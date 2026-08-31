@@ -18,7 +18,16 @@ export interface AuthProfileResult {
   error?: string
 }
 
+export interface AuthProfileSummary {
+  kind: CliUsageKind
+  accountId: string
+  name: string
+  email: string
+  ready: boolean
+}
+
 export const AUTH_PROFILES_IPC = {
+  LIST: 'auth-profiles:list',
   IMPORT_CURRENT: 'auth-profiles:import-current',
   ACTIVATE: 'auth-profiles:activate',
   INSPECT: 'auth-profiles:inspect',

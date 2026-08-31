@@ -21,9 +21,6 @@ const DiffViewerPanel = lazy(() =>
 const WebChatPanel = lazy(() =>
   import('@renderer/components/chatgpt/ChatGPTPanel').then((m) => ({ default: m.WebChatPanel }))
 )
-const LimitsPanel = lazy(() =>
-  import('@renderer/components/usage/LimitsPanel').then((m) => ({ default: m.LimitsPanel }))
-)
 const LogsPanel = lazy(() =>
   import('@renderer/components/logs/LogsPanel').then((m) => ({ default: m.LogsPanel }))
 )
@@ -136,12 +133,6 @@ export function PanelContent({ panelId, type, launchMode, accountId }: PanelCont
       return (
         <Suspense fallback={<PanelLoading />}>
           <TasksPanel />
-        </Suspense>
-      )
-    case 'usage':
-      return (
-        <Suspense fallback={<PanelLoading />}>
-          <LimitsPanel />
         </Suspense>
       )
     default:

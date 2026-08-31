@@ -1,13 +1,12 @@
-import { Files, Gauge, GitBranch, UsersRound } from 'lucide-react'
+import { Files, GitBranch, UsersRound } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 
 interface SidebarActivityBarProps {
   isOpen: boolean
-  view: 'files' | 'changes' | 'limits' | 'accounts'
+  view: 'files' | 'changes' | 'accounts'
   changesCount: number
   onSelectFiles: () => void
   onSelectChanges: () => void
-  onSelectLimits: () => void
   onSelectAccounts: () => void
 }
 
@@ -17,12 +16,10 @@ export function SidebarActivityBar({
   changesCount,
   onSelectFiles,
   onSelectChanges,
-  onSelectLimits,
   onSelectAccounts
 }: SidebarActivityBarProps): React.JSX.Element {
   const filesActive = isOpen && view === 'files'
   const changesActive = isOpen && view === 'changes'
-  const limitsActive = isOpen && view === 'limits'
   const accountsActive = isOpen && view === 'accounts'
   const badge = changesCount > 99 ? '99+' : String(changesCount)
 
@@ -55,20 +52,6 @@ export function SidebarActivityBar({
         )}
       >
         <UsersRound className="h-4 w-4" />
-      </button>
-      <button
-        type="button"
-        onClick={onSelectLimits}
-        title={limitsActive ? 'Hide limits' : 'Show limits'}
-        aria-label={limitsActive ? 'Hide limits' : 'Show limits'}
-        className={cn(
-          'flex h-9 w-9 items-center justify-center rounded-md transition-colors',
-          limitsActive
-            ? 'bg-primary/15 text-primary'
-            : 'text-text-muted hover:bg-hover hover:text-text-primary'
-        )}
-      >
-        <Gauge className="h-4 w-4" />
       </button>
       <button
         type="button"

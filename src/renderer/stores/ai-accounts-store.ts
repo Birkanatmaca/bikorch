@@ -8,6 +8,7 @@ import {
   type DiscoveredAiAccount
 } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
+import type { AuthProfileSummary } from '@shared/contracts/auth-profiles'
 
 export type AiAccountDraft = Pick<AiAccount, 'kind' | 'name' | 'email' | 'plan' | 'note'>
 
@@ -23,6 +24,7 @@ interface AiAccountsStore extends AiAccountsSnapshot {
     identity?: { email?: string; name?: string }
   ) => void
   syncDiscoveredAccounts: (discovered: DiscoveredAiAccount[]) => void
+  syncAuthProfiles: (profiles: AuthProfileSummary[]) => void
 }
 
 function initialState(): AiAccountsSnapshot {
@@ -187,6 +189,49 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
       accounts.push(account)
       if (!activeAccountByKind[incoming.kind]) {
         activeAccountByKind[incoming.kind] = account.id
+      }
+    }
+
+    set({ accounts, activeAccountByKind })
+  },
+
+  syncAuthProfiles: (profiles) => {
+    const now = Date.now()
+    const current = get()
+    const accounts = [...current.accounts]
+    const activeAccountByKind = { ...current.activeAccountByKind }
+
+    for (const profile of profiles) {
+      const existingIndex = accounts.findIndex((account) => account.id === profile.accountId)
+
+      if (existingIndex >= 0) {
+        const existing = accounts[existingIndex]
+        accounts[existingIndex] = {
+          ...existing,
+          name: existing.source === 'manual' ? existing.name : profile.name || existing.name,
+          email: profile.email || existing.email,
+          profileReady: profile.ready || existing.profileReady,
+          lastSeenAt: now,
+          lastAuthenticatedAt: existing.lastAuthenticatedAt ?? (profile.ready ? now : null)
+        }
+      } else {
+        const account: AiAccount = {
+          id: profile.accountId,
+          kind: profile.kind,
+          name: profile.name || `${profile.kind} account`,
+          email: profile.email,
+          plan: '',
+          note: '',
+          createdAt: now,
+          source: 'discovered',
+          lastSeenAt: now,
+          profileReady: profile.ready,
+          lastAuthenticatedAt: profile.ready ? now : null
+        }
+        accounts.push(account)
+        if (!activeAccountByKind[profile.kind]) {
+          activeAccountByKind[profile.kind] = account.id
+        }
       }
     }
 

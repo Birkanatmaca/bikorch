@@ -7,6 +7,7 @@ import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
 import {
   importCurrentAuthProfile,
   inspectAuthProfile,
+  listAuthProfiles,
   prepareAuthProfileLaunch,
   removeAuthProfile
 } from '../accounts/profile-manager'
@@ -25,6 +26,8 @@ function isAuthProfileRequest(payload: unknown): payload is AuthProfileRequest {
 }
 
 export function registerAuthProfileHandlers(): void {
+  ipcMain.handle(AUTH_PROFILES_IPC.LIST, () => listAuthProfiles())
+
   ipcMain.handle(AUTH_PROFILES_IPC.IMPORT_CURRENT, (_event, payload: unknown) => {
     if (!isAuthProfileRequest(payload)) {
       return { ok: false, ready: false, error: 'Invalid account profile request' }

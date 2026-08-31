@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync
 } from 'fs'
@@ -13,8 +14,10 @@ import { dirname, join, resolve, sep } from 'path'
 import type {
   AuthProfileIdentity,
   AuthProfileRequest,
-  AuthProfileResult
+  AuthProfileResult,
+  AuthProfileSummary
 } from '@shared/contracts/auth-profiles'
+import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import {
   deleteAntigravityCredential,
@@ -311,6 +314,51 @@ export function inspectAuthProfile(request: AuthProfileRequest): AuthProfileResu
       error: error instanceof Error ? error.message : 'Could not inspect CLI account'
     }
   }
+}
+
+export function listAuthProfiles(): AuthProfileSummary[] {
+  const profiles: AuthProfileSummary[] = []
+
+  for (const kind of AI_ACCOUNT_KINDS) {
+    const kindRoot = join(profilesRoot(), kind)
+    if (!existsSync(kindRoot)) continue
+
+    let entries
+    try {
+      entries = readdirSync(kindRoot, { withFileTypes: true })
+    } catch {
+      continue
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+
+      const metadata = readJson(join(kindRoot, entry.name, 'profile.json'))
+      const accountId = asString(metadata?.accountId)
+      if (!accountId) continue
+
+      const inspected = inspectAuthProfile({ kind, accountId })
+      if (!inspected.ready) continue
+
+      const storedEmail = asString(metadata?.email)
+      const email = inspected.identity?.email || storedEmail || ''
+      const name =
+        inspected.identity?.name ||
+        asString(metadata?.name) ||
+        email ||
+        `${AI_ACCOUNT_LABELS[kind]} account`
+
+      profiles.push({
+        kind,
+        accountId,
+        name,
+        email,
+        ready: true
+      })
+    }
+  }
+
+  return profiles
 }
 
 export function removeAuthProfile(request: AuthProfileRequest): AuthProfileResult {

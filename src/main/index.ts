@@ -51,10 +51,6 @@ function createWindow(): void {
     recordRendererConsole(level, message, sourceId)
   })
 
-  if (isDev) {
-    mainWindow.webContents.openDevTools({ mode: 'detach' })
-  }
-
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }

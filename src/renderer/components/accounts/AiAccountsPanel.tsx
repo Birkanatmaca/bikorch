@@ -96,6 +96,22 @@ function formatUsageDetail(provider: CliUsageInfo | undefined): string | undefin
   return `Resets in ${hours}h`
 }
 
+function mergeUsageResponses(
+  current: CliUsageResponse | null,
+  next: CliUsageResponse
+): CliUsageResponse {
+  const nextAccountIds = new Set(
+    next.providers.flatMap((provider) => (provider.accountId ? [provider.accountId] : []))
+  )
+  const previousProviders = (current?.providers ?? []).filter(
+    (provider) => !provider.accountId || !nextAccountIds.has(provider.accountId)
+  )
+  return {
+    checkedAt: next.checkedAt,
+    providers: [...previousProviders, ...next.providers]
+  }
+}
+
 function AccountForm({
   account,
   onClose
@@ -240,6 +256,8 @@ function AccountCard({
   account,
   provider,
   isActive,
+  isChecking,
+  onCheck,
   onOpen,
   onEdit,
   onRemove
@@ -247,6 +265,8 @@ function AccountCard({
   account: AiAccount
   provider: CliUsageInfo | undefined
   isActive: boolean
+  isChecking: boolean
+  onCheck: () => void
   onOpen: () => void
   onEdit: () => void
   onRemove: () => void
@@ -255,11 +275,7 @@ function AccountCard({
   const isConnected = account.profileReady
   const primaryRemaining = provider?.primary ? 100 - provider.primary.usedPercent : null
   const secondaryRemaining = provider?.secondary ? 100 - provider.secondary.usedPercent : null
-  const matchesCurrentSignIn =
-    !provider?.accountEmail ||
-    !account.email ||
-    provider.accountEmail.trim().toLowerCase() === account.email.trim().toLowerCase()
-  const liveUsage = isActive && matchesCurrentSignIn && provider?.status === 'available'
+  const liveUsage = provider?.status === 'available'
   const primaryLabel = provider?.primary?.label ?? 'Primary limit'
   const secondaryLabel = provider?.secondary?.label ?? 'Secondary limit'
   const hasLiveWindows = Boolean(provider?.primary || provider?.secondary)
@@ -291,6 +307,20 @@ function AccountCard({
           {account.email && <p className="truncate font-mono text-[9px] text-text-secondary">{account.email}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            onClick={onCheck}
+            disabled={!account.profileReady || isChecking}
+            className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[9px] font-medium text-text-secondary hover:bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+            title={
+              !account.profileReady
+                ? 'Sign in to this account before checking usage'
+                : 'Check this account usage'
+            }
+          >
+            <RefreshCw className={cn('h-2.5 w-2.5', isChecking && 'animate-spin')} />
+            Check
+          </button>
           <button
             type="button"
             onClick={onOpen}
@@ -343,19 +373,15 @@ function AccountCard({
         </div>
       ) : (
         <div className="mt-2 flex items-center gap-1.5 rounded-md border border-border bg-app-bg/60 px-2 py-1.5 text-[9px] text-text-muted">
-          {isActive && provider?.status === 'error' ? (
+          {provider?.status === 'error' ? (
             <AlertCircle className="h-3 w-3 shrink-0 text-warning" />
           ) : (
             <Clock3 className="h-3 w-3 shrink-0" />
           )}
           <span>
-            {!isActive
-              ? 'Select this profile to pin its usage here'
-              : !account.profileReady
-                ? 'Sign in is required for this account profile'
-              : !matchesCurrentSignIn
-                ? 'Profile is ready — open it to load this account'
-              : provider?.detail ?? 'Usage is not available for this CLI yet'}
+            {!account.profileReady
+              ? 'Sign in is required for this account profile'
+              : provider?.detail ?? 'Usage has not been checked yet'}
           </span>
         </div>
       )}
@@ -371,24 +397,81 @@ export function AiAccountsPanel(): React.JSX.Element {
   const markAccountAuthenticated = useAiAccountsStore((state) => state.markAccountAuthenticated)
   const removeAccount = useAiAccountsStore((state) => state.removeAccount)
   const syncDiscoveredAccounts = useAiAccountsStore((state) => state.syncDiscoveredAccounts)
+  const syncAuthProfiles = useAiAccountsStore((state) => state.syncAuthProfiles)
   const addPanel = useWorkspaceStore((state) => state.addPanel)
   const [usage, setUsage] = useState<CliUsageResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [formAccount, setFormAccount] = useState<AiAccount | null | undefined>(undefined)
+  const [checkingAccountIds, setCheckingAccountIds] = useState<Set<string>>(() => new Set())
   const importedProfileIds = useRef(new Set<string>())
+  const checkedAccountIds = useRef(new Set<string>())
+
+  const checkAccounts = useCallback(async (targetAccounts: AiAccount[]): Promise<void> => {
+    const accountsToCheck = targetAccounts.filter((account) => account.profileReady)
+    if (accountsToCheck.length === 0) return
+
+    for (const account of accountsToCheck) checkedAccountIds.current.add(account.id)
+    setCheckingAccountIds((current) => {
+      const next = new Set(current)
+      for (const account of accountsToCheck) next.add(account.id)
+      return next
+    })
+
+    await Promise.allSettled(
+      accountsToCheck.map(async (account) => {
+        try {
+          const nextUsage = await window.api.usage.read({
+            accounts: [{ kind: account.kind, accountId: account.id }]
+          })
+          setUsage((current) => mergeUsageResponses(current, nextUsage))
+        } catch (checkError) {
+          setError(checkError instanceof Error ? checkError.message : 'Could not load AI usage')
+        } finally {
+          setCheckingAccountIds((current) => {
+            const next = new Set(current)
+            next.delete(account.id)
+            return next
+          })
+        }
+      })
+    )
+  }, [])
 
   const refresh = useCallback(async (): Promise<void> => {
     setLoading(true)
     setError(null)
     try {
-      setUsage(await window.api.usage.read())
+      const currentAccounts = useAiAccountsStore.getState().accounts
+      const readyAccounts = currentAccounts.filter((account) => account.profileReady)
+      if (readyAccounts.length > 0) {
+        await checkAccounts(readyAccounts)
+      } else {
+        setUsage(await window.api.usage.read())
+      }
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : 'Could not load AI usage')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [checkAccounts])
+
+  useEffect(() => {
+    let cancelled = false
+    void window.api.authProfiles
+      .list()
+      .then((profiles) => {
+        if (!cancelled) syncAuthProfiles(profiles)
+      })
+      .catch((listError) => {
+        if (!cancelled) {
+          setError(listError instanceof Error ? listError.message : 'Could not load saved accounts')
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [syncAuthProfiles])
 
   useEffect(() => {
     void refresh()
@@ -403,6 +486,13 @@ export function AiAccountsPanel(): React.JSX.Element {
     window.addEventListener(AI_ACCOUNTS_REFRESH_EVENT, handleRefreshRequest)
     return () => window.removeEventListener(AI_ACCOUNTS_REFRESH_EVENT, handleRefreshRequest)
   }, [refresh])
+
+  useEffect(() => {
+    const accountsToCheck = accounts.filter(
+      (account) => account.profileReady && !checkedAccountIds.current.has(account.id)
+    )
+    if (accountsToCheck.length > 0) void checkAccounts(accountsToCheck)
+  }, [accounts, checkAccounts])
 
   useEffect(() => {
     if (!usage) return
@@ -464,7 +554,17 @@ export function AiAccountsPanel(): React.JSX.Element {
 
   const providerByKind = useMemo(() => {
     const map = new Map<CliUsageKind, CliUsageInfo>()
-    for (const provider of usage?.providers ?? []) map.set(provider.kind, provider)
+    for (const provider of usage?.providers ?? []) {
+      if (!provider.accountId) map.set(provider.kind, provider)
+    }
+    return map
+  }, [usage])
+
+  const providerByAccount = useMemo(() => {
+    const map = new Map<string, CliUsageInfo>()
+    for (const provider of usage?.providers ?? []) {
+      if (provider.accountId) map.set(provider.accountId, provider)
+    }
     return map
   }, [usage])
 
@@ -648,8 +748,10 @@ export function AiAccountsPanel(): React.JSX.Element {
                       <AccountCard
                         key={account.id}
                         account={account}
-                        provider={providerByKind.get(account.kind)}
+                        provider={providerByAccount.get(account.id)}
                         isActive={activeAccountByKind[account.kind] === account.id}
+                        isChecking={checkingAccountIds.has(account.id)}
+                        onCheck={() => void checkAccounts([account])}
                         onOpen={() => void openAccountCli(account)}
                         onEdit={() => setFormAccount(account)}
                         onRemove={() => handleRemove(account)}

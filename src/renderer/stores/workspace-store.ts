@@ -69,7 +69,7 @@ interface WorkspaceStore extends WorkspaceSnapshot {
   toggleSidebar: (projectId: string) => void
   selectLeftSidebar: (
     projectId: string,
-    view: 'files' | 'changes' | 'limits' | 'accounts'
+    view: 'files' | 'changes' | 'accounts'
   ) => void
   clearPanelLaunchMode: (panelId: string) => void
 }

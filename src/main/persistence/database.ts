@@ -44,8 +44,7 @@ const VALID_PANEL_TYPES = new Set<PanelType>([
   'git-changes',
   'diff',
   'logs',
-  'tasks',
-  'usage'
+  'tasks'
 ])
 
 function getDbPath(): string {
@@ -209,10 +208,8 @@ function parseLayout(raw: unknown): WorkspaceLayout {
     leftSidebarView:
       layout.leftSidebarView === 'changes'
         ? 'changes'
-        : layout.leftSidebarView === 'limits'
-          ? 'limits'
-          : layout.leftSidebarView === 'accounts'
-            ? 'accounts'
+        : layout.leftSidebarView === 'accounts'
+          ? 'accounts'
           : 'files',
     orchestratorDirection:
       layout.orchestratorDirection === 'horizontal' ||

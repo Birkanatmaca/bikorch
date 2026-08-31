@@ -461,7 +461,6 @@ export function WorkspaceLayout(): React.JSX.Element {
         changesCount={changesCount}
         onSelectFiles={() => selectLeftSidebar(activeProjectId, 'files')}
         onSelectChanges={() => selectLeftSidebar(activeProjectId, 'changes')}
-        onSelectLimits={() => selectLeftSidebar(activeProjectId, 'limits')}
         onSelectAccounts={() => selectLeftSidebar(activeProjectId, 'accounts')}
       />
       <div className="min-h-0 min-w-0 flex-1">

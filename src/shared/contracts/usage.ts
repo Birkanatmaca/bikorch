@@ -3,6 +3,15 @@ import type { PtyKind } from './pty'
 export type CliUsageKind = Exclude<PtyKind, 'terminal'>
 export type CliUsageStatus = 'available' | 'not-installed' | 'unavailable' | 'error'
 
+export interface UsageAccountRequest {
+  kind: CliUsageKind
+  accountId: string
+}
+
+export interface CliUsageRequest {
+  accounts?: UsageAccountRequest[]
+}
+
 export interface CliUsageWindow {
   label?: string
   usedPercent: number
@@ -19,6 +28,7 @@ export interface CliUsageBreakdown {
 
 export interface CliUsageInfo {
   kind: CliUsageKind
+  accountId?: string
   label: string
   status: CliUsageStatus
   detail: string

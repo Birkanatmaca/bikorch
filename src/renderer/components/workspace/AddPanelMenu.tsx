@@ -19,8 +19,7 @@ const ADDABLE_PANEL_TYPES: PanelType[] = [
   'git-changes',
   'diff',
   'logs',
-  'tasks',
-  'usage'
+  'tasks'
 ]
 
 export { ADD_PANEL_MENU_EVENT } from '@renderer/lib/app-events'

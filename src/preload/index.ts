@@ -36,7 +36,11 @@ import {
   CLI_IPC,
   type PtyKind
 } from '@shared/contracts/pty'
-import { type CliUsageResponse, USAGE_IPC } from '@shared/contracts/usage'
+import {
+  type CliUsageRequest,
+  type CliUsageResponse,
+  USAGE_IPC
+} from '@shared/contracts/usage'
 import {
   LOGS_IPC,
   type AppLogEntry,
@@ -47,7 +51,8 @@ import { WINDOW_IPC } from '@shared/contracts/window'
 import {
   AUTH_PROFILES_IPC,
   type AuthProfileRequest,
-  type AuthProfileResult
+  type AuthProfileResult,
+  type AuthProfileSummary
 } from '@shared/contracts/auth-profiles'
 
 export interface CliApi {
@@ -98,7 +103,7 @@ export interface WindowApi {
 }
 
 export interface UsageApi {
-  read: () => Promise<CliUsageResponse>
+  read: (request?: CliUsageRequest) => Promise<CliUsageResponse>
 }
 
 export interface LogsApi {
@@ -108,6 +113,7 @@ export interface LogsApi {
 }
 
 export interface AuthProfilesApi {
+  list: () => Promise<AuthProfileSummary[]>
   importCurrent: (request: AuthProfileRequest) => Promise<AuthProfileResult>
   activate: (request: AuthProfileRequest) => Promise<AuthProfileResult>
   inspect: (request: AuthProfileRequest) => Promise<AuthProfileResult>
@@ -174,7 +180,7 @@ const persistenceApi: PersistenceApi = {
 }
 
 const usageApi: UsageApi = {
-  read: () => ipcRenderer.invoke(USAGE_IPC.READ)
+  read: (request) => ipcRenderer.invoke(USAGE_IPC.READ, request)
 }
 
 const logsApi: LogsApi = {
@@ -192,6 +198,7 @@ const logsApi: LogsApi = {
 }
 
 const authProfilesApi: AuthProfilesApi = {
+  list: () => ipcRenderer.invoke(AUTH_PROFILES_IPC.LIST),
   importCurrent: (request) => ipcRenderer.invoke(AUTH_PROFILES_IPC.IMPORT_CURRENT, request),
   activate: (request) => ipcRenderer.invoke(AUTH_PROFILES_IPC.ACTIVATE, request),
   inspect: (request) => ipcRenderer.invoke(AUTH_PROFILES_IPC.INSPECT, request),

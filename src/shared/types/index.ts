@@ -12,7 +12,6 @@ export type PanelType =
   | 'diff'
   | 'logs'
   | 'tasks'
-  | 'usage'
 
 export interface PanelDefinition {
   id: string
@@ -47,7 +46,7 @@ export interface WorkspaceLayout {
   bottomSize: number
   mainVerticalSize: number
   leftCollapsed?: boolean
-  leftSidebarView?: 'files' | 'changes' | 'limits' | 'accounts'
+  leftSidebarView?: 'files' | 'changes' | 'accounts'
   orchestratorDirection?: OrchestratorDirection
   centerPanelSizes?: Record<string, number>
   /** Free-form terminal windows in the center canvas, percentages 0–100 */
@@ -82,8 +81,7 @@ export const PANEL_TYPE_LABELS: Record<PanelType, string> = {
   'git-changes': 'Git Changes',
   diff: 'Code Review',
   logs: 'Logs',
-  tasks: 'Tasks',
-  usage: 'Usage'
+  tasks: 'Tasks'
 }
 
 export const DEFAULT_LAYOUT: WorkspaceLayout = {
