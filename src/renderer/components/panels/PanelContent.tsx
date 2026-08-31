@@ -24,6 +24,12 @@ const WebChatPanel = lazy(() =>
 const LimitsPanel = lazy(() =>
   import('@renderer/components/usage/LimitsPanel').then((m) => ({ default: m.LimitsPanel }))
 )
+const LogsPanel = lazy(() =>
+  import('@renderer/components/logs/LogsPanel').then((m) => ({ default: m.LogsPanel }))
+)
+const TasksPanel = lazy(() =>
+  import('@renderer/components/tasks/TasksPanel').then((m) => ({ default: m.TasksPanel }))
+)
 
 interface PanelContentProps {
   panelId: string
@@ -122,12 +128,16 @@ export function PanelContent({ panelId, type, launchMode, accountId }: PanelCont
       )
     case 'logs':
       return (
-        <div className="flex h-full flex-col bg-app-bg p-3 font-mono text-xs text-text-muted">
-          Logs panel — coming soon
-        </div>
+        <Suspense fallback={<PanelLoading />}>
+          <LogsPanel />
+        </Suspense>
       )
     case 'tasks':
-      return <PlaceholderLines count={5} />
+      return (
+        <Suspense fallback={<PanelLoading />}>
+          <TasksPanel />
+        </Suspense>
+      )
     case 'usage':
       return (
         <Suspense fallback={<PanelLoading />}>

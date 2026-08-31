@@ -11,6 +11,8 @@ import { useCommandPalette } from '@renderer/hooks/use-command-palette'
 import { useOpenProject } from '@renderer/hooks/use-open-project'
 import { usePersistenceBootstrap } from '@renderer/hooks/use-persistence-bootstrap'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
+import { cn } from '@renderer/lib/utils'
+import { isMacOS, isWindows } from '@renderer/lib/electron-api'
 
 export default function App(): React.JSX.Element {
   const { isReady, error } = usePersistenceBootstrap()
@@ -19,6 +21,11 @@ export default function App(): React.JSX.Element {
   const projects = useWorkspaceStore((s) => s.projects)
   const addProject = useWorkspaceStore((s) => s.addProject)
   const addPanel = useWorkspaceStore((s) => s.addPanel)
+  const platformClass = isMacOS()
+    ? 'platform-macos'
+    : isWindows()
+      ? 'platform-windows'
+      : 'platform-linux'
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent): void => {
@@ -64,7 +71,7 @@ export default function App(): React.JSX.Element {
 
   return (
     <ErrorBoundary>
-      <div className="flex h-full flex-col bg-app-bg">
+      <div className={cn('flex h-full flex-col bg-app-bg', platformClass)}>
         {error && (
           <div className="border-b border-warning/30 bg-warning/10 px-3 py-1.5 text-xs text-warning">
             {error} — using fallback workspace

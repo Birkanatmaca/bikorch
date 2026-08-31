@@ -47,7 +47,7 @@ export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Eleme
           <FileExplorerPanel />
         </div>
         <div className={cn('h-full', !isChanges && 'hidden')}>
-          <GitChangesPanel hideHeader active={isChanges} />
+          <GitChangesPanel hideHeader />
         </div>
         {isLimits && <div className="h-full"><LimitsPanel /></div>}
         {isAccounts && <div className="h-full"><AiAccountsPanel /></div>}

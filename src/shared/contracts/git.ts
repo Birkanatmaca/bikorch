@@ -69,12 +69,27 @@ export interface GitDiscardRequest {
   status: GitChangeStatus
 }
 
+export interface GitFileRequest {
+  projectRoot: string
+  filePath: string
+}
+
+export interface GitCommitRequest {
+  projectRoot: string
+  message: string
+}
+
 export const GIT_IPC = {
   DISCOVER: 'git:discover',
   STATUS: 'git:status',
   DIFF: 'git:diff',
   DISCARD: 'git:discard',
-  CHECKOUT_BRANCH: 'git:checkout-branch'
+  CHECKOUT_BRANCH: 'git:checkout-branch',
+  STAGE: 'git:stage',
+  UNSTAGE: 'git:unstage',
+  STAGE_ALL: 'git:stage-all',
+  UNSTAGE_ALL: 'git:unstage-all',
+  COMMIT: 'git:commit'
 } as const
 
 export const GIT_STATUS_LABELS: Record<GitChangeStatus, string> = {

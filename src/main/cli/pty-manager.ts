@@ -14,16 +14,20 @@ import {
   getAuthProfileEnv,
   prepareAuthProfileLaunch
 } from '../accounts/profile-manager'
+import { recordLog } from '../logs'
 
 interface PtySession {
   id: string
   kind: PtyCreateRequest['kind']
-  process: IPty
+  process: IPty | null
   webContents: WebContents
   status: PtySessionStatus
   cols: number
   rows: number
+  outputBuffer: string
 }
+
+const OUTPUT_BUFFER_LIMIT = 120_000
 
 class PtyManager {
   private sessions = new Map<string, PtySession>()
@@ -35,7 +39,23 @@ class PtyManager {
       return { sessionId, status: 'error', error: 'Invalid session ID' }
     }
 
-    if (this.sessions.has(sessionId)) {
+    const existing = this.sessions.get(sessionId)
+    if (existing?.kind === kind) {
+      existing.webContents = webContents
+      const nextCols = Math.max(20, Math.min(400, Math.floor(cols) || 80))
+      const nextRows = Math.max(6, Math.min(200, Math.floor(rows) || 24))
+      if (existing.process && (existing.cols !== nextCols || existing.rows !== nextRows)) {
+        this.resize(sessionId, nextCols, nextRows)
+      }
+      this.emit(webContents, { type: 'status', sessionId, status: existing.status, kind })
+      if (existing.outputBuffer) {
+        this.emit(webContents, { type: 'data', sessionId, data: existing.outputBuffer })
+      }
+      recordLog('debug', `${getKindLabel(kind)} session reattached (${sessionId})`, 'pty')
+      return { sessionId, status: existing.status }
+    }
+
+    if (existing) {
       this.kill(sessionId)
     }
 
@@ -111,23 +131,31 @@ class PtyManager {
           webContents,
           status: 'running',
           cols: safeCols,
-          rows: safeRows
+          rows: safeRows,
+          outputBuffer: ''
         }
 
         this.sessions.set(sessionId, session)
         this.emit(webContents, { type: 'status', sessionId, status: 'running' })
+        recordLog('info', `${getKindLabel(kind)} session started (${sessionId})`, 'pty')
 
         shellProcess.onData((data) => {
-          this.emit(webContents, { type: 'data', sessionId, data })
+          session.outputBuffer = `${session.outputBuffer}${data}`.slice(-OUTPUT_BUFFER_LIMIT)
+          this.emit(session.webContents, { type: 'data', sessionId, data })
         })
 
         shellProcess.onExit(({ exitCode }) => {
           const existing = this.sessions.get(sessionId)
           if (!existing || existing.process !== shellProcess) return
           existing.status = 'stopped'
-          this.emit(webContents, { type: 'exit', sessionId, exitCode })
-          this.emit(webContents, { type: 'status', sessionId, status: 'stopped' })
-          this.sessions.delete(sessionId)
+          existing.process = null
+          this.emit(existing.webContents, { type: 'exit', sessionId, exitCode })
+          this.emit(existing.webContents, { type: 'status', sessionId, status: 'stopped' })
+          recordLog(
+            exitCode === 0 ? 'info' : 'warn',
+            `${getKindLabel(kind)} session exited with code ${exitCode ?? 'unknown'} (${sessionId})`,
+            'pty'
+          )
         })
 
         return { sessionId, status: 'running' }
@@ -150,6 +178,7 @@ class PtyManager {
       error: message,
       ...(kind !== 'terminal' ? { code: 'CLI_MISSING' as const, kind } : {})
     })
+    recordLog('error', message, 'pty')
 
     return {
       sessionId,
@@ -161,13 +190,13 @@ class PtyManager {
 
   write(sessionId: string, data: string): void {
     const session = this.sessions.get(sessionId)
-    if (!session) return
+    if (!session?.process) return
     session.process.write(data)
   }
 
   resize(sessionId: string, cols: number, rows: number): void {
     const session = this.sessions.get(sessionId)
-    if (!session) return
+    if (!session?.process) return
     const nextCols = Math.max(20, Math.min(400, Math.floor(cols)))
     const nextRows = Math.max(6, Math.min(200, Math.floor(rows)))
     if (nextCols === session.cols && nextRows === session.rows) return
@@ -181,6 +210,7 @@ class PtyManager {
     if (!session) return
 
     this.sessions.delete(sessionId)
+    if (!session.process) return
     try {
       session.process.kill()
     } catch {

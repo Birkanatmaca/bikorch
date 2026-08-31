@@ -7,6 +7,7 @@ import { registerPersistenceHandlers } from './persistence'
 import { registerWindowHandlers } from './window'
 import { registerUsageHandlers } from './usage'
 import { registerAuthProfileHandlers } from './auth-profiles'
+import { registerLogsHandlers } from './logs'
 
 export function registerIpcHandlers(): void {
   registerPtyHandlers()
@@ -17,6 +18,7 @@ export function registerIpcHandlers(): void {
   registerWindowHandlers()
   registerUsageHandlers()
   registerAuthProfileHandlers()
+  registerLogsHandlers()
 
   ipcMain.handle('dialog:selectFolder', async () => {
     const result = await dialog.showOpenDialog({

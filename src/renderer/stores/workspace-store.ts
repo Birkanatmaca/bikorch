@@ -16,6 +16,22 @@ import {
   clampOrchestratorRect,
   type OrchestratorRect
 } from '@shared/types'
+import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
+import { useAiAccountsStore } from './ai-accounts-store'
+
+const PTY_PANEL_TYPES = new Set<PanelType>([
+  'terminal',
+  'claude',
+  'cursor',
+  'gemini',
+  'antigravity',
+  'codex'
+])
+
+function terminatePanelSession(panelId: string, type: PanelType): void {
+  if (!PTY_PANEL_TYPES.has(type) || typeof window === 'undefined' || !window.api?.pty) return
+  void window.api.pty.kill({ sessionId: panelId })
+}
 
 interface WorkspaceSnapshot {
   projects: Project[]
@@ -45,6 +61,7 @@ interface WorkspaceStore extends WorkspaceSnapshot {
     accountId?: string,
     titleOverride?: string
   ) => string
+  renamePanel: (panelId: string, title: string) => void
   removePanel: (panelId: string) => void
   movePanel: (panelId: string, zone: PanelZone) => void
   updateLayout: (projectId: string, layout: Partial<WorkspaceLayout>) => void
@@ -164,6 +181,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   removeProject: (projectId) => {
+    const workspace = get().workspaces[projectId]
+    workspace?.panels.forEach((panel) => terminatePanelSession(panel.id, panel.type))
+
     set((state) => {
       const projects = state.projects.filter((p) => p.id !== projectId)
       const { [projectId]: _, ...workspaces } = state.workspaces
@@ -235,13 +255,17 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
     const targetZone = zone ?? getDefaultZone(type)
     const hadRight = workspace.panels.some((p) => p.zone === 'right')
+    const defaultAccountId = AI_ACCOUNT_KINDS.includes(type as (typeof AI_ACCOUNT_KINDS)[number])
+      ? useAiAccountsStore.getState().activeAccountByKind[type as (typeof AI_ACCOUNT_KINDS)[number]] ?? undefined
+      : undefined
+    const panelAccountId = accountId ?? defaultAccountId
     const newPanel: PanelDefinition = {
       id: uuidv4(),
       type,
       title: titleOverride?.trim() || getNextPanelTitle(type, workspace.panels),
       zone: targetZone,
       ...(launchMode === 'login' ? { launchMode: 'login' as const } : {}),
-      ...(accountId ? { accountId } : {})
+      ...(panelAccountId ? { accountId: panelAccountId } : {})
     }
 
     const panels = [...workspace.panels, newPanel]
@@ -291,12 +315,38 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     return newPanel.id
   },
 
+  renamePanel: (panelId, title) => {
+    const normalizedTitle = title.trim().slice(0, 120)
+    if (!normalizedTitle) return
+
+    const { activeProjectId, workspaces } = get()
+    if (!activeProjectId) return
+
+    const workspace = workspaces[activeProjectId]
+    if (!workspace || !workspace.panels.some((panel) => panel.id === panelId)) return
+
+    set({
+      workspaces: {
+        ...workspaces,
+        [activeProjectId]: {
+          ...workspace,
+          panels: workspace.panels.map((panel) =>
+            panel.id === panelId ? { ...panel, title: normalizedTitle } : panel
+          )
+        }
+      }
+    })
+  },
+
   removePanel: (panelId) => {
     const { activeProjectId, workspaces } = get()
     if (!activeProjectId) return
 
     const workspace = workspaces[activeProjectId]
     if (!workspace) return
+
+    const removedPanel = workspace.panels.find((p) => p.id === panelId)
+    if (removedPanel) terminatePanelSession(removedPanel.id, removedPanel.type)
 
     const nextPanels = workspace.panels.filter((p) => p.id !== panelId)
     const { [panelId]: _removed, ...restRects } = workspace.layout.centerPanelRects ?? {}

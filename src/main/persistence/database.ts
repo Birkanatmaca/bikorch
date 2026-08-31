@@ -25,6 +25,7 @@ import {
   createDefaultActiveAccountByKind,
   type ActiveAccountByKind
 } from '@shared/contracts/accounts'
+import type { ProjectTask, TaskPriority, TaskStatus } from '@shared/contracts/tasks'
 import { v4 as uuidv4 } from 'uuid'
 
 let db: Database | null = null
@@ -98,6 +99,12 @@ function initSchema(database: Database): void {
       project_id TEXT PRIMARY KEY,
       selected_file TEXT,
       active_diff_json TEXT
+    );
+  `)
+  database.run(`
+    CREATE TABLE IF NOT EXISTS project_tasks (
+      project_id TEXT PRIMARY KEY,
+      tasks_json TEXT NOT NULL
     );
   `)
 
@@ -272,6 +279,41 @@ function parseActiveAccountByKind(raw: unknown, accounts: AiAccount[]): ActiveAc
   return defaults
 }
 
+function parseTasks(raw: unknown): ProjectTask[] {
+  if (!Array.isArray(raw)) return []
+
+  return raw.flatMap((item): ProjectTask[] => {
+    if (!item || typeof item !== 'object') return []
+    const task = item as Partial<ProjectTask>
+    if (
+      typeof task.id !== 'string' ||
+      task.id.length === 0 ||
+      task.id.length > 100 ||
+      typeof task.title !== 'string' ||
+      task.title.trim().length === 0 ||
+      task.title.length > 500
+    ) {
+      return []
+    }
+
+    const status: TaskStatus =
+      task.status === 'in-progress' || task.status === 'done' ? task.status : 'todo'
+    const priority: TaskPriority =
+      task.priority === 'low' || task.priority === 'high' ? task.priority : 'medium'
+
+    return [
+      {
+        id: task.id,
+        title: task.title.trim(),
+        status,
+        priority,
+        createdAt: typeof task.createdAt === 'number' ? task.createdAt : Date.now(),
+        updatedAt: typeof task.updatedAt === 'number' ? task.updatedAt : Date.now()
+      }
+    ]
+  })
+}
+
 export function createDefaultSnapshot(): PersistedSnapshot {
   return {
     projects: [],
@@ -282,7 +324,8 @@ export function createDefaultSnapshot(): PersistedSnapshot {
       activeDiffByProject: {}
     },
     accounts: [],
-    activeAccountByKind: createDefaultActiveAccountByKind()
+    activeAccountByKind: createDefaultActiveAccountByKind(),
+    tasksByProject: {}
   }
 }
 
@@ -394,7 +437,28 @@ export function loadSnapshot(): PersistedSnapshot {
     }
   }
 
-  return { projects, activeProjectId, workspaces, editor, accounts, activeAccountByKind }
+  const tasksByProject: Record<string, ProjectTask[]> = {}
+  const tasksResult = database.exec('SELECT project_id, tasks_json FROM project_tasks')
+  if (tasksResult.length > 0) {
+    for (const row of tasksResult[0].values as Array<[string, string]>) {
+      const [projectId, tasksJson] = row
+      try {
+        tasksByProject[projectId] = parseTasks(JSON.parse(tasksJson))
+      } catch {
+        tasksByProject[projectId] = []
+      }
+    }
+  }
+
+  return {
+    projects,
+    activeProjectId,
+    workspaces,
+    editor,
+    accounts,
+    activeAccountByKind,
+    tasksByProject
+  }
 }
 
 export function saveSnapshot(snapshot: PersistedSnapshot): void {
@@ -429,6 +493,7 @@ export function saveSnapshot(snapshot: PersistedSnapshot): void {
         database.run('DELETE FROM projects WHERE id = ?', [id])
         database.run('DELETE FROM project_workspaces WHERE project_id = ?', [id])
         database.run('DELETE FROM project_editor_state WHERE project_id = ?', [id])
+        database.run('DELETE FROM project_tasks WHERE project_id = ?', [id])
       }
     }
 
@@ -458,6 +523,11 @@ export function saveSnapshot(snapshot: PersistedSnapshot): void {
           snapshot.editor.selectedFileByProject[project.id] ?? null,
           activeDiff ? JSON.stringify(activeDiff) : null
         ]
+      )
+
+      database.run(
+        'INSERT OR REPLACE INTO project_tasks (project_id, tasks_json) VALUES (?, ?)',
+        [project.id, JSON.stringify(snapshot.tasksByProject?.[project.id] ?? [])]
       )
     })
 

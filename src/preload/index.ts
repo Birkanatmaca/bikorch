@@ -13,6 +13,8 @@ import {
   type GitDiffResponse,
   type GitCheckoutBranchRequest,
   type GitDiscardRequest,
+  type GitFileRequest,
+  type GitCommitRequest,
   type GitDiscoverRequest,
   type GitDiscoverResponse,
   type GitStatusRequest,
@@ -35,6 +37,12 @@ import {
   type PtyKind
 } from '@shared/contracts/pty'
 import { type CliUsageResponse, USAGE_IPC } from '@shared/contracts/usage'
+import {
+  LOGS_IPC,
+  type AppLogEntry,
+  type GetLogsRequest,
+  type LogEvent
+} from '@shared/contracts/logs'
 import { WINDOW_IPC } from '@shared/contracts/window'
 import {
   AUTH_PROFILES_IPC,
@@ -70,6 +78,11 @@ export interface GitApi {
   checkoutBranch: (request: GitCheckoutBranchRequest) => Promise<{ ok: true }>
   diff: (request: GitDiffRequest) => Promise<GitDiffResponse>
   discard: (request: GitDiscardRequest) => Promise<{ ok: true }>
+  stage: (request: GitFileRequest) => Promise<{ ok: true }>
+  unstage: (request: GitFileRequest) => Promise<{ ok: true }>
+  stageAll: (request: GitStatusRequest) => Promise<{ ok: true }>
+  unstageAll: (request: GitStatusRequest) => Promise<{ ok: true }>
+  commit: (request: GitCommitRequest) => Promise<{ ok: true }>
 }
 
 export interface PersistenceApi {
@@ -88,6 +101,12 @@ export interface UsageApi {
   read: () => Promise<CliUsageResponse>
 }
 
+export interface LogsApi {
+  get: (request?: GetLogsRequest) => Promise<{ entries: AppLogEntry[] }>
+  clear: () => Promise<{ ok: true }>
+  onEvent: (callback: (event: LogEvent) => void) => () => void
+}
+
 export interface AuthProfilesApi {
   importCurrent: (request: AuthProfileRequest) => Promise<AuthProfileResult>
   activate: (request: AuthProfileRequest) => Promise<AuthProfileResult>
@@ -104,6 +123,7 @@ export interface AppApi {
   git: GitApi
   persistence: PersistenceApi
   usage: UsageApi
+  logs: LogsApi
   authProfiles: AuthProfilesApi
   window: WindowApi
 }
@@ -140,7 +160,12 @@ const gitApi: GitApi = {
   status: (request) => ipcRenderer.invoke(GIT_IPC.STATUS, request),
   checkoutBranch: (request) => ipcRenderer.invoke(GIT_IPC.CHECKOUT_BRANCH, request),
   diff: (request) => ipcRenderer.invoke(GIT_IPC.DIFF, request),
-  discard: (request) => ipcRenderer.invoke(GIT_IPC.DISCARD, request)
+  discard: (request) => ipcRenderer.invoke(GIT_IPC.DISCARD, request),
+  stage: (request) => ipcRenderer.invoke(GIT_IPC.STAGE, request),
+  unstage: (request) => ipcRenderer.invoke(GIT_IPC.UNSTAGE, request),
+  stageAll: (request) => ipcRenderer.invoke(GIT_IPC.STAGE_ALL, request),
+  unstageAll: (request) => ipcRenderer.invoke(GIT_IPC.UNSTAGE_ALL, request),
+  commit: (request) => ipcRenderer.invoke(GIT_IPC.COMMIT, request)
 }
 
 const persistenceApi: PersistenceApi = {
@@ -150,6 +175,20 @@ const persistenceApi: PersistenceApi = {
 
 const usageApi: UsageApi = {
   read: () => ipcRenderer.invoke(USAGE_IPC.READ)
+}
+
+const logsApi: LogsApi = {
+  get: (request) => ipcRenderer.invoke(LOGS_IPC.GET, request),
+  clear: () => ipcRenderer.invoke(LOGS_IPC.CLEAR),
+  onEvent: (callback) => {
+    const listener = (_event: IpcRendererEvent, payload: LogEvent): void => {
+      callback(payload)
+    }
+    ipcRenderer.on(LOGS_IPC.EVENT, listener)
+    return () => {
+      ipcRenderer.removeListener(LOGS_IPC.EVENT, listener)
+    }
+  }
 }
 
 const authProfilesApi: AuthProfilesApi = {
@@ -175,6 +214,7 @@ const api: AppApi = {
   git: gitApi,
   persistence: persistenceApi,
   usage: usageApi,
+  logs: logsApi,
   authProfiles: authProfilesApi,
   window: windowApi
 }

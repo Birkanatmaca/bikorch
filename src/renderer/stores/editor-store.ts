@@ -293,10 +293,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const gitChanges = selectGitChanges(useGitStore.getState().stateByProject, projectId)
     if (!activeDiff.status) return
 
-    const change = gitChanges.find((c) => c.path === activeDiff.filePath) ?? {
-      path: activeDiff.filePath,
-      status: activeDiff.status,
-      staged: false
+    const change = gitChanges.find((c) => c.path === activeDiff.filePath)
+    if (!change) {
+      get().clearDiff(projectId)
+      return
     }
 
     await get().openDiff(projectId, projectRoot, change, gitChanges)

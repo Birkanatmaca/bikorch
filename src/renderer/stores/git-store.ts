@@ -33,10 +33,16 @@ interface GitStore {
   selectRepo: (projectId: string, repoRoot: string) => void
   checkoutBranch: (projectId: string, workspaceRoot: string, branch: string) => Promise<void>
   discardChange: (projectId: string, workspaceRoot: string, change: GitChange) => Promise<void>
+  stageChange: (projectId: string, workspaceRoot: string, change: GitChange) => Promise<void>
+  unstageChange: (projectId: string, workspaceRoot: string, change: GitChange) => Promise<void>
+  stageAll: (projectId: string, workspaceRoot: string) => Promise<void>
+  unstageAll: (projectId: string, workspaceRoot: string) => Promise<void>
+  commitChanges: (projectId: string, workspaceRoot: string, message: string) => Promise<void>
   getChangeStatus: (projectId: string, filePath: string) => GitChangeStatus | null
 }
 
 const EMPTY_CHANGES: GitChange[] = []
+const latestRefreshByProject = new Map<string, number>()
 
 export const EMPTY_GIT_STATE: GitState = {
   branch: null,
@@ -149,6 +155,8 @@ export const useGitStore = create<GitStore>((set, get) => ({
   stateByProject: {},
 
   refresh: async (projectId, projectRoot, options) => {
+    const refreshId = (latestRefreshByProject.get(projectId) ?? 0) + 1
+    latestRefreshByProject.set(projectId, refreshId)
     const previous = get().stateByProject[projectId] ?? EMPTY_BUNDLE
     const quiet = Boolean(options?.quiet && previous.selectedRoot)
 
@@ -180,6 +188,8 @@ export const useGitStore = create<GitStore>((set, get) => ({
         byRoot[root] = repoState
       }
 
+      if (latestRefreshByProject.get(projectId) !== refreshId) return
+
       set((state) => ({
         stateByProject: {
           ...state.stateByProject,
@@ -194,6 +204,7 @@ export const useGitStore = create<GitStore>((set, get) => ({
         }
       }))
     } catch (error) {
+      if (latestRefreshByProject.get(projectId) !== refreshId) return
       const message = error instanceof Error ? error.message : 'Failed to load git status'
       set((state) => ({
         stateByProject: {
@@ -220,6 +231,61 @@ export const useGitStore = create<GitStore>((set, get) => ({
       filePath: change.path,
       status: change.status
     })
+    await get().refresh(projectId, workspaceRoot)
+  },
+
+  stageChange: async (projectId, workspaceRoot, change) => {
+    const bundle = get().stateByProject[projectId]
+    const repoRoot = bundle?.selectedRoot
+    if (!repoRoot) {
+      throw new Error('No repository selected')
+    }
+
+    await window.api.git.stage({ projectRoot: repoRoot, filePath: change.path })
+    await get().refresh(projectId, workspaceRoot)
+  },
+
+  unstageChange: async (projectId, workspaceRoot, change) => {
+    const bundle = get().stateByProject[projectId]
+    const repoRoot = bundle?.selectedRoot
+    if (!repoRoot) {
+      throw new Error('No repository selected')
+    }
+
+    await window.api.git.unstage({ projectRoot: repoRoot, filePath: change.path })
+    await get().refresh(projectId, workspaceRoot)
+  },
+
+  stageAll: async (projectId, workspaceRoot) => {
+    const bundle = get().stateByProject[projectId]
+    const repoRoot = bundle?.selectedRoot
+    if (!repoRoot) {
+      throw new Error('No repository selected')
+    }
+
+    await window.api.git.stageAll({ projectRoot: repoRoot })
+    await get().refresh(projectId, workspaceRoot)
+  },
+
+  unstageAll: async (projectId, workspaceRoot) => {
+    const bundle = get().stateByProject[projectId]
+    const repoRoot = bundle?.selectedRoot
+    if (!repoRoot) {
+      throw new Error('No repository selected')
+    }
+
+    await window.api.git.unstageAll({ projectRoot: repoRoot })
+    await get().refresh(projectId, workspaceRoot)
+  },
+
+  commitChanges: async (projectId, workspaceRoot, message) => {
+    const bundle = get().stateByProject[projectId]
+    const repoRoot = bundle?.selectedRoot
+    if (!repoRoot) {
+      throw new Error('No repository selected')
+    }
+
+    await window.api.git.commit({ projectRoot: repoRoot, message })
     await get().refresh(projectId, workspaceRoot)
   },
 

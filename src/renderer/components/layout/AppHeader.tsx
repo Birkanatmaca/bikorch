@@ -4,7 +4,7 @@ import { AddPanelMenu } from '../workspace/AddPanelMenu'
 import { AppLogo } from '../brand/AppLogo'
 import { MenuBar } from './MenuBar'
 import { TitleBarControls } from './TitleBarControls'
-import { isWindows } from '@renderer/lib/electron-api'
+import { isMacOS, isWindows } from '@renderer/lib/electron-api'
 import { CLI_LOGO_CLASS, getCliLogo } from '@renderer/lib/cli-logos'
 import { cn } from '@renderer/lib/utils'
 import { ChevronDown, MessageCircle } from 'lucide-react'
@@ -20,6 +20,7 @@ export function AppHeader({
   onCommandPalette
 }: AppHeaderProps): React.JSX.Element {
   const isWin = isWindows()
+  const isMac = isMacOS()
   const addPanel = useWorkspaceStore((s) => s.addPanel)
   const chatgptLogo = getCliLogo('chatgpt')
   const claudeChatLogo = getCliLogo('claude-chat')
@@ -54,12 +55,24 @@ export function AppHeader({
   return (
     <header
       className={cn(
-        'flex h-9 shrink-0 items-center border-b border-border bg-panel-bg',
-        isWin && 'app-drag-region',
+        'app-header flex h-9 shrink-0 items-center border-b border-border bg-panel-bg',
+        (isWin || isMac) && 'app-drag-region',
+        isMac && 'app-header-macos',
+        isWin && 'app-header-windows',
         isWin ? 'pl-0 pr-0' : 'px-2'
       )}
+      onDoubleClick={(event) => {
+        if (!isWin || !window.api?.window) return
+        if ((event.target as HTMLElement).closest('.app-no-drag')) return
+        void window.api.window.maximize()
+      }}
     >
-      <div className="flex shrink-0 items-center pl-2.5 app-no-drag">
+      <div
+        className={cn(
+          'flex shrink-0 items-center app-no-drag',
+          isMac ? 'pl-[76px]' : 'pl-2.5'
+        )}
+      >
         <AppLogo size="xs" className="opacity-90" />
         <div className="mx-1.5 h-4 w-px bg-border" />
         <MenuBar onCommandPalette={onCommandPalette} />
@@ -76,7 +89,7 @@ export function AppHeader({
 
       {!showWorkspaceControls && <div className="min-h-full min-w-8 flex-1" aria-hidden />}
 
-      <div className="flex shrink-0 items-center gap-1.5 pr-1 app-no-drag">
+      <div className={cn('app-header-actions flex shrink-0 items-center gap-1.5 app-no-drag', isWin ? 'pr-0' : 'pr-1')}>
         {showWorkspaceControls && <AddPanelMenu />}
         {showWorkspaceControls && (
           <div ref={chatMenuRef} className="relative">

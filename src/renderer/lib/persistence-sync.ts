@@ -3,6 +3,7 @@ import { useEditorStore } from '@renderer/stores/editor-store'
 import { selectGitBundle, selectGitChanges, useGitStore } from '@renderer/stores/git-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useAiAccountsStore } from '@renderer/stores/ai-accounts-store'
+import { useTasksStore } from '@renderer/stores/tasks-store'
 
 const SAVE_DEBOUNCE_MS = 400
 
@@ -14,6 +15,7 @@ export function buildPersistedSnapshot(): PersistedSnapshot {
   const workspace = useWorkspaceStore.getState().getSnapshot()
   const editor = useEditorStore.getState().getPersistedState()
   const accounts = useAiAccountsStore.getState().getSnapshot()
+  const tasks = useTasksStore.getState().getSnapshot()
 
   return {
     projects: workspace.projects,
@@ -21,7 +23,8 @@ export function buildPersistedSnapshot(): PersistedSnapshot {
     workspaces: workspace.workspaces,
     editor,
     accounts: accounts.accounts,
-    activeAccountByKind: accounts.activeAccountByKind
+    activeAccountByKind: accounts.activeAccountByKind,
+    tasksByProject: tasks.tasksByProject
   }
 }
 
@@ -40,6 +43,7 @@ export async function hydrateFromDisk(): Promise<void> {
     accounts: snapshot.accounts,
     activeAccountByKind: snapshot.activeAccountByKind
   })
+  useTasksStore.getState().hydrate({ tasksByProject: snapshot.tasksByProject ?? {} })
   isHydrating = false
 
   // Restore diff in background — don't block app startup
@@ -129,6 +133,11 @@ export function startPersistenceSync(): void {
     ) {
       return
     }
+    scheduleSave()
+  })
+
+  useTasksStore.subscribe((state, prevState) => {
+    if (state.tasksByProject === prevState.tasksByProject) return
     scheduleSave()
   })
 }

@@ -1,6 +1,7 @@
 import type { GitChangeStatus } from './git'
 import type { Project, ProjectWorkspaceState } from '../types'
 import type { AiAccount, ActiveAccountByKind } from './accounts'
+import type { ProjectTask } from './tasks'
 
 export interface PersistedEditorState {
   selectedFileByProject: Record<string, string | null>
@@ -23,6 +24,7 @@ export interface PersistedSnapshot {
   editor: PersistedEditorState
   accounts: AiAccount[]
   activeAccountByKind: ActiveAccountByKind
+  tasksByProject: Record<string, ProjectTask[]>
 }
 
 export const PERSISTENCE_IPC = {

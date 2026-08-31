@@ -121,6 +121,8 @@ export function TerminalView({
     if (!container || initializedRef.current) return
     initializedRef.current = true
     disposedRef.current = false
+    const projectIdAtMount = activeProjectId
+    const folderPathAtMount = project?.folderPath ?? null
 
     const terminal = new Terminal(getTerminalOptions(kind))
 
@@ -343,12 +345,29 @@ export function TerminalView({
       window.removeEventListener(FOCUS_TERMINAL_EVENT, onFocusRequest)
       window.removeEventListener(TERMINAL_LAYOUT_LOCK_EVENT, onLayoutLock)
       unsubscribe()
-      void window.api.pty.kill({ sessionId })
       terminal.dispose()
       terminalRef.current = null
       fitAddonRef.current = null
       initializedRef.current = false
-      removeSession(sessionId)
+
+      // Switching projects unmounts the visible panel, but the PTY remains alive.
+      // Renderer-only state is cleared when the panel was actually removed.
+      const workspaceAtCleanup = projectIdAtMount
+        ? useWorkspaceStore.getState().workspaces[projectIdAtMount]
+        : undefined
+      const panelStillExists =
+        workspaceAtCleanup?.panels.some((panel) => panel.id === sessionId) ?? false
+      const currentFolderPath = projectIdAtMount
+        ? useWorkspaceStore
+            .getState()
+            .projects.find((workspaceProject) => workspaceProject.id === projectIdAtMount)
+            ?.folderPath ?? null
+        : null
+
+      if (!panelStillExists || currentFolderPath !== folderPathAtMount) {
+        void window.api.pty.kill({ sessionId })
+      }
+      if (!panelStillExists) removeSession(sessionId)
     }
   }, [sessionId, kind, accountId, project?.folderPath, setStatus, removeSession, clearPanelLaunchMode, scheduleFit, fitTerminal])
 

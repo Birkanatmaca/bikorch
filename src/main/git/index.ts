@@ -257,6 +257,47 @@ export async function checkoutGitBranch(projectRoot: string, branch: string): Pr
   await runGit(projectRoot, ['checkout', branch])
 }
 
+export async function stageGitFile(projectRoot: string, filePath: string): Promise<void> {
+  const repoRoot = await resolveRepoRoot(projectRoot)
+  const relativePath = toRepoRelativePath(repoRoot, filePath)
+  assertSafeRepoFile(repoRoot, relativePath)
+  await runGit(repoRoot, ['add', '--', relativePath])
+}
+
+export async function unstageGitFile(projectRoot: string, filePath: string): Promise<void> {
+  const repoRoot = await resolveRepoRoot(projectRoot)
+  const relativePath = toRepoRelativePath(repoRoot, filePath)
+  assertSafeRepoFile(repoRoot, relativePath)
+
+  try {
+    await runGit(repoRoot, ['restore', '--staged', '--', relativePath])
+  } catch {
+    await runGit(repoRoot, ['reset', 'HEAD', '--', relativePath])
+  }
+}
+
+export async function stageAllGitChanges(projectRoot: string): Promise<void> {
+  const repoRoot = await resolveRepoRoot(projectRoot)
+  await runGit(repoRoot, ['add', '--all'])
+}
+
+export async function unstageAllGitChanges(projectRoot: string): Promise<void> {
+  const repoRoot = await resolveRepoRoot(projectRoot)
+
+  try {
+    await runGit(repoRoot, ['restore', '--staged', '--', '.'])
+  } catch {
+    await runGit(repoRoot, ['reset', 'HEAD', '--', '.'])
+  }
+}
+
+export async function commitGitChanges(projectRoot: string, message: string): Promise<void> {
+  const trimmed = message.trim()
+  if (!trimmed) throw new Error('Commit message cannot be empty')
+  if (trimmed.length > 500) throw new Error('Commit message is too long')
+  await runGit(projectRoot, ['commit', '-m', trimmed])
+}
+
 const MAX_DIFF_BYTES = 2 * 1024 * 1024
 
 async function resolveRepoRoot(cwd: string): Promise<string> {
@@ -363,6 +404,12 @@ export async function discardFileChange(
 
   if (status === 'U') {
     await rm(absolutePath, { recursive: true, force: true })
+    return
+  }
+
+  if (status === 'A') {
+    await rm(absolutePath, { recursive: true, force: true })
+    await runGit(repoRoot, ['reset', 'HEAD', '--', relativePath]).catch(() => undefined)
     return
   }
 

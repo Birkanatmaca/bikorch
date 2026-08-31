@@ -1,8 +1,13 @@
 import { DiffEditor, Editor } from '@monaco-editor/react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useActiveProject } from '@renderer/hooks/use-active-project'
 import { useEditorStore } from '@renderer/stores/editor-store'
-import { selectGitBundle, selectGitChanges, useGitStore } from '@renderer/stores/git-store'
+import {
+  selectGitBundle,
+  selectGitChanges,
+  selectGitState,
+  useGitStore
+} from '@renderer/stores/git-store'
 import { EmptyState } from '@renderer/components/ui/EmptyState'
 import {
   ChevronLeft,
@@ -34,12 +39,29 @@ export function DiffViewerPanel(): React.JSX.Element {
   const navigateDiff = useEditorStore((s) => s.navigateDiff)
   const refreshDiff = useEditorStore((s) => s.refreshDiff)
   const gitChanges = useGitStore((s) => selectGitChanges(s.stateByProject, projectId))
+  const lastFetchedAt = useGitStore(
+    (s) => selectGitState(s.stateByProject, projectId).lastFetchedAt
+  )
   const selectedRoot = useGitStore(
     (s) => selectGitBundle(s.stateByProject, projectId).selectedRoot
   )
   const repoRoot = selectedRoot ?? projectRoot
   const isFileMode = activeDiff?.mode === 'file'
   const isDiffMode = activeDiff?.mode === 'diff'
+
+  useEffect(() => {
+    if (!projectId || !repoRoot || !isDiffMode || !lastFetchedAt) return
+    void refreshDiff(projectId, repoRoot)
+  }, [
+    activeDiff?.filePath,
+    activeDiff?.mode,
+    activeDiff?.status,
+    isDiffMode,
+    lastFetchedAt,
+    projectId,
+    refreshDiff,
+    repoRoot
+  ])
 
   const handleNavigate = (direction: 'prev' | 'next'): void => {
     if (!projectId || !repoRoot || !isDiffMode) return

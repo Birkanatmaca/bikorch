@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { ptyManager } from './cli/pty-manager'
 import { registerIpcHandlers } from './ipc'
+import { installConsoleCapture, recordRendererConsole } from './logs'
 import {
   closePersistenceDatabase,
   initPersistenceDatabase
@@ -9,8 +10,11 @@ import {
 
 const isDev = !app.isPackaged
 
+installConsoleCapture()
+
 function createWindow(): void {
   const isWin = process.platform === 'win32'
+  const isMac = process.platform === 'darwin'
 
   const mainWindow = new BrowserWindow({
     width: 1400,
@@ -21,7 +25,7 @@ function createWindow(): void {
     backgroundColor: '#0D0F12',
     icon: join(__dirname, '../../app-logo.png'),
     frame: !isWin,
-    titleBarStyle: isWin ? 'hidden' : 'hiddenInset',
+    titleBarStyle: isWin ? 'hidden' : isMac ? 'hiddenInset' : undefined,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -41,6 +45,10 @@ function createWindow(): void {
 
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     console.error('Render process gone:', details)
+  })
+
+  mainWindow.webContents.on('console-message', (_event, level, message, _line, sourceId) => {
+    recordRendererConsole(level, message, sourceId)
   })
 
   if (isDev) {
