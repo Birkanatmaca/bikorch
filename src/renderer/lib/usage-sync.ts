@@ -41,6 +41,14 @@ async function readAccounts(accounts: AiAccount[]): Promise<void> {
         accounts: [{ kind: account.kind, accountId: account.id }]
       })
       useUsageStore.getState().applyResponse(response, [account.id])
+      const provider =
+        response.providers.find((item) => item.accountId === account.id) ?? response.providers[0]
+      if (provider && (provider.accountEmail || provider.planType)) {
+        useAiAccountsStore.getState().updateAccount(account.id, {
+          ...(provider.accountEmail ? { email: provider.accountEmail } : {}),
+          ...(provider.planType ? { plan: provider.planType } : {})
+        })
+      }
     } catch {
       useUsageStore.getState().markChecked([account.id])
     }

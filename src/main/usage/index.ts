@@ -25,12 +25,12 @@ import {
   hasStoredAntigravityCredentials
 } from '../accounts/antigravity-credential'
 import {
-  cursorCredentialsSupported,
-  readCursorKeychainTokens,
-  restoreCursorKeychainTokens,
-  type CursorKeychainTokens
+  cursorCredentialsSupported
 } from '../accounts/cursor-credential'
-import { withAntigravityCredentialLock } from '../accounts/credential-lock'
+import {
+  withAntigravityCredentialLock,
+  withCursorCredentialLock
+} from '../accounts/credential-lock'
 
 const USAGE_KINDS: CliUsageKind[] = ['claude', 'cursor', 'gemini', 'antigravity', 'codex']
 
@@ -67,18 +67,8 @@ const INTERACTIVE_USAGE_SETTLE_DELAY_MS = 120
 const INTERACTIVE_USAGE_TIMEOUT_MS = 18000
 const INTERACTIVE_USAGE_OUTPUT_LIMIT = 120000
 
-let cursorUsageQueue: Promise<void> = Promise.resolve()
-
 function withCursorUsageLock<T>(task: () => Promise<T>): Promise<T> {
-  const result = cursorUsageQueue.then(
-    () => task(),
-    () => task()
-  )
-  cursorUsageQueue = result.then(
-    () => undefined,
-    () => undefined
-  )
-  return result
+  return withCursorCredentialLock(task)
 }
 
 function withAntigravityUsageLock<T>(task: () => Promise<T>): Promise<T> {
@@ -830,8 +820,7 @@ async function readProviderUsage(
   let preparedIdentity: CliAccountIdentity = {}
   if (
     scope.accountId &&
-    !(kind === 'antigravity' && antigravityLockHeld) &&
-    !(kind === 'cursor' && cursorLockHeld)
+    !(kind === 'antigravity' && antigravityLockHeld)
   ) {
     const prepared = await prepareAuthProfileLaunch(
       { kind, accountId: scope.accountId },
@@ -945,64 +934,13 @@ async function readProviderUsage(
 async function readCursorAccountUsage(
   requests: UsageAccountRequest[]
 ): Promise<CliUsageInfo[]> {
-  if (!cursorCredentialsSupported()) {
-    return Promise.all(
-      requests.map((request) => readProviderUsage('cursor', { accountId: request.accountId }))
+  const providers: CliUsageInfo[] = []
+  for (const request of requests) {
+    providers.push(
+      await readProviderUsage('cursor', { accountId: request.accountId }, false, true)
     )
   }
-
-  return withCursorUsageLock(async () => {
-    let previousTokens: CursorKeychainTokens | null = null
-    try {
-      previousTokens = await readCursorKeychainTokens()
-    } catch (error) {
-      const detail =
-        error instanceof Error ? error.message : 'Cursor credentials could not be read'
-      return requests.map((request) =>
-        withAccountScope(baseUsageInfo('cursor', 'error', detail), request.accountId)
-      )
-    }
-
-    const providers: CliUsageInfo[] = []
-    try {
-      for (const request of requests) {
-        const prepared = await prepareAuthProfileLaunch(request, 'normal')
-        if (!prepared.ok) {
-          providers.push(
-            withAccountScope(
-              baseUsageInfo(
-                'cursor',
-                'error',
-                prepared.error ?? 'Cursor account could not be prepared'
-              ),
-              request.accountId
-            )
-          )
-          continue
-        }
-        if (!prepared.ready) {
-          providers.push(
-            withAccountScope(
-              baseUsageInfo('cursor', 'unavailable', 'Account profile is not ready'),
-              request.accountId
-            )
-          )
-          continue
-        }
-        providers.push(
-          await readProviderUsage('cursor', { accountId: request.accountId }, false, true)
-        )
-      }
-    } finally {
-      try {
-        await restoreCursorKeychainTokens(previousTokens)
-      } catch (error) {
-        console.error('Could not restore Cursor credentials after usage check:', error)
-      }
-    }
-
-    return providers
-  })
+  return providers
 }
 
 async function readAntigravityAccountUsage(

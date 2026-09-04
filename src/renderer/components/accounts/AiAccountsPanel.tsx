@@ -264,7 +264,14 @@ function AccountCard({
   const liveUsage = provider?.status === 'available'
   const primaryLabel = provider?.primary?.label ?? 'Primary limit'
   const secondaryLabel = provider?.secondary?.label ?? 'Secondary limit'
-  const hasLiveWindows = Boolean(provider?.primary || provider?.secondary)
+  const breakdownGauges = (provider?.breakdown ?? [])
+    .filter((item) => typeof item.usedPercent === 'number')
+    .slice(0, 2)
+  const hasLiveWindows = Boolean(
+    provider?.primary || provider?.secondary || (liveUsage && breakdownGauges.length > 0)
+  )
+  const displayEmail = account.email || provider?.accountEmail
+  const displayPlan = account.plan || provider?.planType || undefined
 
   return (
     <article
@@ -291,7 +298,9 @@ function AccountCard({
             )}
           </div>
           <p className="truncate text-[10px] text-text-muted">{AI_ACCOUNT_LABELS[account.kind]}</p>
-          {account.email && <p className="truncate font-mono text-[9px] text-text-secondary">{account.email}</p>}
+          {displayEmail && (
+            <p className="truncate font-mono text-[9px] text-text-secondary">{displayEmail}</p>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
           <button
@@ -327,25 +336,35 @@ function AccountCard({
         </div>
       </div>
 
-      {account.plan || account.note ? (
+      {displayPlan || account.note ? (
         <div className="mt-1.5 flex items-center gap-1.5 font-mono text-[9px] text-text-muted">
-          {account.plan && <span className="rounded bg-elevated px-1.5 py-0.5">{account.plan}</span>}
+          {displayPlan && <span className="rounded bg-elevated px-1.5 py-0.5">{displayPlan}</span>}
           {account.note && <span className="truncate">{account.note}</span>}
         </div>
       ) : null}
 
       {liveUsage && hasLiveWindows ? (
         <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-          {provider?.primary && (
+          {provider?.primary ? (
             <CircularUsage
               label={primaryLabel}
               remaining={primaryRemaining}
               detail={formatUsageDetail(provider)}
             />
-          )}
-          {provider?.secondary && (
+          ) : breakdownGauges[0] ? (
+            <CircularUsage
+              label={breakdownGauges[0].label}
+              remaining={100 - (breakdownGauges[0].usedPercent ?? 0)}
+            />
+          ) : null}
+          {provider?.secondary ? (
             <CircularUsage label={secondaryLabel} remaining={secondaryRemaining} />
-          )}
+          ) : !provider?.primary && breakdownGauges[1] ? (
+            <CircularUsage
+              label={breakdownGauges[1].label}
+              remaining={100 - (breakdownGauges[1].usedPercent ?? 0)}
+            />
+          ) : null}
         </div>
       ) : (
         <div className="mt-2 flex items-center gap-1.5 rounded-md border border-border bg-app-bg/60 px-2 py-1.5 text-[9px] text-text-muted">
@@ -462,7 +481,11 @@ export function AiAccountsPanel(): React.JSX.Element {
         plan: '',
         note: ''
       })
-    removePanelsForAccount(kind, accountId)
+    if (kind === 'cursor' || kind === 'antigravity') {
+      closeOtherAccountCliPanels(kind, accountId)
+    } else {
+      removePanelsForAccount(kind, accountId)
+    }
     addPanel(
       kind,
       'center',
@@ -495,7 +518,7 @@ export function AiAccountsPanel(): React.JSX.Element {
       return
     }
 
-    if (kind === 'antigravity') {
+    if (kind === 'antigravity' || kind === 'cursor') {
       await openLoginCli(kind)
       return
     }
@@ -506,8 +529,8 @@ export function AiAccountsPanel(): React.JSX.Element {
   const handleRemove = async (account: AiAccount): Promise<void> => {
     if (
       !window.confirm(
-        account.kind === 'antigravity'
-          ? `Sign out and remove ${account.name}? This runs /logout in Antigravity, signs it out on this computer, and closes open sessions.`
+        account.kind === 'antigravity' || account.kind === 'cursor'
+          ? `Sign out and remove ${account.name}? This signs ${AI_ACCOUNT_LABELS[account.kind]} out on this computer and closes open sessions.`
           : `Sign out and remove ${account.name}? Open sessions for this account will be closed.`
       )
     ) {
@@ -559,7 +582,7 @@ export function AiAccountsPanel(): React.JSX.Element {
         await openLoginCli(account.kind, account)
         return
       }
-      if (account.kind === 'cursor' || account.kind === 'antigravity') {
+      if (account.kind === 'antigravity') {
         closeOtherAccountCliPanels(account.kind, account.id)
       }
       setActiveAccount(account.kind, account.id)
@@ -703,7 +726,7 @@ export function AiAccountsPanel(): React.JSX.Element {
                       <span className="min-w-0 flex-1">
                         {installedByKind[kind] === false
                           ? 'CLI is not installed'
-                          : kind === 'antigravity'
+                          : kind === 'antigravity' || kind === 'cursor'
                             ? 'No managed account yet. Open CLI starts a fresh sign-in and will not reuse the previous system session.'
                             : 'No managed account yet. Open the CLI with your system session or add an account for isolated profiles.'}
                       </span>
@@ -725,7 +748,10 @@ export function AiAccountsPanel(): React.JSX.Element {
           })}
           <div className="flex items-start gap-1.5 px-1 pt-1 text-[9px] leading-relaxed text-text-muted">
             <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-success" />
-            <span>Managed accounts use isolated profiles. Existing system logins are imported automatically when detected. Removing one signs it out and closes its sessions.</span>
+            <span>
+              You can save more than one Cursor CLI account and open each CLI to inspect it.
+              Antigravity still uses one live session at a time.
+            </span>
           </div>
         </div>
       </div>

@@ -28,6 +28,20 @@ export function stripAnsi(value: string): string {
   return value.replace(ANSI_RE, '')
 }
 
+export function looksCliSignedIn(kind: PtyKind, buffer: string): boolean {
+  const tail = stripAnsi(buffer).replace(/\r/g, '')
+  if (kind === 'cursor') {
+    return (
+      /Plan,\s*search,\s*build anything/i.test(tail) ||
+      /logged in as\b|successfully logged in|authentication successful|login successful/i.test(tail)
+    )
+  }
+  if (/not logged in|not signed in|please (?:sign|log) in|authentication required/i.test(tail)) {
+    return false
+  }
+  return false
+}
+
 export function inferCliActivity(buffer: string): 'waiting' | 'busy' | null {
   const tail = stripAnsi(buffer).replace(/\r/g, '').slice(-1200)
   if (!tail.trim()) return null

@@ -13,7 +13,7 @@ import {
   removeAuthProfile
 } from '../accounts/profile-manager'
 import { ptyManager } from '../cli/pty-manager'
-import { withAntigravityCredentialLock } from '../accounts/credential-lock'
+import { withAntigravityCredentialLock, withCursorCredentialLock } from '../accounts/credential-lock'
 
 function isAuthProfileRequest(payload: unknown): payload is AuthProfileRequest {
   if (!payload || typeof payload !== 'object') return false
@@ -24,7 +24,8 @@ function isAuthProfileRequest(payload: unknown): payload is AuthProfileRequest {
     request.accountId.length <= 200 &&
     AI_ACCOUNT_KINDS.includes(request.kind) &&
     (request.email === undefined ||
-      (typeof request.email === 'string' && request.email.length <= 320))
+      (typeof request.email === 'string' && request.email.length <= 320)) &&
+    (request.signedIn === undefined || typeof request.signedIn === 'boolean')
   )
 }
 
@@ -40,6 +41,9 @@ export function registerAuthProfileHandlers(): void {
     if (payload.kind === 'antigravity') {
       return withAntigravityCredentialLock(() => importCurrentAuthProfile(payload))
     }
+    if (payload.kind === 'cursor') {
+      return withCursorCredentialLock(() => importCurrentAuthProfile(payload))
+    }
     return importCurrentAuthProfile(payload)
   })
 
@@ -49,6 +53,9 @@ export function registerAuthProfileHandlers(): void {
     }
     if (payload.kind === 'antigravity') {
       return withAntigravityCredentialLock(() => prepareAuthProfileLaunch(payload, 'normal'))
+    }
+    if (payload.kind === 'cursor') {
+      return withCursorCredentialLock(() => prepareAuthProfileLaunch(payload, 'normal'))
     }
     return prepareAuthProfileLaunch(payload, 'normal')
   })

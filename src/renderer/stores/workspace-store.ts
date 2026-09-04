@@ -406,7 +406,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           .filter(
             (panel) =>
               panel.type === kind &&
-              (kind === 'antigravity' || !panel.accountId || panel.accountId === accountId)
+              (kind === 'antigravity' ||
+                !panel.accountId ||
+                panel.accountId === accountId)
           )
           .map((panel) => panel.id)
       )
@@ -442,10 +444,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     for (const [projectId, workspace] of Object.entries(workspaces)) {
       const removedIds = new Set(
         workspace.panels
-          .filter(
-            (panel) =>
-              panel.type === kind && panel.accountId && panel.accountId !== keepAccountId
-          )
+          .filter((panel) => {
+            if (panel.type !== kind) return false
+            if (kind === 'antigravity') return true
+            return Boolean(panel.accountId && panel.accountId !== keepAccountId)
+          })
           .map((panel) => panel.id)
       )
       if (removedIds.size === 0) {

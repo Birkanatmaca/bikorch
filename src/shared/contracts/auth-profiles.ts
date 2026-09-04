@@ -4,6 +4,7 @@ export interface AuthProfileRequest {
   kind: CliUsageKind
   accountId: string
   email?: string
+  signedIn?: boolean
 }
 
 export interface AuthProfileIdentity {

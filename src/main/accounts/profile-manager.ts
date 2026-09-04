@@ -26,15 +26,20 @@ import {
 import {
   applyCursorCredentialsForAccount,
   captureCursorCredentialsForAccount,
-  cursorCredentialsSupported,
+  getCursorSessionAccount,
   hasStoredCursorCredentials,
+  markCursorSessionAccount,
+  readCursorKeychainTokens,
+  readStoredCursorConfigIdentity,
   removeStoredCursorCredentials
 } from './cursor-credential'
-import { withAntigravityCredentialLock } from './credential-lock'
+import { withAntigravityCredentialLock, withCursorCredentialLock } from './credential-lock'
 import { logoutAntigravityCli } from './antigravity-logout'
+import { logoutCursorCli } from './cursor-logout'
 import {
   applyAntigravityCredentialsForAccount,
   captureAntigravityCredentialsForAccount,
+  getAntigravitySessionAccount,
   hasStoredAntigravityCredentials,
   markAntigravitySessionAccount
 } from './antigravity-credential'
@@ -184,28 +189,78 @@ async function captureAntigravity(request: AuthProfileRequest): Promise<AuthProf
   }
 }
 
+function cursorEmailTakenByOtherAccount(accountId: string, email: string): boolean {
+  const target = email.trim().toLowerCase()
+  if (!target) return false
+  const kindRoot = join(profilesRoot(), 'cursor')
+  if (!existsSync(kindRoot)) return false
+
+  let entries
+  try {
+    entries = readdirSync(kindRoot, { withFileTypes: true })
+  } catch {
+    return false
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const metadata = readJson(join(kindRoot, entry.name, 'profile.json'))
+    const otherId = asString(metadata?.accountId)
+    if (!otherId || otherId === accountId) continue
+    const otherEmail = asString(metadata?.email)?.toLowerCase()
+    if (otherEmail === target) return true
+  }
+  return false
+}
+
+async function captureCursor(request: AuthProfileRequest): Promise<AuthProfileResult> {
+  if (!safeStorage.isEncryptionAvailable()) {
+    return {
+      ok: false,
+      ready: false,
+      error: 'Secure local credential encryption is not available on this computer'
+    }
+  }
+  const captured = await captureCursorCredentialsForAccount(request.accountId, {
+    signedInHint: request.signedIn === true
+  })
+  ensureProfileRoot(request.kind, request.accountId)
+  const identity = readStoredCursorConfigIdentity(request.accountId)
+  const email = request.email || identity?.email
+  if (email && cursorEmailTakenByOtherAccount(request.accountId, email)) {
+    removeStoredCursorCredentials(request.accountId)
+    return {
+      ok: false,
+      ready: false,
+      error:
+        'This Cursor account is already saved. Sign in with a different account in the browser.'
+    }
+  }
+  if (!captured) return { ok: true, ready: false }
+  writeMetadata({
+    ...request,
+    ...(email ? { email } : {})
+  })
+  return {
+    ok: true,
+    ready: true,
+    identity: {
+      email: email || '',
+      name: identity?.name || email || 'Cursor CLI account'
+    }
+  }
+}
+
 export async function importCurrentAuthProfile(
   request: AuthProfileRequest
 ): Promise<AuthProfileResult> {
   try {
     if (request.kind === 'antigravity') return await captureAntigravity(request)
+    if (request.kind === 'cursor') return await captureCursor(request)
 
     const root = ensureProfileRoot(request.kind, request.accountId)
     let copied = false
-    if (request.kind === 'cursor') {
-      const profileConfigPath = join(root, 'config', 'cli-config.json')
-      const profileConfig = readJson(profileConfigPath)
-      const profileHasAuth = Boolean(asRecord(profileConfig?.authInfo))
-      copied = profileHasAuth
-        ? true
-        : copyIfPresent(
-            join(homedir(), '.cursor', 'cli-config.json'),
-            profileConfigPath
-          )
-      if (cursorCredentialsSupported()) {
-        await captureCursorCredentialsForAccount(request.accountId)
-      }
-    } else if (request.kind === 'codex') {
+    if (request.kind === 'codex') {
       ensureCodexConfig(root)
       copied = copyIfPresent(join(homedir(), '.codex', 'auth.json'), join(root, 'auth.json'))
     } else if (request.kind === 'gemini') {
@@ -243,12 +298,6 @@ export function getAuthProfileEnv(
   accountId: string
 ): Record<string, string> {
   const root = ensureProfileRoot(kind, accountId)
-  if (kind === 'cursor') {
-    return {
-      CURSOR_CONFIG_DIR: join(root, 'config'),
-      CURSOR_DATA_DIR: join(root, 'data')
-    }
-  }
   if (kind === 'codex') {
     ensureCodexConfig(root)
     return { CODEX_HOME: root }
@@ -256,6 +305,11 @@ export function getAuthProfileEnv(
   if (kind === 'gemini') return { GEMINI_CLI_HOME: root }
   if (kind === 'antigravity') return { GEMINI_CLI_HOME: root }
   if (kind === 'claude') return { CLAUDE_CONFIG_DIR: root }
+  if (kind === 'cursor') {
+    const configDir = join(root, '.cursor')
+    mkdirSync(configDir, { recursive: true })
+    return { CURSOR_CONFIG_DIR: configDir }
+  }
   return {}
 }
 
@@ -266,10 +320,21 @@ export async function prepareAuthProfileLaunch(
   try {
     if (launchMode === 'login') {
       if (request.kind === 'antigravity') {
+        const liveId = getAntigravitySessionAccount()
+        if (liveId && liveId !== request.accountId) {
+          await captureAntigravityCredentialsForAccount(liveId).catch(() => false)
+        }
         markAntigravitySessionAccount(null)
         await logoutAntigravityCli()
       }
-      if (request.kind === 'cursor') removeStoredCursorCredentials(request.accountId)
+      if (request.kind === 'cursor') {
+        const liveId = getCursorSessionAccount()
+        if (liveId && liveId !== request.accountId) {
+          await captureCursorCredentialsForAccount(liveId).catch(() => false)
+        }
+        markCursorSessionAccount(null)
+        await logoutCursorCli()
+      }
       removeProfileDirectory(request.kind, request.accountId)
       const root = ensureProfileRoot(request.kind, request.accountId)
       if (request.kind === 'codex') ensureCodexConfig(root)
@@ -299,27 +364,31 @@ export async function prepareAuthProfileLaunch(
     }
 
     if (request.kind === 'cursor') {
-      const inspected = inspectAuthProfile(request)
-      if (!inspected.ready) return inspected
-      if (cursorCredentialsSupported()) {
-        if (!hasStoredCursorCredentials(request.accountId)) {
-          return {
-            ok: false,
-            ready: false,
-            error:
-              'Cursor session tokens are missing for this account. Open Sign in and authenticate again.'
-          }
-        }
-        const applied = await applyCursorCredentialsForAccount(request.accountId)
-        if (!applied) {
-          return {
-            ok: false,
-            ready: false,
-            error: 'Could not activate Cursor credentials for this account'
-          }
+      if (!hasStoredCursorCredentials(request.accountId)) {
+        return { ok: true, ready: false }
+      }
+      const applied = await applyCursorCredentialsForAccount(request.accountId)
+      if (!applied) {
+        return {
+          ok: false,
+          ready: false,
+          error:
+            'Could not activate this Cursor account. Sign in again to recapture its token.'
         }
       }
-      return inspected
+      const configIdentity = readStoredCursorConfigIdentity(request.accountId)
+      return {
+        ok: true,
+        ready: true,
+        identity:
+          readMetadataIdentity(request.kind, request.accountId) ??
+          (configIdentity
+            ? {
+                email: configIdentity.email ?? '',
+                name: configIdentity.name ?? configIdentity.email ?? ''
+              }
+            : undefined)
+      }
     }
 
     getAuthProfileEnv(request.kind, request.accountId)
@@ -343,12 +412,16 @@ export function inspectAuthProfile(request: AuthProfileRequest): AuthProfileResu
       ready = existsSync(join(root, 'credential.bin'))
       identity = readMetadataIdentity(request.kind, request.accountId)
     } else if (request.kind === 'cursor') {
-      const config = readJson(join(root, 'config', 'cli-config.json'))
-      const auth = asRecord(config?.authInfo)
-      const email = asString(auth?.email)
-      const name = asString(auth?.displayName)
-      ready = Boolean(auth)
-      if (email || name) identity = { email: email ?? '', name: name ?? email ?? '' }
+      ready = hasStoredCursorCredentials(request.accountId)
+      const configIdentity = readStoredCursorConfigIdentity(request.accountId)
+      identity =
+        readMetadataIdentity(request.kind, request.accountId) ??
+        (configIdentity
+          ? {
+              email: configIdentity.email ?? '',
+              name: configIdentity.name ?? configIdentity.email ?? ''
+            }
+          : undefined)
     } else if (request.kind === 'codex') {
       const auth = readJson(join(root, 'auth.json'))
       const tokens = asRecord(auth?.tokens)
@@ -439,7 +512,11 @@ export async function removeAuthProfile(request: AuthProfileRequest): Promise<Au
       markAntigravitySessionAccount(null)
       await withAntigravityCredentialLock(() => logoutAntigravityCli())
     }
-    if (request.kind === 'cursor') removeStoredCursorCredentials(request.accountId)
+    if (request.kind === 'cursor') {
+      markCursorSessionAccount(null)
+      await withCursorCredentialLock(() => logoutCursorCli())
+      removeStoredCursorCredentials(request.accountId)
+    }
     removeProfileDirectory(request.kind, request.accountId)
     return { ok: true, ready: false }
   } catch (error) {
@@ -466,12 +543,14 @@ export async function inspectSystemAuthProfile(kind: CliUsageKind): Promise<Auth
     }
 
     if (kind === 'cursor') {
+      const tokens = await readCursorKeychainTokens()
       const config = readJson(join(home, '.cursor', 'cli-config.json'))
       const auth = asRecord(config?.authInfo)
-      const email = asString(auth?.email)
-      const name = asString(auth?.displayName)
-      const ready = Boolean(auth)
-      if (!ready) return { ok: true, ready: false }
+      const hasAuthInfo = Boolean(auth && Object.keys(auth).length > 0) ||
+        (typeof config?.authInfo === 'string' && config.authInfo.trim().length > 0)
+      if (!tokens && !hasAuthInfo) return { ok: true, ready: false }
+      const email = asString(auth?.email) ?? asString(auth?.emailAddress)
+      const name = asString(auth?.displayName) ?? asString(auth?.name)
       return {
         ok: true,
         ready: true,

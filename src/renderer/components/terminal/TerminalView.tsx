@@ -17,6 +17,7 @@ import {
   isCliKind,
   isInterrupt,
   isPromptSubmit,
+  looksCliSignedIn,
   mapProcessStatus
 } from '@renderer/lib/cli-activity'
 
@@ -139,14 +140,17 @@ export function TerminalView({
     let outputTail = ''
     let idleTimer: number | null = null
     let authInspectTimer: number | null = null
+    let authPollTimer: number | null = null
     let authCaptured = false
     let authCaptureInFlight = false
     let lastAuthCaptureError: string | null = null
     let receivedSinceBusy = false
+    const captureAfterLogin = launchMode === 'login'
+    const shouldCaptureAccount = Boolean(accountId) && (captureAfterLogin || kind === 'cursor')
 
     const inspectAuthenticatedProfile = async (): Promise<void> => {
       if (
-        launchMode !== 'login' ||
+        !shouldCaptureAccount ||
         !accountId ||
         kind === 'terminal' ||
         authCaptured ||
@@ -154,12 +158,20 @@ export function TerminalView({
       ) {
         return
       }
+      const emailMatches = outputTail.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)
+      const email = emailMatches?.at(-1)
+      const signedIn = looksCliSignedIn(kind, outputTail)
+      if (kind === 'antigravity' && !email) return
+      if (kind === 'cursor' && !signedIn && !email) return
+
       authCaptureInFlight = true
       try {
-        const emailMatches = outputTail.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)
-        const email = emailMatches?.at(-1)
-        if (kind === 'antigravity' && !email) return
-        const request = { kind, accountId, ...(email ? { email } : {}) }
+        const request = {
+          kind,
+          accountId,
+          ...(email ? { email } : {}),
+          ...(kind === 'cursor' && signedIn ? { signedIn: true } : {})
+        }
         const result =
           kind === 'antigravity' || kind === 'cursor'
             ? await window.api.authProfiles.importCurrent(request)
@@ -174,6 +186,10 @@ export function TerminalView({
         }
         if (!result.ready) return
         authCaptured = true
+        if (authPollTimer !== null) {
+          window.clearInterval(authPollTimer)
+          authPollTimer = null
+        }
         window.dispatchEvent(
           new CustomEvent(AI_ACCOUNT_AUTHENTICATED_EVENT, {
             detail: { accountId, kind, identity: result.identity }
@@ -195,12 +211,18 @@ export function TerminalView({
     }
 
     const scheduleAuthInspect = (): void => {
-      if (launchMode !== 'login' || !accountId || authCaptured) return
+      if (!shouldCaptureAccount || authCaptured) return
       if (authInspectTimer !== null) window.clearTimeout(authInspectTimer)
       authInspectTimer = window.setTimeout(() => {
         authInspectTimer = null
         void inspectAuthenticatedProfile()
-      }, kind === 'antigravity' ? 1600 : 900)
+      }, kind === 'antigravity' || kind === 'cursor' ? 1600 : 900)
+    }
+
+    if (kind === 'cursor' && shouldCaptureAccount) {
+      authPollTimer = window.setInterval(() => {
+        void inspectAuthenticatedProfile()
+      }, 2000)
     }
 
     const applyCliStatus = (next: 'waiting' | 'busy'): void => {
@@ -213,7 +235,7 @@ export function TerminalView({
 
     const noteOutput = (chunk: string): void => {
       if (!cli) return
-      outputTail = (outputTail + chunk).slice(-4000)
+      outputTail = (outputTail + chunk).slice(-8000)
       const inferred = inferCliActivity(outputTail)
       const current = useTerminalStore.getState().getStatus(sessionId)
       if (current === 'busy') receivedSinceBusy = true
@@ -268,7 +290,7 @@ export function TerminalView({
           }
           setStatus(sessionId, 'stopped')
           terminal.writeln(`\r\n\x1b[90m[Process exited with code ${event.exitCode}]\x1b[0m`)
-          if (launchMode === 'login') {
+          if (shouldCaptureAccount) {
             void inspectAuthenticatedProfile()
             window.dispatchEvent(new Event(AI_ACCOUNTS_REFRESH_EVENT))
           }
@@ -288,7 +310,7 @@ export function TerminalView({
       }
     })
 
-    const startSession = async (term: Terminal): Promise<void> => {
+    const startSession = async (term: Terminal, nextLaunchMode: PtyLaunchMode = launchMode): Promise<void> => {
       if (kind === 'cursor' && window.api.cli) {
         const detected = await window.api.cli.detect('cursor')
         if (!detected.installed) {
@@ -298,6 +320,12 @@ export function TerminalView({
         }
       }
 
+      if (nextLaunchMode === 'login' && kind === 'cursor') {
+        term.writeln(
+          '\x1b[90mSigning out the current Cursor CLI session so you can add a different account...\x1b[0m'
+        )
+      }
+
       const cwd = project?.folderPath ?? ''
       const result: PtyCreateResponse = await window.api.pty.create({
         sessionId,
@@ -305,10 +333,10 @@ export function TerminalView({
         kind,
         cols: term.cols,
         rows: term.rows,
-        launchMode,
+        launchMode: nextLaunchMode,
         accountId
       })
-      if (launchMode === 'login') {
+      if (nextLaunchMode === 'login') {
         clearPanelLaunchMode(sessionId)
       }
       setStatus(sessionId, mapProcessStatus(kind, result.status), result.error)
@@ -317,6 +345,10 @@ export function TerminalView({
         if (result.code === 'CLI_MISSING' && kind === 'cursor') {
           setInstallPrompt('cursor')
         }
+      } else if (nextLaunchMode === 'login' && kind === 'cursor') {
+        term.writeln(
+          '\x1b[33m[Account] Complete sign-in in the browser with the Cursor account you want to add.\x1b[0m'
+        )
       }
     }
 
@@ -373,6 +405,7 @@ export function TerminalView({
       }
       if (idleTimer !== null) window.clearTimeout(idleTimer)
       if (authInspectTimer !== null) window.clearTimeout(authInspectTimer)
+      if (authPollTimer !== null) window.clearInterval(authPollTimer)
       resizeObserver.disconnect()
       container.removeEventListener('pointerdown', focusThis)
       window.removeEventListener(FOCUS_TERMINAL_EVENT, onFocusRequest)
