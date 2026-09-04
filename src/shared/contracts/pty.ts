@@ -26,7 +26,7 @@ export interface PtyCreateRequest {
   accountId?: string
 }
 
-export type PtyErrorCode = 'CLI_MISSING'
+export type PtyErrorCode = 'CLI_MISSING' | 'ACCOUNT_REQUIRED'
 
 export interface PtyCreateResponse {
   sessionId: string

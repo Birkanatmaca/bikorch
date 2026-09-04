@@ -1,6 +1,8 @@
 node_modules
 dist
 out
+release
+build/icon.iconset
 *.log
 .DS_Store
 Thumbs.db

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { PANEL_TYPE_LABELS, type PanelType } from '@shared/types'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useGitStore } from '@renderer/stores/git-store'
+import { useOpenProject } from '@renderer/hooks/use-open-project'
 import { useActiveProject } from '@renderer/hooks/use-active-project'
 import { cn } from '@renderer/lib/utils'
 import { Search } from 'lucide-react'
@@ -25,8 +26,8 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
   const inputRef = useRef<HTMLInputElement>(null)
 
   const addPanel = useWorkspaceStore((s) => s.addPanel)
-  const addProject = useWorkspaceStore((s) => s.addProject)
   const selectLeftSidebar = useWorkspaceStore((s) => s.selectLeftSidebar)
+  const { openFolderPicker } = useOpenProject()
   const { projectId, projectRoot } = useActiveProject()
   const refreshGit = useGitStore((s) => s.refresh)
 
@@ -35,9 +36,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
       Object.entries(PANEL_TYPE_LABELS) as [PanelType, string][]
     ).map(([type, label]) => ({
       id: `panel-${type}`,
-      label: `Add ${label}`,
+      label,
       group: 'Panels',
-      keywords: type,
+      keywords: `add ${type} ${label}`,
       action: () => {
         addPanel(type)
         onClose()
@@ -50,14 +51,15 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
         label: 'New Project',
         group: 'Workspace',
         action: () => {
-          addProject()
+          void openFolderPicker({ forceNew: true })
           onClose()
         }
       },
       {
         id: 'add-terminal',
-        label: 'Add Terminal',
+        label: 'Terminal',
         group: 'Quick',
+        keywords: 'add terminal',
         action: () => {
           addPanel('terminal')
           onClose()
@@ -65,8 +67,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
       },
       {
         id: 'add-claude',
-        label: 'Add Claude Code',
+        label: 'Claude',
         group: 'Quick',
+        keywords: 'add claude code',
         action: () => {
           addPanel('claude')
           onClose()
@@ -74,8 +77,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
       },
       {
         id: 'add-cursor',
-        label: 'Add Cursor CLI',
+        label: 'Cursor',
         group: 'Quick',
+        keywords: 'add cursor cli',
         action: () => {
           addPanel('cursor')
           onClose()
@@ -83,8 +87,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
       },
       {
         id: 'open-gemini',
-        label: 'Open Gemini CLI',
+        label: 'Gemini',
         group: 'Quick',
+        keywords: 'open gemini cli',
         action: () => {
           addPanel('gemini')
           onClose()
@@ -92,8 +97,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
       },
       {
         id: 'open-antigravity',
-        label: 'Open Antigravity CLI',
+        label: 'Antigravity',
         group: 'Quick',
+        keywords: 'open antigravity cli',
         action: () => {
           addPanel('antigravity')
           onClose()
@@ -101,8 +107,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
       },
       {
         id: 'open-codex',
-        label: 'Open Codex CLI',
+        label: 'Codex',
         group: 'Quick',
+        keywords: 'open codex cli',
         action: () => {
           addPanel('codex')
           onClose()
@@ -131,7 +138,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
       },
       ...panelCommands
     ]
-  }, [addPanel, addProject, onClose, projectId, projectRoot, refreshGit, selectLeftSidebar])
+  }, [addPanel, onClose, openFolderPicker, projectId, projectRoot, refreshGit, selectLeftSidebar])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()

@@ -7,10 +7,13 @@ import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
 import {
   importCurrentAuthProfile,
   inspectAuthProfile,
+  discoverSystemAuthProfiles,
   listAuthProfiles,
   prepareAuthProfileLaunch,
   removeAuthProfile
 } from '../accounts/profile-manager'
+import { ptyManager } from '../cli/pty-manager'
+import { withAntigravityCredentialLock } from '../accounts/credential-lock'
 
 function isAuthProfileRequest(payload: unknown): payload is AuthProfileRequest {
   if (!payload || typeof payload !== 'object') return false
@@ -28,9 +31,14 @@ function isAuthProfileRequest(payload: unknown): payload is AuthProfileRequest {
 export function registerAuthProfileHandlers(): void {
   ipcMain.handle(AUTH_PROFILES_IPC.LIST, () => listAuthProfiles())
 
+  ipcMain.handle(AUTH_PROFILES_IPC.DISCOVER_SYSTEM, () => discoverSystemAuthProfiles())
+
   ipcMain.handle(AUTH_PROFILES_IPC.IMPORT_CURRENT, (_event, payload: unknown) => {
     if (!isAuthProfileRequest(payload)) {
       return { ok: false, ready: false, error: 'Invalid account profile request' }
+    }
+    if (payload.kind === 'antigravity') {
+      return withAntigravityCredentialLock(() => importCurrentAuthProfile(payload))
     }
     return importCurrentAuthProfile(payload)
   })
@@ -38,6 +46,9 @@ export function registerAuthProfileHandlers(): void {
   ipcMain.handle(AUTH_PROFILES_IPC.ACTIVATE, (_event, payload: unknown) => {
     if (!isAuthProfileRequest(payload)) {
       return { ok: false, ready: false, error: 'Invalid account profile request' }
+    }
+    if (payload.kind === 'antigravity') {
+      return withAntigravityCredentialLock(() => prepareAuthProfileLaunch(payload, 'normal'))
     }
     return prepareAuthProfileLaunch(payload, 'normal')
   })
@@ -49,10 +60,11 @@ export function registerAuthProfileHandlers(): void {
     return inspectAuthProfile(payload)
   })
 
-  ipcMain.handle(AUTH_PROFILES_IPC.REMOVE, (_event, payload: unknown) => {
+  ipcMain.handle(AUTH_PROFILES_IPC.REMOVE, async (_event, payload: unknown) => {
     if (!isAuthProfileRequest(payload)) {
       return { ok: false, ready: false, error: 'Invalid account profile request' }
     }
-    return removeAuthProfile(payload)
+    ptyManager.killForAccount(payload.kind, payload.accountId)
+    return await removeAuthProfile(payload)
   })
 }

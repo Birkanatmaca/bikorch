@@ -14,11 +14,15 @@ import {
   getAuthProfileEnv,
   prepareAuthProfileLaunch
 } from '../accounts/profile-manager'
+import { withAntigravityCredentialLock } from '../accounts/credential-lock'
+import { logoutAntigravityCli } from '../accounts/antigravity-logout'
+import { markAntigravitySessionAccount } from '../accounts/antigravity-credential'
 import { recordLog } from '../logs'
 
 interface PtySession {
   id: string
   kind: PtyCreateRequest['kind']
+  accountId?: string
   process: IPty | null
   webContents: WebContents
   status: PtySessionStatus
@@ -40,7 +44,8 @@ class PtyManager {
     }
 
     const existing = this.sessions.get(sessionId)
-    if (existing?.kind === kind) {
+
+    if (existing?.kind === kind && existing.accountId === request.accountId) {
       existing.webContents = webContents
       const nextCols = Math.max(20, Math.min(400, Math.floor(cols) || 80))
       const nextRows = Math.max(6, Math.min(200, Math.floor(rows) || 24))
@@ -57,6 +62,26 @@ class PtyManager {
 
     if (existing) {
       this.kill(sessionId)
+    }
+
+    if (kind === 'cursor' && request.accountId) {
+      for (const session of this.sessions.values()) {
+        if (
+          session.kind === 'cursor' &&
+          session.accountId &&
+          session.accountId !== request.accountId
+        ) {
+          this.kill(session.id)
+        }
+      }
+    }
+
+    if (kind === 'antigravity') {
+      for (const session of this.sessions.values()) {
+        if (session.kind === 'antigravity' && session.id !== sessionId) {
+          this.kill(session.id)
+        }
+      }
     }
 
     const cwd = resolveSafeCwd(request.cwd)
@@ -79,11 +104,30 @@ class PtyManager {
     const safeCols = Math.max(20, Math.min(400, Math.floor(cols) || 80))
     const safeRows = Math.max(6, Math.min(200, Math.floor(rows) || 24))
     let profileEnv: Record<string, string> = {}
+    if (kind === 'antigravity' && !request.accountId) {
+      try {
+        await withAntigravityCredentialLock(() => logoutAntigravityCli())
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Could not sign out the previous Antigravity account'
+        this.emit(webContents, {
+          type: 'status',
+          sessionId,
+          status: 'error',
+          error: message,
+          kind
+        })
+        return { sessionId, status: 'error', error: message, kind }
+      }
+    }
     if (request.accountId && kind !== 'terminal') {
-      const prepared = await prepareAuthProfileLaunch(
-        { kind, accountId: request.accountId },
-        request.launchMode ?? 'normal'
-      )
+      const accountId = request.accountId
+      const prepareLaunch = (): Promise<Awaited<ReturnType<typeof prepareAuthProfileLaunch>>> =>
+        prepareAuthProfileLaunch({ kind, accountId }, request.launchMode ?? 'normal')
+      const prepared =
+        kind === 'antigravity'
+          ? await withAntigravityCredentialLock(prepareLaunch)
+          : await prepareLaunch()
       if (!prepared.ok) {
         const message = prepared.error ?? `Could not prepare ${getKindLabel(kind)} account`
         this.emit(webContents, {
@@ -127,6 +171,7 @@ class PtyManager {
         const session: PtySession = {
           id: sessionId,
           kind,
+          ...(request.accountId ? { accountId: request.accountId } : {}),
           process: shellProcess,
           webContents,
           status: 'running',
@@ -137,6 +182,9 @@ class PtyManager {
 
         this.sessions.set(sessionId, session)
         this.emit(webContents, { type: 'status', sessionId, status: 'running' })
+        if (kind === 'antigravity') {
+          markAntigravitySessionAccount(request.accountId ?? null)
+        }
         recordLog('info', `${getKindLabel(kind)} session started (${sessionId})`, 'pty')
 
         shellProcess.onData((data) => {
@@ -216,6 +264,17 @@ class PtyManager {
     } catch {
       // Process may already be dead
     }
+  }
+
+  killForAccount(kind: Exclude<PtyCreateRequest['kind'], 'terminal'>, accountId: string): void {
+    const sessionIds = [...this.sessions.values()]
+      .filter(
+        (session) =>
+          session.kind === kind &&
+          (kind === 'antigravity' || !session.accountId || session.accountId === accountId)
+      )
+      .map((session) => session.id)
+    for (const sessionId of sessionIds) this.kill(sessionId)
   }
 
   killAll(): void {

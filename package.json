@@ -1,13 +1,35 @@
 {
   "name": "ai-dev-workspace",
+  "productName": "Bikorch",
   "version": "0.1.0",
-  "description": "AI Developer Workspace — multi-CLI desktop workspace",
+  "description": "Bikorch — multi-CLI desktop workspace orchestrator",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "dist:mac": "npm run build && electron-builder --mac",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json"
+  },
+  "build": {
+    "appId": "com.bikorch.app",
+    "productName": "Bikorch",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "app-logo.png",
+      "build/icon.icns"
+    ],
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "dir"
+      ]
+    }
   },
   "dependencies": {
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
@@ -37,6 +59,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^34.2.0",
     "electron-vite": "^3.0.0",
+    "electron-builder": "^25.1.8",
     "tailwindcss": "^4.0.6",
     "typescript": "^5.7.3",
     "vite": "^6.1.0"

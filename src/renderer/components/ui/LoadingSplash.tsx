@@ -1,10 +1,13 @@
 import { AppLogo, AppWordmark } from '@renderer/components/brand/AppLogo'
+import { AppWindowEdge } from '@renderer/components/layout/AppWindowEdge'
 
 export function LoadingSplash(): React.JSX.Element {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 bg-app-bg">
+    <div className="app-shell flex h-full flex-col items-center justify-center gap-4">
+      <AppWindowEdge />
       <div className="relative">
-        <div className="absolute -inset-4 animate-ping rounded-full bg-primary/10" />
+        <span className="loading-rank-orbit loading-rank-orbit-inner" aria-hidden />
+        <span className="loading-rank-orbit" aria-hidden />
         <div className="relative">
           <AppLogo size="lg" />
         </div>

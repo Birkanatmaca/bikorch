@@ -15,15 +15,29 @@ import type {
   AuthProfileIdentity,
   AuthProfileRequest,
   AuthProfileResult,
-  AuthProfileSummary
+  AuthProfileSummary,
+  SystemAuthDiscovery
 } from '@shared/contracts/auth-profiles'
 import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import {
-  deleteAntigravityCredential,
-  readAntigravityCredential,
-  writeAntigravityCredential
+  readAntigravityCredential
 } from './windows-credential'
+import {
+  applyCursorCredentialsForAccount,
+  captureCursorCredentialsForAccount,
+  cursorCredentialsSupported,
+  hasStoredCursorCredentials,
+  removeStoredCursorCredentials
+} from './cursor-credential'
+import { withAntigravityCredentialLock } from './credential-lock'
+import { logoutAntigravityCli } from './antigravity-logout'
+import {
+  applyAntigravityCredentialsForAccount,
+  captureAntigravityCredentialsForAccount,
+  hasStoredAntigravityCredentials,
+  markAntigravitySessionAccount
+} from './antigravity-credential'
 
 type JsonRecord = Record<string, unknown>
 
@@ -83,6 +97,13 @@ function ensureProfileRoot(kind: CliUsageKind, accountId: string): string {
   const root = getAuthProfileRoot(kind, accountId)
   mkdirSync(root, { recursive: true })
   return root
+}
+
+function removeProfileDirectory(kind: CliUsageKind, accountId: string): void {
+  const root = resolve(getAuthProfileRoot(kind, accountId))
+  const expectedRoot = `${resolve(profilesRoot())}${sep}`
+  if (!root.startsWith(expectedRoot)) throw new Error('Invalid account profile path')
+  if (existsSync(root)) rmSync(root, { recursive: true, force: true })
 }
 
 function copyIfPresent(source: string, target: string): boolean {
@@ -152,10 +173,9 @@ async function captureAntigravity(request: AuthProfileRequest): Promise<AuthProf
       error: 'Secure local credential encryption is not available on this computer'
     }
   }
-  const secret = await readAntigravityCredential()
-  if (!secret) return { ok: true, ready: false }
-  const root = ensureProfileRoot(request.kind, request.accountId)
-  writeFileSync(join(root, 'credential.bin'), safeStorage.encryptString(secret))
+  const captured = await captureAntigravityCredentialsForAccount(request.accountId)
+  if (!captured) return { ok: true, ready: false }
+  ensureProfileRoot(request.kind, request.accountId)
   writeMetadata(request)
   return {
     ok: true,
@@ -173,10 +193,18 @@ export async function importCurrentAuthProfile(
     const root = ensureProfileRoot(request.kind, request.accountId)
     let copied = false
     if (request.kind === 'cursor') {
-      copied = copyIfPresent(
-        join(homedir(), '.cursor', 'cli-config.json'),
-        join(root, 'config', 'cli-config.json')
-      )
+      const profileConfigPath = join(root, 'config', 'cli-config.json')
+      const profileConfig = readJson(profileConfigPath)
+      const profileHasAuth = Boolean(asRecord(profileConfig?.authInfo))
+      copied = profileHasAuth
+        ? true
+        : copyIfPresent(
+            join(homedir(), '.cursor', 'cli-config.json'),
+            profileConfigPath
+          )
+      if (cursorCredentialsSupported()) {
+        await captureCursorCredentialsForAccount(request.accountId)
+      }
     } else if (request.kind === 'codex') {
       ensureCodexConfig(root)
       copied = copyIfPresent(join(homedir(), '.codex', 'auth.json'), join(root, 'auth.json'))
@@ -226,6 +254,7 @@ export function getAuthProfileEnv(
     return { CODEX_HOME: root }
   }
   if (kind === 'gemini') return { GEMINI_CLI_HOME: root }
+  if (kind === 'antigravity') return { GEMINI_CLI_HOME: root }
   if (kind === 'claude') return { CLAUDE_CONFIG_DIR: root }
   return {}
 }
@@ -235,21 +264,64 @@ export async function prepareAuthProfileLaunch(
   launchMode: 'normal' | 'login'
 ): Promise<AuthProfileResult> {
   try {
+    if (launchMode === 'login') {
+      if (request.kind === 'antigravity') {
+        markAntigravitySessionAccount(null)
+        await logoutAntigravityCli()
+      }
+      if (request.kind === 'cursor') removeStoredCursorCredentials(request.accountId)
+      removeProfileDirectory(request.kind, request.accountId)
+      const root = ensureProfileRoot(request.kind, request.accountId)
+      if (request.kind === 'codex') ensureCodexConfig(root)
+      writeMetadata(request)
+      return { ok: true, ready: false }
+    }
+
     ensureProfileRoot(request.kind, request.accountId)
     if (request.kind === 'antigravity') {
-      if (launchMode === 'login') {
-        await deleteAntigravityCredential()
+      if (!hasStoredAntigravityCredentials(request.accountId)) {
         return { ok: true, ready: false }
       }
-      const credentialPath = join(getAuthProfileRoot(request.kind, request.accountId), 'credential.bin')
-      if (!existsSync(credentialPath)) return { ok: true, ready: false }
-      if (!safeStorage.isEncryptionAvailable()) {
-        return { ok: false, ready: false, error: 'Secure credential storage is unavailable' }
+      const applied = await applyAntigravityCredentialsForAccount(request.accountId)
+      if (!applied) {
+        return {
+          ok: false,
+          ready: false,
+          error:
+            'Could not activate this Antigravity account. Sign in again to recapture its token.'
+        }
       }
-      const secret = safeStorage.decryptString(readFileSync(credentialPath))
-      await writeAntigravityCredential(secret)
-      return { ok: true, ready: true, identity: readMetadataIdentity(request.kind, request.accountId) }
+      return {
+        ok: true,
+        ready: true,
+        identity: readMetadataIdentity(request.kind, request.accountId)
+      }
     }
+
+    if (request.kind === 'cursor') {
+      const inspected = inspectAuthProfile(request)
+      if (!inspected.ready) return inspected
+      if (cursorCredentialsSupported()) {
+        if (!hasStoredCursorCredentials(request.accountId)) {
+          return {
+            ok: false,
+            ready: false,
+            error:
+              'Cursor session tokens are missing for this account. Open Sign in and authenticate again.'
+          }
+        }
+        const applied = await applyCursorCredentialsForAccount(request.accountId)
+        if (!applied) {
+          return {
+            ok: false,
+            ready: false,
+            error: 'Could not activate Cursor credentials for this account'
+          }
+        }
+      }
+      return inspected
+    }
+
     getAuthProfileEnv(request.kind, request.accountId)
     return inspectAuthProfile(request)
   } catch (error) {
@@ -361,14 +433,14 @@ export function listAuthProfiles(): AuthProfileSummary[] {
   return profiles
 }
 
-export function removeAuthProfile(request: AuthProfileRequest): AuthProfileResult {
+export async function removeAuthProfile(request: AuthProfileRequest): Promise<AuthProfileResult> {
   try {
-    const root = resolve(getAuthProfileRoot(request.kind, request.accountId))
-    const expectedRoot = `${resolve(profilesRoot())}${sep}`
-    if (!root.startsWith(expectedRoot)) {
-      return { ok: false, ready: false, error: 'Invalid account profile path' }
+    if (request.kind === 'antigravity') {
+      markAntigravitySessionAccount(null)
+      await withAntigravityCredentialLock(() => logoutAntigravityCli())
     }
-    if (existsSync(root)) rmSync(root, { recursive: true, force: true })
+    if (request.kind === 'cursor') removeStoredCursorCredentials(request.accountId)
+    removeProfileDirectory(request.kind, request.accountId)
     return { ok: true, ready: false }
   } catch (error) {
     return {
@@ -377,4 +449,106 @@ export function removeAuthProfile(request: AuthProfileRequest): AuthProfileResul
       error: error instanceof Error ? error.message : 'Could not remove CLI account profile'
     }
   }
+}
+
+export async function inspectSystemAuthProfile(kind: CliUsageKind): Promise<AuthProfileResult> {
+  try {
+    const home = homedir()
+
+    if (kind === 'antigravity') {
+      const secret = await readAntigravityCredential()
+      if (!secret) return { ok: true, ready: false }
+      return {
+        ok: true,
+        ready: true,
+        identity: { email: '', name: `${AI_ACCOUNT_LABELS[kind]} account` }
+      }
+    }
+
+    if (kind === 'cursor') {
+      const config = readJson(join(home, '.cursor', 'cli-config.json'))
+      const auth = asRecord(config?.authInfo)
+      const email = asString(auth?.email)
+      const name = asString(auth?.displayName)
+      const ready = Boolean(auth)
+      if (!ready) return { ok: true, ready: false }
+      return {
+        ok: true,
+        ready: true,
+        identity: {
+          email: email ?? '',
+          name: name ?? email ?? `${AI_ACCOUNT_LABELS[kind]} account`
+        }
+      }
+    }
+
+    if (kind === 'codex') {
+      const auth = readJson(join(home, '.codex', 'auth.json'))
+      const tokens = asRecord(auth?.tokens)
+      const idToken = asString(tokens?.id_token)
+      const payload = idToken ? decodeJwtPayload(idToken) : null
+      const email =
+        asString(payload?.email) ??
+        asString(payload?.email_address) ??
+        getNestedString(payload, ['https://api.openai.com/auth', 'email'])
+      const ready = Boolean(auth && (tokens || asString(auth.OPENAI_API_KEY)))
+      if (!ready) return { ok: true, ready: false }
+      return {
+        ok: true,
+        ready: true,
+        identity: { email: email ?? '', name: email ?? `${AI_ACCOUNT_LABELS[kind]} account` }
+      }
+    }
+
+    if (kind === 'gemini') {
+      const accounts = readJson(join(home, '.gemini', 'google_accounts.json'))
+      const email = asString(accounts?.active)
+      const ready = existsSync(join(home, '.gemini', 'oauth_creds.json'))
+      if (!ready) return { ok: true, ready: false }
+      return {
+        ok: true,
+        ready: true,
+        identity: { email: email ?? '', name: email ?? `${AI_ACCOUNT_LABELS[kind]} account` }
+      }
+    }
+
+    if (kind === 'claude') {
+      const credentials = readJson(join(home, '.claude', '.credentials.json'))
+      const oauth = asRecord(credentials?.claudeAiOauth)
+      const email =
+        asString(oauth?.emailAddress) ?? asString(oauth?.email) ?? asString(credentials?.email)
+      const ready = Boolean(credentials)
+      if (!ready) return { ok: true, ready: false }
+      return {
+        ok: true,
+        ready: true,
+        identity: { email: email ?? '', name: email ?? `${AI_ACCOUNT_LABELS[kind]} account` }
+      }
+    }
+
+    return { ok: true, ready: false }
+  } catch (error) {
+    return {
+      ok: false,
+      ready: false,
+      error: error instanceof Error ? error.message : 'Could not inspect system CLI account'
+    }
+  }
+}
+
+export async function discoverSystemAuthProfiles(): Promise<SystemAuthDiscovery[]> {
+  const discoveries: SystemAuthDiscovery[] = []
+
+  for (const kind of AI_ACCOUNT_KINDS) {
+    const inspected = await inspectSystemAuthProfile(kind)
+    if (!inspected.ready) continue
+    discoveries.push({
+      kind,
+      ready: true,
+      name: inspected.identity?.name || `${AI_ACCOUNT_LABELS[kind]} account`,
+      email: inspected.identity?.email || ''
+    })
+  }
+
+  return discoveries
 }

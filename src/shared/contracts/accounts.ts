@@ -30,8 +30,6 @@ export interface AiAccount {
   lastAuthenticatedAt: number | null
 }
 
-export type DiscoveredAiAccount = Pick<AiAccount, 'kind' | 'name' | 'email' | 'plan'>
-
 export type ActiveAccountByKind = Record<CliUsageKind, string | null>
 
 export interface AiAccountsSnapshot {

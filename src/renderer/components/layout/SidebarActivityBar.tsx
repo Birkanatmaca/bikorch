@@ -24,17 +24,15 @@ export function SidebarActivityBar({
   const badge = changesCount > 99 ? '99+' : String(changesCount)
 
   return (
-    <aside className="flex w-10 shrink-0 flex-col items-center gap-1 border-r border-border bg-elevated py-2">
+    <aside className="activity-rail flex w-11 shrink-0 flex-col items-center gap-1.5 py-2.5">
       <button
         type="button"
         onClick={onSelectFiles}
         title={filesActive ? 'Hide files' : 'Show files'}
         aria-label={filesActive ? 'Hide files' : 'Show files'}
         className={cn(
-          'flex h-9 w-9 items-center justify-center rounded-md transition-colors',
-          filesActive
-            ? 'bg-primary/15 text-primary'
-            : 'text-text-muted hover:bg-hover hover:text-text-primary'
+          'glass-icon-btn h-9 w-9',
+          filesActive && 'glass-icon-btn-active'
         )}
       >
         <Files className="h-4 w-4" />
@@ -45,10 +43,8 @@ export function SidebarActivityBar({
         title={accountsActive ? 'Hide AI accounts' : 'Show AI accounts'}
         aria-label={accountsActive ? 'Hide AI accounts' : 'Show AI accounts'}
         className={cn(
-          'flex h-9 w-9 items-center justify-center rounded-md transition-colors',
-          accountsActive
-            ? 'bg-primary/15 text-primary'
-            : 'text-text-muted hover:bg-hover hover:text-text-primary'
+          'glass-icon-btn h-9 w-9',
+          accountsActive && 'glass-icon-btn-active'
         )}
       >
         <UsersRound className="h-4 w-4" />
@@ -59,10 +55,8 @@ export function SidebarActivityBar({
         title={changesActive ? 'Hide changes' : 'Show changes'}
         aria-label={changesActive ? 'Hide changes' : 'Show changes'}
         className={cn(
-          'relative flex h-9 w-9 items-center justify-center rounded-md transition-colors',
-          changesActive
-            ? 'bg-primary/15 text-primary'
-            : 'text-text-muted hover:bg-hover hover:text-text-primary'
+          'glass-icon-btn relative h-9 w-9',
+          changesActive && 'glass-icon-btn-active'
         )}
       >
         <GitBranch className="h-4 w-4" />

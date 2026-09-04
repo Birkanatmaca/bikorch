@@ -104,10 +104,9 @@ export function createDefaultPanels(): PanelDefinition[] {
 }
 
 const LEGACY_PANEL_IDS = new Set(['git-changes-default', 'terminal-default'])
-
 /** Strip legacy default panels and ensure the Files sidebar exists. */
 export function sanitizeWorkspacePanels(panels: PanelDefinition[]): PanelDefinition[] {
-  const filtered = panels.filter((p) => !LEGACY_PANEL_IDS.has(p.id))
+  const filtered = panels.filter((panel) => !LEGACY_PANEL_IDS.has(panel.id))
   const hasFileExplorer = filtered.some((p) => p.type === 'file-explorer' && p.zone === 'left')
   if (!hasFileExplorer) return createDefaultPanels()
   return filtered.map((panel) => {

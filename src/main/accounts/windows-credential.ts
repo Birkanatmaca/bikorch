@@ -1,4 +1,4 @@
-import { spawn } from 'child_process'
+import { execFile, spawn } from 'child_process'
 import { join } from 'path'
 
 type CredentialAction = 'read' | 'write' | 'delete'
@@ -118,6 +118,99 @@ function Invoke-BikorchCredential([string]$encodedRequest) {
 }
 `
 
+const ANTIGRAVITY_CREDENTIAL_SERVICE = 'gemini'
+const ANTIGRAVITY_CREDENTIAL_ACCOUNT = 'antigravity'
+const WINDOWS_ANTIGRAVITY_CREDENTIAL_TARGET = 'gemini:antigravity'
+const LEGACY_WINDOWS_CREDENTIAL_TARGET = 'gemini'
+
+function missingCredential(action: CredentialAction): CredentialResponse {
+  return action === 'read' ? { ok: true, found: false } : { ok: true }
+}
+
+function runMacCredentialCommand(
+  action: CredentialAction,
+  args: string[]
+): Promise<CredentialResponse> {
+  return new Promise((resolve) => {
+    execFile(
+      '/usr/bin/security',
+      args,
+      { encoding: 'utf8', maxBuffer: 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (!error) {
+          if (action === 'read') {
+            const value = stdout.replace(/\r?\n$/, '')
+            resolve(value ? { ok: true, found: true, secret: value } : missingCredential(action))
+            return
+          }
+          resolve({ ok: true })
+          return
+        }
+
+        const detail = `${stderr || ''}${stdout || ''}`.trim()
+        if (/could not be found|not found|no keychain/i.test(detail)) {
+          resolve(missingCredential(action))
+          return
+        }
+        resolve({
+          ok: false,
+          error: detail || `macOS Keychain ${action} action failed`
+        })
+      }
+    )
+  })
+}
+
+async function runMacCredentialAction(
+  action: CredentialAction,
+  secret?: string
+): Promise<CredentialResponse> {
+  const identityArgs = [
+    '-s',
+    ANTIGRAVITY_CREDENTIAL_SERVICE,
+    '-a',
+    ANTIGRAVITY_CREDENTIAL_ACCOUNT
+  ]
+
+  if (action === 'read') {
+    return runMacCredentialCommand('read', ['find-generic-password', ...identityArgs, '-w'])
+  }
+
+  if (action === 'delete') {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const deleted = await runMacCredentialCommand('delete', [
+        'delete-generic-password',
+        ...identityArgs
+      ])
+      if (!deleted.ok) return deleted
+      const remaining = await runMacCredentialCommand('read', [
+        'find-generic-password',
+        ...identityArgs,
+        '-w'
+      ])
+      if (!remaining.ok) return remaining
+      if (!remaining.found) return { ok: true }
+    }
+    return { ok: false, error: 'Could not fully remove Antigravity credential from Keychain' }
+  }
+
+  // Some Antigravity/go-keyring records reject `-U` even though the item has
+  // the same service and account. Replacing the exact item makes restore and
+  // account switching deterministic without leaving a duplicate behind.
+  const deleted = await runMacCredentialCommand('delete', [
+    'delete-generic-password',
+    ...identityArgs
+  ])
+  if (!deleted.ok) return deleted
+
+  return runMacCredentialCommand('write', [
+    'add-generic-password',
+    ...identityArgs,
+    '-w',
+    secret ?? ''
+  ])
+}
+
 function powershellPath(): string {
   const systemRoot = process.env.SystemRoot ?? 'C:\\Windows'
   return join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
@@ -127,53 +220,74 @@ async function runCredentialAction(
   action: CredentialAction,
   secret?: string
 ): Promise<CredentialResponse> {
-  if (process.platform !== 'win32') {
-    return { ok: false, error: 'Windows Credential Manager is only available on Windows' }
+  if (process.platform === 'darwin') {
+    return runMacCredentialAction(action, secret)
   }
 
-  const request = Buffer.from(
-    JSON.stringify({
-      action,
-      target: 'gemini:antigravity',
-      username: 'antigravity',
-      ...(secret ? { secret } : {})
-    }),
-    'utf8'
-  ).toString('base64')
+  if (process.platform !== 'win32') {
+    return { ok: false, error: 'Secure Antigravity credential storage is unavailable on this platform' }
+  }
 
-  return new Promise((resolve) => {
-    const child = spawn(
-      powershellPath(),
-      ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', '-'],
-      { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }
-    )
-    let stdout = ''
-    let stderr = ''
-    child.stdout.on('data', (chunk: Buffer) => {
-      stdout = (stdout + chunk.toString('utf8')).slice(-12000)
+  const runWindowsAction = (target: string): Promise<CredentialResponse> => {
+    const request = Buffer.from(
+      JSON.stringify({
+        action,
+        target,
+        username: ANTIGRAVITY_CREDENTIAL_ACCOUNT,
+        ...(secret ? { secret } : {})
+      }),
+      'utf8'
+    ).toString('base64')
+
+    return new Promise((resolve) => {
+      const child = spawn(
+        powershellPath(),
+        ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', '-'],
+        { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }
+      )
+      let stdout = ''
+      let stderr = ''
+      child.stdout.on('data', (chunk: Buffer) => {
+        stdout = (stdout + chunk.toString('utf8')).slice(-12000)
+      })
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString('utf8')).slice(-4000)
+      })
+      child.on('error', (error) => resolve({ ok: false, error: error.message }))
+      child.on('close', () => {
+        const line = stdout
+          .split(/\r?\n/)
+          .map((value) => value.trim())
+          .filter(Boolean)
+          .at(-1)
+        if (!line) {
+          resolve({ ok: false, error: stderr.trim() || 'Credential Manager returned no response' })
+          return
+        }
+        try {
+          resolve(JSON.parse(line) as CredentialResponse)
+        } catch {
+          resolve({ ok: false, error: 'Credential Manager returned an invalid response' })
+        }
+      })
+      child.stdin.end(`${WINDOWS_CREDENTIAL_SCRIPT}\nInvoke-BikorchCredential '${request}'\n`)
     })
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr = (stderr + chunk.toString('utf8')).slice(-4000)
-    })
-    child.on('error', (error) => resolve({ ok: false, error: error.message }))
-    child.on('close', () => {
-      const line = stdout
-        .split(/\r?\n/)
-        .map((value) => value.trim())
-        .filter(Boolean)
-        .at(-1)
-      if (!line) {
-        resolve({ ok: false, error: stderr.trim() || 'Credential Manager returned no response' })
-        return
-      }
-      try {
-        resolve(JSON.parse(line) as CredentialResponse)
-      } catch {
-        resolve({ ok: false, error: 'Credential Manager returned an invalid response' })
-      }
-    })
-    child.stdin.end(`${WINDOWS_CREDENTIAL_SCRIPT}\nInvoke-BikorchCredential '${request}'\n`)
-  })
+  }
+
+  if (action === 'read') {
+    const current = await runWindowsAction(WINDOWS_ANTIGRAVITY_CREDENTIAL_TARGET)
+    if (current.ok && current.found) return current
+    const legacy = await runWindowsAction(LEGACY_WINDOWS_CREDENTIAL_TARGET)
+    return legacy.ok && legacy.found ? legacy : current
+  }
+
+  const current = await runWindowsAction(WINDOWS_ANTIGRAVITY_CREDENTIAL_TARGET)
+  if (!current.ok) return current
+  if (action === 'delete') {
+    const legacy = await runWindowsAction(LEGACY_WINDOWS_CREDENTIAL_TARGET)
+    if (!legacy.ok) return legacy
+  }
+  return current
 }
 
 export async function readAntigravityCredential(): Promise<string | null> {
@@ -190,4 +304,11 @@ export async function writeAntigravityCredential(secret: string): Promise<void> 
 export async function deleteAntigravityCredential(): Promise<void> {
   const result = await runCredentialAction('delete')
   if (!result.ok) throw new Error(result.error || 'Could not remove Antigravity credential')
+  const remaining = await runCredentialAction('read')
+  if (!remaining.ok) {
+    throw new Error(remaining.error || 'Could not verify Antigravity sign-out')
+  }
+  if (remaining.found) {
+    throw new Error('Antigravity is still signed in on this computer')
+  }
 }

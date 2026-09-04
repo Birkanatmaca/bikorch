@@ -15,6 +15,7 @@ import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { cn } from '@renderer/lib/utils'
 import { focusTerminal, lockTerminalLayout, unlockTerminalLayout } from '@renderer/lib/app-events'
 import { cliFrameClass, getCliChromePhase } from '@renderer/lib/cli-chrome'
+import { isMacOS } from '@renderer/lib/electron-api'
 import { ContextMenu } from '@renderer/components/ui/ContextMenu'
 import { useOrchestratorContextMenu } from '@renderer/components/workspace/use-orchestrator-context-menu'
 
@@ -154,7 +155,8 @@ function OrchestratorWindow({
   onMoveStart,
   onResizeStart,
   onContextMenu,
-  live
+  live,
+  active
 }: {
   panel: PanelDefinition
   rect: OrchestratorRect
@@ -165,10 +167,12 @@ function OrchestratorWindow({
   onResizeStart: (edge: ResizeEdge, e: React.PointerEvent) => void
   onContextMenu: (e: React.MouseEvent) => void
   live: boolean
+  active: boolean
 }): React.JSX.Element {
   const status = useTerminalStore((s) => s.sessions[panel.id])
   const phase = getCliChromePhase(panel.type, status)
   const showChrome = LIVE_PANEL_TYPES.includes(panel.type) && phase !== 'off'
+  const isMac = isMacOS()
 
   return (
     <div
@@ -193,10 +197,10 @@ function OrchestratorWindow({
     >
       <div
         className={cn(
-          'relative h-full overflow-hidden rounded-md border bg-panel-bg',
-          showChrome
-            ? cliFrameClass(phase)
-            : 'border-border shadow-lg shadow-black/25'
+          'relative h-full overflow-hidden border bg-panel-bg',
+          isMac ? 'orchestrator-window-macos' : 'rounded-md shadow-lg shadow-black/25',
+          showChrome ? cliFrameClass(phase) : 'border-border',
+          !active && isMac && 'orchestrator-window-macos-inactive'
         )}
       >
         <PanelShell
@@ -208,8 +212,9 @@ function OrchestratorWindow({
           accountId={panel.accountId}
           draggable={false}
           flush
+          windowActive={active}
           onHeaderPointerDown={(e) => {
-            if ((e.target as HTMLElement).closest('button')) return
+            if ((e.target as HTMLElement).closest('button, .mac-traffic-lights')) return
             onMoveStart(e)
           }}
         />
@@ -401,8 +406,8 @@ export function OrchestratorZone({
     >
       <div
         className={cn(
-          'orchestrator-grid pointer-events-none absolute inset-0 transition-opacity duration-200',
-          isEditing ? 'opacity-100' : 'opacity-0'
+          'orchestrator-grid pointer-events-none absolute inset-0',
+          isEditing && 'orchestrator-grid-active'
         )}
         aria-hidden
       />
@@ -418,6 +423,7 @@ export function OrchestratorZone({
           onResizeStart={(edge, e) => beginInteraction(panel.id, edge, e)}
           onContextMenu={(e) => openAt(e, panel.id)}
           live={previewRects[panel.id] !== undefined}
+          active={focusedId === null || focusedId === panel.id}
         />
       ))}
       <ContextMenu

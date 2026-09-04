@@ -1,9 +1,11 @@
-import type { PersistedEditorState, PersistedSnapshot } from '@shared/contracts/persistence'
+import type { PersistedSnapshot } from '@shared/contracts/persistence'
 import { useEditorStore } from '@renderer/stores/editor-store'
 import { selectGitBundle, selectGitChanges, useGitStore } from '@renderer/stores/git-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useAiAccountsStore } from '@renderer/stores/ai-accounts-store'
 import { useTasksStore } from '@renderer/stores/tasks-store'
+import { useUsageStore } from '@renderer/stores/usage-store'
+import { syncDiscoveredSystemAccounts } from '@renderer/lib/system-auth-sync'
 
 const SAVE_DEBOUNCE_MS = 400
 
@@ -16,6 +18,7 @@ export function buildPersistedSnapshot(): PersistedSnapshot {
   const editor = useEditorStore.getState().getPersistedState()
   const accounts = useAiAccountsStore.getState().getSnapshot()
   const tasks = useTasksStore.getState().getSnapshot()
+  const usage = useUsageStore.getState().getSnapshot()
 
   return {
     projects: workspace.projects,
@@ -24,12 +27,16 @@ export function buildPersistedSnapshot(): PersistedSnapshot {
     editor,
     accounts: accounts.accounts,
     activeAccountByKind: accounts.activeAccountByKind,
-    tasksByProject: tasks.tasksByProject
+    tasksByProject: tasks.tasksByProject,
+    usage
   }
 }
 
 export async function hydrateFromDisk(): Promise<void> {
-  const snapshot = await window.api.persistence.load()
+  const [snapshot, profiles] = await Promise.all([
+    window.api.persistence.load(),
+    window.api.authProfiles.list().catch(() => null)
+  ])
   isHydrating = true
 
   useWorkspaceStore.getState().hydrate({
@@ -43,7 +50,10 @@ export async function hydrateFromDisk(): Promise<void> {
     accounts: snapshot.accounts,
     activeAccountByKind: snapshot.activeAccountByKind
   })
+  if (profiles) useAiAccountsStore.getState().syncAuthProfiles(profiles)
+  await syncDiscoveredSystemAccounts().catch(() => undefined)
   useTasksStore.getState().hydrate({ tasksByProject: snapshot.tasksByProject ?? {} })
+  useUsageStore.getState().hydrate(snapshot.usage)
   isHydrating = false
 
   // Restore diff in background — don't block app startup
@@ -138,6 +148,16 @@ export function startPersistenceSync(): void {
 
   useTasksStore.subscribe((state, prevState) => {
     if (state.tasksByProject === prevState.tasksByProject) return
+    scheduleSave()
+  })
+
+  useUsageStore.subscribe((state, prevState) => {
+    if (
+      state.providers === prevState.providers &&
+      state.checkedAtByAccountId === prevState.checkedAtByAccountId
+    ) {
+      return
+    }
     scheduleSave()
   })
 }

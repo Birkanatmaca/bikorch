@@ -26,8 +26,16 @@ export interface AuthProfileSummary {
   ready: boolean
 }
 
+export interface SystemAuthDiscovery {
+  kind: CliUsageKind
+  ready: boolean
+  name: string
+  email: string
+}
+
 export const AUTH_PROFILES_IPC = {
   LIST: 'auth-profiles:list',
+  DISCOVER_SYSTEM: 'auth-profiles:discover-system',
   IMPORT_CURRENT: 'auth-profiles:import-current',
   ACTIVATE: 'auth-profiles:activate',
   INSPECT: 'auth-profiles:inspect',

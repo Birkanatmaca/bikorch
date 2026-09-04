@@ -4,8 +4,7 @@ import {
   createDefaultActiveAccountByKind,
   type AiAccount,
   type ActiveAccountByKind,
-  type AiAccountsSnapshot,
-  type DiscoveredAiAccount
+  type AiAccountsSnapshot
 } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import type { AuthProfileSummary } from '@shared/contracts/auth-profiles'
@@ -13,6 +12,7 @@ import type { AuthProfileSummary } from '@shared/contracts/auth-profiles'
 export type AiAccountDraft = Pick<AiAccount, 'kind' | 'name' | 'email' | 'plan' | 'note'>
 
 interface AiAccountsStore extends AiAccountsSnapshot {
+  suppressSystemImportByKind: Record<CliUsageKind, boolean>
   hydrate: (snapshot: Partial<AiAccountsSnapshot>) => void
   getSnapshot: () => AiAccountsSnapshot
   addAccount: (draft: AiAccountDraft) => string
@@ -23,14 +23,26 @@ interface AiAccountsStore extends AiAccountsSnapshot {
     accountId: string,
     identity?: { email?: string; name?: string }
   ) => void
-  syncDiscoveredAccounts: (discovered: DiscoveredAiAccount[]) => void
   syncAuthProfiles: (profiles: AuthProfileSummary[]) => void
 }
 
-function initialState(): AiAccountsSnapshot {
+function createDefaultSuppressSystemImport(): Record<CliUsageKind, boolean> {
+  return {
+    claude: false,
+    cursor: false,
+    gemini: false,
+    antigravity: false,
+    codex: false
+  }
+}
+
+function initialState(): AiAccountsSnapshot & {
+  suppressSystemImportByKind: Record<CliUsageKind, boolean>
+} {
   return {
     accounts: [],
-    activeAccountByKind: createDefaultActiveAccountByKind()
+    activeAccountByKind: createDefaultActiveAccountByKind(),
+    suppressSystemImportByKind: createDefaultSuppressSystemImport()
   }
 }
 
@@ -43,7 +55,11 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
       ...createDefaultActiveAccountByKind(),
       ...(snapshot.activeAccountByKind ?? {})
     }
-    set({ accounts, activeAccountByKind })
+    set({
+      accounts,
+      activeAccountByKind,
+      suppressSystemImportByKind: createDefaultSuppressSystemImport()
+    })
   },
 
   getSnapshot: () => {
@@ -66,14 +82,7 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
       lastAuthenticatedAt: null
     }
     const current = get()
-    const activeAccountByKind = { ...current.activeAccountByKind }
-    if (!activeAccountByKind[account.kind]) {
-      activeAccountByKind[account.kind] = account.id
-    }
-    set({
-      accounts: [...current.accounts, account],
-      activeAccountByKind
-    })
+    set({ accounts: [...current.accounts, account] })
     return account.id
   },
 
@@ -102,15 +111,25 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
     const accounts = current.accounts.filter((account) => account.id !== accountId)
     const activeAccountByKind = { ...current.activeAccountByKind }
     if (activeAccountByKind[removed.kind] === accountId) {
-      activeAccountByKind[removed.kind] =
-        accounts.find((account) => account.kind === removed.kind)?.id ?? null
+      activeAccountByKind[removed.kind] = null
     }
-    set({ accounts, activeAccountByKind })
+    const hasRemainingReady = accounts.some(
+      (account) => account.kind === removed.kind && account.profileReady
+    )
+    set({
+      accounts,
+      activeAccountByKind,
+      suppressSystemImportByKind: {
+        ...current.suppressSystemImportByKind,
+        [removed.kind]: !hasRemainingReady
+      }
+    })
   },
 
   setActiveAccount: (kind, accountId) => {
     const account = get().accounts.find(
-      (candidate) => candidate.id === accountId && candidate.kind === kind
+      (candidate) =>
+        candidate.id === accountId && candidate.kind === kind && candidate.profileReady
     )
     if (!account) return
     set((state) => ({
@@ -123,8 +142,8 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
 
   markAccountAuthenticated: (accountId, identity) => {
     const now = Date.now()
-    set((state) => ({
-      accounts: state.accounts.map((account) =>
+    set((state) => {
+      const accounts = state.accounts.map((account) =>
         account.id === accountId
           ? {
               ...account,
@@ -139,99 +158,67 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
             }
           : account
       )
-    }))
-  },
-
-  syncDiscoveredAccounts: (discovered) => {
-    const now = Date.now()
-    const current = get()
-    const accounts = [...current.accounts]
-    const activeAccountByKind = { ...current.activeAccountByKind }
-
-    for (const incoming of discovered) {
-      const normalizedEmail = incoming.email.trim().toLowerCase()
-      const existingIndex = accounts.findIndex(
-        (account) =>
-          account.kind === incoming.kind &&
-          ((normalizedEmail && account.email.trim().toLowerCase() === normalizedEmail) ||
-            (account.source === 'discovered' && account.name === incoming.name))
-      )
-
-      if (existingIndex >= 0) {
-        const existing = accounts[existingIndex]
-        accounts[existingIndex] = {
-          ...existing,
-          name: existing.source === 'manual' ? existing.name : incoming.name,
-          email: incoming.email || existing.email,
-          plan: incoming.plan || existing.plan,
-          source: existing.source,
-          lastSeenAt: now
-        }
-        if (!activeAccountByKind[incoming.kind]) {
-          activeAccountByKind[incoming.kind] = existing.id
-        }
-        continue
+      const authenticated = accounts.find((account) => account.id === accountId)
+      return {
+        accounts,
+        suppressSystemImportByKind: authenticated
+          ? {
+              ...state.suppressSystemImportByKind,
+              [authenticated.kind]: false
+            }
+          : state.suppressSystemImportByKind
       }
-
-      const account: AiAccount = {
-        id: `discovered:${incoming.kind}:${normalizedEmail || incoming.name.toLowerCase()}`,
-        kind: incoming.kind,
-        name: incoming.name,
-        email: incoming.email,
-        plan: incoming.plan,
-        note: '',
-        createdAt: now,
-        source: 'discovered',
-        lastSeenAt: now,
-        profileReady: false,
-        lastAuthenticatedAt: null
-      }
-      accounts.push(account)
-      if (!activeAccountByKind[incoming.kind]) {
-        activeAccountByKind[incoming.kind] = account.id
-      }
-    }
-
-    set({ accounts, activeAccountByKind })
+    })
   },
 
   syncAuthProfiles: (profiles) => {
     const now = Date.now()
     const current = get()
-    const accounts = [...current.accounts]
+    const profilesById = new Map(profiles.map((profile) => [profile.accountId, profile]))
+    const accounts = current.accounts.map((account) => {
+      const profile = profilesById.get(account.id)
+      if (!profile || profile.kind !== account.kind) {
+        return account.profileReady ? { ...account, profileReady: false } : account
+      }
+
+      profilesById.delete(account.id)
+      return {
+        ...account,
+        name: account.source === 'manual' ? account.name : profile.name || account.name,
+        email: profile.email || account.email,
+        profileReady: profile.ready,
+        lastSeenAt: now,
+        lastAuthenticatedAt: account.lastAuthenticatedAt ?? (profile.ready ? now : null)
+      }
+    })
     const activeAccountByKind = { ...current.activeAccountByKind }
 
-    for (const profile of profiles) {
-      const existingIndex = accounts.findIndex((account) => account.id === profile.accountId)
+    for (const profile of profilesById.values()) {
+      const account: AiAccount = {
+        id: profile.accountId,
+        kind: profile.kind,
+        name: profile.name || `${profile.kind} account`,
+        email: profile.email,
+        plan: '',
+        note: '',
+        createdAt: now,
+        source: 'discovered',
+        lastSeenAt: now,
+        profileReady: profile.ready,
+        lastAuthenticatedAt: profile.ready ? now : null
+      }
+      accounts.push(account)
+    }
 
-      if (existingIndex >= 0) {
-        const existing = accounts[existingIndex]
-        accounts[existingIndex] = {
-          ...existing,
-          name: existing.source === 'manual' ? existing.name : profile.name || existing.name,
-          email: profile.email || existing.email,
-          profileReady: profile.ready || existing.profileReady,
-          lastSeenAt: now,
-          lastAuthenticatedAt: existing.lastAuthenticatedAt ?? (profile.ready ? now : null)
-        }
-      } else {
-        const account: AiAccount = {
-          id: profile.accountId,
-          kind: profile.kind,
-          name: profile.name || `${profile.kind} account`,
-          email: profile.email,
-          plan: '',
-          note: '',
-          createdAt: now,
-          source: 'discovered',
-          lastSeenAt: now,
-          profileReady: profile.ready,
-          lastAuthenticatedAt: profile.ready ? now : null
-        }
-        accounts.push(account)
-        if (!activeAccountByKind[profile.kind]) {
-          activeAccountByKind[profile.kind] = account.id
-        }
+    for (const kind of Object.keys(activeAccountByKind) as CliUsageKind[]) {
+      const activeId = activeAccountByKind[kind]
+      if (
+        activeId &&
+        !accounts.some(
+          (account) => account.id === activeId && account.kind === kind && account.profileReady
+        )
+      ) {
+        activeAccountByKind[kind] = null
       }
     }
 

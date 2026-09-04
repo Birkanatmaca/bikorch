@@ -52,7 +52,8 @@ import {
   AUTH_PROFILES_IPC,
   type AuthProfileRequest,
   type AuthProfileResult,
-  type AuthProfileSummary
+  type AuthProfileSummary,
+  type SystemAuthDiscovery
 } from '@shared/contracts/auth-profiles'
 
 export interface CliApi {
@@ -114,6 +115,7 @@ export interface LogsApi {
 
 export interface AuthProfilesApi {
   list: () => Promise<AuthProfileSummary[]>
+  discoverSystem: () => Promise<SystemAuthDiscovery[]>
   importCurrent: (request: AuthProfileRequest) => Promise<AuthProfileResult>
   activate: (request: AuthProfileRequest) => Promise<AuthProfileResult>
   inspect: (request: AuthProfileRequest) => Promise<AuthProfileResult>
@@ -199,6 +201,7 @@ const logsApi: LogsApi = {
 
 const authProfilesApi: AuthProfilesApi = {
   list: () => ipcRenderer.invoke(AUTH_PROFILES_IPC.LIST),
+  discoverSystem: () => ipcRenderer.invoke(AUTH_PROFILES_IPC.DISCOVER_SYSTEM),
   importCurrent: (request) => ipcRenderer.invoke(AUTH_PROFILES_IPC.IMPORT_CURRENT, request),
   activate: (request) => ipcRenderer.invoke(AUTH_PROFILES_IPC.ACTIVATE, request),
   inspect: (request) => ipcRenderer.invoke(AUTH_PROFILES_IPC.INSPECT, request),

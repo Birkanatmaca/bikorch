@@ -17,6 +17,7 @@ import {
   type OrchestratorRect
 } from '@shared/types'
 import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
+import type { CliUsageKind } from '@shared/contracts/usage'
 import { useAiAccountsStore } from './ai-accounts-store'
 
 const PTY_PANEL_TYPES = new Set<PanelType>([
@@ -49,6 +50,7 @@ interface WorkspaceStore extends WorkspaceSnapshot {
   removeProject: (projectId: string) => void
   setActiveProject: (projectId: string) => void
   updateProject: (projectId: string, updates: Partial<Pick<Project, 'name' | 'folderPath'>>) => void
+  reorderProjects: (fromIndex: number, toIndex: number) => void
   touchRecentProject: (projectId: string) => void
   ensureProjectWorkspace: (projectId: string, openSidebar?: boolean) => void
 
@@ -63,6 +65,8 @@ interface WorkspaceStore extends WorkspaceSnapshot {
   ) => string
   renamePanel: (panelId: string, title: string) => void
   removePanel: (panelId: string) => void
+  removePanelsForAccount: (kind: CliUsageKind, accountId: string) => void
+  closeOtherAccountCliPanels: (kind: CliUsageKind, keepAccountId: string) => void
   movePanel: (panelId: string, zone: PanelZone) => void
   updateLayout: (projectId: string, layout: Partial<WorkspaceLayout>) => void
   updateCenterPanelRect: (panelId: string, rect: OrchestratorRect) => void
@@ -204,16 +208,26 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     }))
   },
 
-  touchRecentProject: (projectId) => {
+  reorderProjects: (fromIndex, toIndex) => {
     set((state) => {
-      const project = state.projects.find((p) => p.id === projectId)
-      if (!project) return state
-      const rest = state.projects.filter((p) => p.id !== projectId)
-      return {
-        projects: [project, ...rest],
-        activeProjectId: projectId
+      if (
+        fromIndex === toIndex ||
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= state.projects.length ||
+        toIndex >= state.projects.length
+      ) {
+        return state
       }
+      const projects = [...state.projects]
+      const [moved] = projects.splice(fromIndex, 1)
+      projects.splice(toIndex, 0, moved)
+      return { projects }
     })
+  },
+
+  touchRecentProject: (projectId) => {
+    set({ activeProjectId: projectId })
     get().ensureProjectWorkspace(projectId)
   },
 
@@ -255,8 +269,23 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
     const targetZone = zone ?? getDefaultZone(type)
     const hadRight = workspace.panels.some((p) => p.zone === 'right')
-    const defaultAccountId = AI_ACCOUNT_KINDS.includes(type as (typeof AI_ACCOUNT_KINDS)[number])
-      ? useAiAccountsStore.getState().activeAccountByKind[type as (typeof AI_ACCOUNT_KINDS)[number]] ?? undefined
+    const accountKind = AI_ACCOUNT_KINDS.includes(type as CliUsageKind)
+      ? (type as CliUsageKind)
+      : null
+    const accountsState = useAiAccountsStore.getState()
+    const activeAccountId = accountKind
+      ? accountsState.activeAccountByKind[accountKind]
+      : null
+    const defaultAccountId = accountKind
+      ? accountsState.accounts.find(
+          (account) =>
+            account.id === activeAccountId &&
+            account.kind === accountKind &&
+            account.profileReady
+        )?.id ??
+        accountsState.accounts.find(
+          (account) => account.kind === accountKind && account.profileReady
+        )?.id
       : undefined
     const panelAccountId = accountId ?? defaultAccountId
     const newPanel: PanelDefinition = {
@@ -364,6 +393,83 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         }
       }
     })
+  },
+
+  removePanelsForAccount: (kind, accountId) => {
+    const { workspaces } = get()
+    let changed = false
+    const nextWorkspaces: Record<string, ProjectWorkspaceState> = {}
+
+    for (const [projectId, workspace] of Object.entries(workspaces)) {
+      const removedIds = new Set(
+        workspace.panels
+          .filter(
+            (panel) =>
+              panel.type === kind &&
+              (kind === 'antigravity' || !panel.accountId || panel.accountId === accountId)
+          )
+          .map((panel) => panel.id)
+      )
+      if (removedIds.size === 0) {
+        nextWorkspaces[projectId] = workspace
+        continue
+      }
+
+      changed = true
+      for (const panel of workspace.panels) {
+        if (removedIds.has(panel.id)) terminatePanelSession(panel.id, panel.type)
+      }
+      const centerPanelRects = Object.fromEntries(
+        Object.entries(workspace.layout.centerPanelRects ?? {}).filter(
+          ([panelId]) => !removedIds.has(panelId)
+        )
+      )
+      nextWorkspaces[projectId] = {
+        ...workspace,
+        panels: workspace.panels.filter((panel) => !removedIds.has(panel.id)),
+        layout: { ...workspace.layout, centerPanelRects }
+      }
+    }
+
+    if (changed) set({ workspaces: nextWorkspaces })
+  },
+
+  closeOtherAccountCliPanels: (kind, keepAccountId) => {
+    const { workspaces } = get()
+    let changed = false
+    const nextWorkspaces: Record<string, ProjectWorkspaceState> = {}
+
+    for (const [projectId, workspace] of Object.entries(workspaces)) {
+      const removedIds = new Set(
+        workspace.panels
+          .filter(
+            (panel) =>
+              panel.type === kind && panel.accountId && panel.accountId !== keepAccountId
+          )
+          .map((panel) => panel.id)
+      )
+      if (removedIds.size === 0) {
+        nextWorkspaces[projectId] = workspace
+        continue
+      }
+
+      changed = true
+      for (const panel of workspace.panels) {
+        if (removedIds.has(panel.id)) terminatePanelSession(panel.id, panel.type)
+      }
+      const centerPanelRects = Object.fromEntries(
+        Object.entries(workspace.layout.centerPanelRects ?? {}).filter(
+          ([panelId]) => !removedIds.has(panelId)
+        )
+      )
+      nextWorkspaces[projectId] = {
+        ...workspace,
+        panels: workspace.panels.filter((panel) => !removedIds.has(panel.id)),
+        layout: { ...workspace.layout, centerPanelRects }
+      }
+    }
+
+    if (changed) set({ workspaces: nextWorkspaces })
   },
 
   movePanel: (panelId, zone) => {
@@ -510,6 +616,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     }
 
     const panels = sanitizeWorkspacePanels(workspace.panels)
+    const accountsLeftSize = 24
+    const nextLeftSize =
+      view === 'accounts'
+        ? Math.max(workspace.layout.leftSize ?? 14, accountsLeftSize)
+        : workspace.layout.leftSize
     set({
       workspaces: {
         ...get().workspaces,
@@ -519,7 +630,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           layout: {
             ...workspace.layout,
             leftCollapsed: false,
-            leftSidebarView: view
+            leftSidebarView: view,
+            ...(view === 'accounts' && nextLeftSize !== workspace.layout.leftSize
+              ? { leftSize: nextLeftSize }
+              : {})
           }
         }
       }

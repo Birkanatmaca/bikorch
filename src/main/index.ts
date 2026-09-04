@@ -7,14 +7,18 @@ import {
   closePersistenceDatabase,
   initPersistenceDatabase
 } from './persistence/database'
+import { APP_DISPLAY_NAME, applyAppBranding, resolveAppIconPath } from './app-branding'
 
 const isDev = !app.isPackaged
 
+applyAppBranding()
 installConsoleCapture()
 
 function createWindow(): void {
   const isWin = process.platform === 'win32'
   const isMac = process.platform === 'darwin'
+
+  const iconPath = resolveAppIconPath()
 
   const mainWindow = new BrowserWindow({
     width: 1400,
@@ -22,8 +26,9 @@ function createWindow(): void {
     minWidth: 960,
     minHeight: 640,
     show: false,
+    title: APP_DISPLAY_NAME,
     backgroundColor: '#0D0F12',
-    icon: join(__dirname, '../../app-logo.png'),
+    ...(iconPath ? { icon: iconPath } : {}),
     frame: !isWin,
     titleBarStyle: isWin ? 'hidden' : isMac ? 'hiddenInset' : undefined,
     webPreferences: {
@@ -64,6 +69,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  applyAppBranding()
   try {
     await initPersistenceDatabase()
   } catch (error) {

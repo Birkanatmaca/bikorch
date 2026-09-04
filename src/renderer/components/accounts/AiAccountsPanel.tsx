@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertCircle,
   Check,
@@ -7,7 +7,6 @@ import {
   Pencil,
   Play,
   Plus,
-  RefreshCw,
   Trash2,
   UserPlus,
   UsersRound,
@@ -18,18 +17,21 @@ import {
   AI_ACCOUNT_LABELS,
   type AiAccount
 } from '@shared/contracts/accounts'
-import type { CliUsageInfo, CliUsageKind, CliUsageResponse } from '@shared/contracts/usage'
+import type { CliUsageInfo, CliUsageKind } from '@shared/contracts/usage'
 import { CLI_LOGO_CLASS, getCliLogo } from '@renderer/lib/cli-logos'
 import {
   type AiAccountDraft,
   useAiAccountsStore
 } from '@renderer/stores/ai-accounts-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
-import {
-  AI_ACCOUNTS_REFRESH_EVENT,
-  AI_ACCOUNT_AUTHENTICATED_EVENT
-} from '@renderer/lib/app-events'
+import { useUsageStore } from '@renderer/stores/usage-store'
 import { cn } from '@renderer/lib/utils'
+import {
+  importSystemAccountForKind,
+  syncDiscoveredSystemAccounts
+} from '@renderer/lib/system-auth-sync'
+
+let installedCliCache: Partial<Record<CliUsageKind, boolean>> = {}
 
 const EMPTY_DRAFT: AiAccountDraft = {
   kind: 'claude',
@@ -96,22 +98,6 @@ function formatUsageDetail(provider: CliUsageInfo | undefined): string | undefin
   return `Resets in ${hours}h`
 }
 
-function mergeUsageResponses(
-  current: CliUsageResponse | null,
-  next: CliUsageResponse
-): CliUsageResponse {
-  const nextAccountIds = new Set(
-    next.providers.flatMap((provider) => (provider.accountId ? [provider.accountId] : []))
-  )
-  const previousProviders = (current?.providers ?? []).filter(
-    (provider) => !provider.accountId || !nextAccountIds.has(provider.accountId)
-  )
-  return {
-    checkedAt: next.checkedAt,
-    providers: [...previousProviders, ...next.providers]
-  }
-}
-
 function AccountForm({
   account,
   onClose
@@ -162,7 +148,9 @@ function AccountForm({
             <h3 className="text-xs font-medium text-text-primary">
               {account ? 'Edit AI account' : 'Add AI account'}
             </h3>
-            <p className="mt-0.5 text-[10px] text-text-muted">Only profile details are stored</p>
+            <p className="mt-0.5 text-[10px] text-text-muted">
+              Sign-in sessions stay in protected, app-managed profiles
+            </p>
           </div>
           <button
             type="button"
@@ -256,8 +244,7 @@ function AccountCard({
   account,
   provider,
   isActive,
-  isChecking,
-  onCheck,
+  isRemoving,
   onOpen,
   onEdit,
   onRemove
@@ -265,8 +252,7 @@ function AccountCard({
   account: AiAccount
   provider: CliUsageInfo | undefined
   isActive: boolean
-  isChecking: boolean
-  onCheck: () => void
+  isRemoving: boolean
   onOpen: () => void
   onEdit: () => void
   onRemove: () => void
@@ -284,7 +270,8 @@ function AccountCard({
     <article
       className={cn(
         'rounded-lg border bg-panel-bg p-2.5 transition-colors',
-        isActive ? 'border-primary/45 shadow-[0_0_16px_rgb(124_108_242_/_0.08)]' : 'border-border'
+        isActive ? 'border-primary/45 shadow-[0_0_16px_rgb(124_108_242_/_0.08)]' : 'border-border',
+        isRemoving && 'pointer-events-none opacity-60'
       )}
     >
       <div className="flex items-start gap-2">
@@ -309,21 +296,8 @@ function AccountCard({
         <div className="flex shrink-0 items-center gap-0.5">
           <button
             type="button"
-            onClick={onCheck}
-            disabled={!account.profileReady || isChecking}
-            className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[9px] font-medium text-text-secondary hover:bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
-            title={
-              !account.profileReady
-                ? 'Sign in to this account before checking usage'
-                : 'Check this account usage'
-            }
-          >
-            <RefreshCw className={cn('h-2.5 w-2.5', isChecking && 'animate-spin')} />
-            Check
-          </button>
-          <button
-            type="button"
             onClick={onOpen}
+            disabled={isRemoving}
             className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[9px] font-medium text-primary hover:bg-primary/10"
             title={account.profileReady ? 'Open this account profile' : 'Sign in to this account profile'}
           >
@@ -333,6 +307,7 @@ function AccountCard({
           <button
             type="button"
             onClick={onEdit}
+            disabled={isRemoving}
             className="rounded-md p-1 text-text-muted hover:bg-hover hover:text-text-primary"
             aria-label={`Edit ${account.name}`}
             title="Edit account"
@@ -342,11 +317,12 @@ function AccountCard({
           <button
             type="button"
             onClick={onRemove}
+            disabled={isRemoving}
             className="rounded-md p-1 text-text-muted hover:bg-error/10 hover:text-error"
             aria-label={`Remove ${account.name}`}
             title="Remove account"
           >
-            <Trash2 className="h-3 w-3" />
+            <Trash2 className={cn('h-3 w-3', isRemoving && 'animate-pulse')} />
           </button>
         </div>
       </div>
@@ -394,179 +370,71 @@ export function AiAccountsPanel(): React.JSX.Element {
   const activeAccountByKind = useAiAccountsStore((state) => state.activeAccountByKind)
   const setActiveAccount = useAiAccountsStore((state) => state.setActiveAccount)
   const addAccount = useAiAccountsStore((state) => state.addAccount)
-  const markAccountAuthenticated = useAiAccountsStore((state) => state.markAccountAuthenticated)
   const removeAccount = useAiAccountsStore((state) => state.removeAccount)
-  const syncDiscoveredAccounts = useAiAccountsStore((state) => state.syncDiscoveredAccounts)
   const syncAuthProfiles = useAiAccountsStore((state) => state.syncAuthProfiles)
+  const usageProviders = useUsageStore((state) => state.providers)
+  const checkedAtByAccountId = useUsageStore((state) => state.checkedAtByAccountId)
+  const removeUsageAccount = useUsageStore((state) => state.removeAccount)
   const addPanel = useWorkspaceStore((state) => state.addPanel)
-  const [usage, setUsage] = useState<CliUsageResponse | null>(null)
-  const [loading, setLoading] = useState(true)
+  const removePanelsForAccount = useWorkspaceStore((state) => state.removePanelsForAccount)
+  const closeOtherAccountCliPanels = useWorkspaceStore((state) => state.closeOtherAccountCliPanels)
   const [error, setError] = useState<string | null>(null)
   const [formAccount, setFormAccount] = useState<AiAccount | null | undefined>(undefined)
-  const [checkingAccountIds, setCheckingAccountIds] = useState<Set<string>>(() => new Set())
-  const importedProfileIds = useRef(new Set<string>())
-  const checkedAccountIds = useRef(new Set<string>())
+  const [removingAccountIds, setRemovingAccountIds] = useState<Set<string>>(() => new Set())
+  const [installedByKind, setInstalledByKind] = useState<
+    Partial<Record<CliUsageKind, boolean>>
+  >(() => installedCliCache)
 
-  const checkAccounts = useCallback(async (targetAccounts: AiAccount[]): Promise<void> => {
-    const accountsToCheck = targetAccounts.filter((account) => account.profileReady)
-    if (accountsToCheck.length === 0) return
-
-    for (const account of accountsToCheck) checkedAccountIds.current.add(account.id)
-    setCheckingAccountIds((current) => {
-      const next = new Set(current)
-      for (const account of accountsToCheck) next.add(account.id)
-      return next
-    })
-
-    await Promise.allSettled(
-      accountsToCheck.map(async (account) => {
+  const refreshInstalledClis = useCallback(async (): Promise<void> => {
+    const entries = await Promise.all(
+      AI_ACCOUNT_KINDS.map(async (kind) => {
         try {
-          const nextUsage = await window.api.usage.read({
-            accounts: [{ kind: account.kind, accountId: account.id }]
-          })
-          setUsage((current) => mergeUsageResponses(current, nextUsage))
-        } catch (checkError) {
-          setError(checkError instanceof Error ? checkError.message : 'Could not load AI usage')
-        } finally {
-          setCheckingAccountIds((current) => {
-            const next = new Set(current)
-            next.delete(account.id)
-            return next
-          })
+          const result = await window.api.cli.detect(kind)
+          return [kind, result.installed] as const
+        } catch {
+          return [kind, false] as const
         }
       })
     )
+    installedCliCache = Object.fromEntries(entries)
+    setInstalledByKind(installedCliCache)
   }, [])
-
-  const refresh = useCallback(async (): Promise<void> => {
-    setLoading(true)
-    setError(null)
-    try {
-      const currentAccounts = useAiAccountsStore.getState().accounts
-      const readyAccounts = currentAccounts.filter((account) => account.profileReady)
-      if (readyAccounts.length > 0) {
-        await checkAccounts(readyAccounts)
-      } else {
-        setUsage(await window.api.usage.read())
-      }
-    } catch (refreshError) {
-      setError(refreshError instanceof Error ? refreshError.message : 'Could not load AI usage')
-    } finally {
-      setLoading(false)
-    }
-  }, [checkAccounts])
 
   useEffect(() => {
     let cancelled = false
-    void window.api.authProfiles
-      .list()
-      .then((profiles) => {
-        if (!cancelled) syncAuthProfiles(profiles)
-      })
-      .catch((listError) => {
+    void (async () => {
+      try {
+        const profiles = await window.api.authProfiles.list()
+        if (cancelled) return
+        syncAuthProfiles(profiles)
+        await syncDiscoveredSystemAccounts()
+        if (!cancelled) await refreshInstalledClis()
+      } catch (listError) {
         if (!cancelled) {
           setError(listError instanceof Error ? listError.message : 'Could not load saved accounts')
         }
-      })
+      }
+    })()
     return () => {
       cancelled = true
     }
-  }, [syncAuthProfiles])
-
-  useEffect(() => {
-    void refresh()
-    const interval = window.setInterval(() => void refresh(), 5 * 60 * 1000)
-    return () => window.clearInterval(interval)
-  }, [refresh])
-
-  useEffect(() => {
-    const handleRefreshRequest = (): void => {
-      window.setTimeout(() => void refresh(), 800)
-    }
-    window.addEventListener(AI_ACCOUNTS_REFRESH_EVENT, handleRefreshRequest)
-    return () => window.removeEventListener(AI_ACCOUNTS_REFRESH_EVENT, handleRefreshRequest)
-  }, [refresh])
-
-  useEffect(() => {
-    const accountsToCheck = accounts.filter(
-      (account) => account.profileReady && !checkedAccountIds.current.has(account.id)
-    )
-    if (accountsToCheck.length > 0) void checkAccounts(accountsToCheck)
-  }, [accounts, checkAccounts])
-
-  useEffect(() => {
-    if (!usage) return
-    syncDiscoveredAccounts(
-      usage.providers.flatMap((provider) =>
-        provider.accountEmail
-          ? [
-              {
-                kind: provider.kind,
-                name: provider.accountName || `${provider.label} account`,
-                email: provider.accountEmail,
-                plan: provider.planType ?? ''
-              }
-            ]
-          : []
-      )
-    )
-  }, [syncDiscoveredAccounts, usage])
-
-  useEffect(() => {
-    const handleAuthenticated = (event: Event): void => {
-      const detail = (
-        event as CustomEvent<{
-          accountId: string
-          identity?: { email?: string; name?: string }
-        }>
-      ).detail
-      if (!detail?.accountId) return
-      markAccountAuthenticated(detail.accountId, detail.identity)
-    }
-    window.addEventListener(AI_ACCOUNT_AUTHENTICATED_EVENT, handleAuthenticated)
-    return () => window.removeEventListener(AI_ACCOUNT_AUTHENTICATED_EVENT, handleAuthenticated)
-  }, [markAccountAuthenticated])
-
-  useEffect(() => {
-    if (!usage) return
-    for (const provider of usage.providers) {
-      if (!provider.accountEmail) continue
-      const providerEmail = provider.accountEmail.trim().toLowerCase()
-      const account = accounts.find(
-        (candidate) =>
-          candidate.kind === provider.kind &&
-          candidate.email.trim().toLowerCase() === providerEmail
-      )
-      if (!account || account.profileReady || importedProfileIds.current.has(account.id)) continue
-      importedProfileIds.current.add(account.id)
-      void window.api.authProfiles
-        .importCurrent({
-          kind: account.kind,
-          accountId: account.id,
-          email: provider.accountEmail
-        })
-        .then((result) => {
-          if (result.ready) markAccountAuthenticated(account.id, result.identity)
-          else importedProfileIds.current.delete(account.id)
-        })
-    }
-  }, [accounts, markAccountAuthenticated, usage])
-
-  const providerByKind = useMemo(() => {
-    const map = new Map<CliUsageKind, CliUsageInfo>()
-    for (const provider of usage?.providers ?? []) {
-      if (!provider.accountId) map.set(provider.kind, provider)
-    }
-    return map
-  }, [usage])
+  }, [refreshInstalledClis, syncAuthProfiles])
 
   const providerByAccount = useMemo(() => {
     const map = new Map<string, CliUsageInfo>()
-    for (const provider of usage?.providers ?? []) {
+    for (const provider of usageProviders) {
       if (provider.accountId) map.set(provider.accountId, provider)
     }
     return map
-  }, [usage])
+  }, [usageProviders])
+
+  const lastCheckedAt = useMemo(() => {
+    const times = accounts
+      .map((account) => checkedAtByAccountId[account.id])
+      .filter((value): value is number => typeof value === 'number')
+    if (times.length === 0) return null
+    return Math.max(...times)
+  }, [accounts, checkedAtByAccountId])
 
   const accountsByKind = useMemo(
     () =>
@@ -580,24 +448,11 @@ export function AiAccountsPanel(): React.JSX.Element {
   const openAddForm = (): void => setFormAccount(null)
   const closeForm = (): void => setFormAccount(undefined)
 
-  const importCurrentProvider = async (kind: CliUsageKind): Promise<void> => {
-    const email = providerByKind.get(kind)?.accountEmail
-    if (!email) return
-    const current = accounts.find(
-      (account) =>
-        account.kind === kind && account.email.trim().toLowerCase() === email.trim().toLowerCase()
-    )
-    if (!current) return
-    const result = await window.api.authProfiles.importCurrent({
-      kind,
-      accountId: current.id,
-      email
-    })
-    if (result.ready) markAccountAuthenticated(current.id, result.identity)
-  }
-
   const openLoginCli = async (kind: CliUsageKind, account?: AiAccount): Promise<void> => {
-    await importCurrentProvider(kind)
+    if (installedByKind[kind] === false) {
+      setError(`${AI_ACCOUNT_LABELS[kind]} is not installed on this computer`)
+      return
+    }
     const accountId =
       account?.id ??
       addAccount({
@@ -607,7 +462,7 @@ export function AiAccountsPanel(): React.JSX.Element {
         plan: '',
         note: ''
       })
-    setActiveAccount(kind, accountId)
+    removePanelsForAccount(kind, accountId)
     addPanel(
       kind,
       'center',
@@ -618,10 +473,69 @@ export function AiAccountsPanel(): React.JSX.Element {
     )
   }
 
-  const handleRemove = (account: AiAccount): void => {
-    if (window.confirm(`Remove ${account.name}?`)) {
-      void window.api.authProfiles.remove({ kind: account.kind, accountId: account.id })
+  const openGlobalCli = async (kind: CliUsageKind): Promise<void> => {
+    if (installedByKind[kind] === false) {
+      setError(`${AI_ACCOUNT_LABELS[kind]} is not installed on this computer`)
+      return
+    }
+    setError(null)
+
+    try {
+      const importedAccount = await importSystemAccountForKind(kind)
+      if (importedAccount) {
+        await openAccountCli(importedAccount)
+        return
+      }
+    } catch (importError) {
+      setError(
+        importError instanceof Error
+          ? importError.message
+          : `Could not import ${AI_ACCOUNT_LABELS[kind]} account`
+      )
+      return
+    }
+
+    if (kind === 'antigravity') {
+      await openLoginCli(kind)
+      return
+    }
+
+    addPanel(kind, 'center', undefined, 'normal', undefined, AI_ACCOUNT_LABELS[kind])
+  }
+
+  const handleRemove = async (account: AiAccount): Promise<void> => {
+    if (
+      !window.confirm(
+        account.kind === 'antigravity'
+          ? `Sign out and remove ${account.name}? This runs /logout in Antigravity, signs it out on this computer, and closes open sessions.`
+          : `Sign out and remove ${account.name}? Open sessions for this account will be closed.`
+      )
+    ) {
+      return
+    }
+
+    setError(null)
+    setRemovingAccountIds((current) => new Set(current).add(account.id))
+    removePanelsForAccount(account.kind, account.id)
+    try {
+      const result = await window.api.authProfiles.remove({
+        kind: account.kind,
+        accountId: account.id
+      })
+      if (!result.ok) throw new Error(result.error ?? 'Could not sign out this CLI account')
+
       removeAccount(account.id)
+      removeUsageAccount(account.id)
+    } catch (removeError) {
+      setError(
+        removeError instanceof Error ? removeError.message : 'Could not remove CLI account'
+      )
+    } finally {
+      setRemovingAccountIds((current) => {
+        const next = new Set(current)
+        next.delete(account.id)
+        return next
+      })
     }
   }
 
@@ -630,27 +544,46 @@ export function AiAccountsPanel(): React.JSX.Element {
       await openLoginCli(account.kind, account)
       return
     }
-    const activated = await window.api.authProfiles.activate({
-      kind: account.kind,
-      accountId: account.id,
-      ...(account.email ? { email: account.email } : {})
-    })
-    if (!activated.ready) {
-      await openLoginCli(account.kind, account)
-      return
+    setError(null)
+    try {
+      const activated = await window.api.authProfiles.activate({
+        kind: account.kind,
+        accountId: account.id,
+        ...(account.email ? { email: account.email } : {})
+      })
+      if (!activated.ok) {
+        setError(activated.error ?? `Could not activate ${account.name}`)
+        return
+      }
+      if (!activated.ready) {
+        await openLoginCli(account.kind, account)
+        return
+      }
+      if (account.kind === 'cursor' || account.kind === 'antigravity') {
+        closeOtherAccountCliPanels(account.kind, account.id)
+      }
+      setActiveAccount(account.kind, account.id)
+      addPanel(
+        account.kind,
+        'center',
+        undefined,
+        'normal',
+        account.id,
+        `${AI_ACCOUNT_LABELS[account.kind]} · ${account.name}`
+      )
+    } catch (activateError) {
+      setError(
+        activateError instanceof Error ? activateError.message : `Could not activate ${account.name}`
+      )
     }
-    setActiveAccount(account.kind, account.id)
-    addPanel(
-      account.kind,
-      'center',
-      undefined,
-      'normal',
-      account.id,
-      `${AI_ACCOUNT_LABELS[account.kind]} · ${account.name}`
-    )
   }
 
   const connectCli = (kind: CliUsageKind): void => {
+    const kindAccounts = accounts.filter((account) => account.kind === kind)
+    if (kindAccounts.length === 0) {
+      void openGlobalCli(kind)
+      return
+    }
     void openLoginCli(kind)
   }
 
@@ -664,7 +597,7 @@ export function AiAccountsPanel(): React.JSX.Element {
           <div className="min-w-0 flex-1">
             <h2 className="text-xs font-medium text-text-primary">AI Accounts</h2>
             <p className="mt-1 text-[10px] leading-relaxed text-text-muted">
-              Switch between your CLI account profiles
+              Sign in, switch, inspect usage and sign out from one place
             </p>
           </div>
           <button
@@ -679,18 +612,11 @@ export function AiAccountsPanel(): React.JSX.Element {
         </div>
         <div className="mt-2 flex items-center justify-between gap-2 font-mono text-[9px] text-text-muted">
           <span>{accounts.length} account{accounts.length === 1 ? '' : 's'}</span>
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            disabled={loading}
-            className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-hover hover:text-text-primary disabled:opacity-50"
-            title="Refresh usage"
-          >
-            <RefreshCw className={cn('h-3 w-3', loading && 'animate-spin')} />
-            {usage
-              ? `Checked ${new Date(usage.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-              : 'Refresh usage'}
-          </button>
+          <span>
+            {lastCheckedAt
+              ? `Updated ${new Date(lastCheckedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+              : 'Usage updates in the background'}
+          </span>
         </div>
       </div>
 
@@ -716,9 +642,11 @@ export function AiAccountsPanel(): React.JSX.Element {
                     <p className="text-[9px] text-text-muted">
                       {providerAccounts.length > 0
                         ? `${providerAccounts.length} saved account${providerAccounts.length === 1 ? '' : 's'}`
-                        : loading
-                          ? 'Checking local session…'
-                          : 'No connected account detected'}
+                        : installedByKind[kind] === false
+                          ? 'CLI is not installed'
+                          : installedByKind[kind] === undefined
+                            ? 'Checking installation…'
+                            : 'No managed account'}
                     </p>
                   </div>
                   {providerAccounts.length > 0 && (
@@ -729,16 +657,27 @@ export function AiAccountsPanel(): React.JSX.Element {
                   <button
                     type="button"
                     onClick={() => connectCli(kind)}
-                    disabled={providerByKind.get(kind)?.status === 'not-installed'}
+                    disabled={installedByKind[kind] === false}
                     className="inline-flex shrink-0 items-center gap-1 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-1 text-[9px] font-medium text-primary transition-colors hover:border-primary/45 hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-40"
                     title={
-                      providerByKind.get(kind)?.status === 'not-installed'
+                      installedByKind[kind] === false
                         ? `${AI_ACCOUNT_LABELS[kind]} is not installed`
-                        : `Add account to ${AI_ACCOUNT_LABELS[kind]}`
+                        : providerAccounts.length === 0
+                          ? `Open ${AI_ACCOUNT_LABELS[kind]} with your system session`
+                          : `Add account to ${AI_ACCOUNT_LABELS[kind]}`
                     }
                   >
-                    <UserPlus className="h-2.5 w-2.5" />
-                    Add account
+                    {providerAccounts.length === 0 ? (
+                      <>
+                        <Play className="h-2.5 w-2.5" />
+                        Open CLI
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus className="h-2.5 w-2.5" />
+                        Add account
+                      </>
+                    )}
                   </button>
                 </div>
 
@@ -750,22 +689,35 @@ export function AiAccountsPanel(): React.JSX.Element {
                         account={account}
                         provider={providerByAccount.get(account.id)}
                         isActive={activeAccountByKind[account.kind] === account.id}
-                        isChecking={checkingAccountIds.has(account.id)}
-                        onCheck={() => void checkAccounts([account])}
+                        isRemoving={removingAccountIds.has(account.id)}
                         onOpen={() => void openAccountCli(account)}
                         onEdit={() => setFormAccount(account)}
-                        onRemove={() => handleRemove(account)}
+                        onRemove={() => void handleRemove(account)}
                       />
                     ))}
                   </div>
                 ) : (
-                  <div className="flex items-center gap-1.5 rounded-md border border-dashed border-border bg-panel-bg/40 px-2 py-2 text-[9px] text-text-muted">
-                    <UsersRound className="h-3 w-3 shrink-0" />
-                    <span className="min-w-0 flex-1">
-                      {providerByKind.get(kind)?.status === 'not-installed'
-                        ? 'CLI is not installed'
-                        : 'No connected account detected'}
-                    </span>
+                  <div className="rounded-md border border-dashed border-border bg-panel-bg/40 p-2">
+                    <div className="flex items-center gap-1.5 text-[9px] text-text-muted">
+                      <UsersRound className="h-3 w-3 shrink-0" />
+                      <span className="min-w-0 flex-1">
+                        {installedByKind[kind] === false
+                          ? 'CLI is not installed'
+                          : kind === 'antigravity'
+                            ? 'No managed account yet. Open CLI starts a fresh sign-in and will not reuse the previous system session.'
+                            : 'No managed account yet. Open the CLI with your system session or add an account for isolated profiles.'}
+                      </span>
+                    </div>
+                    {installedByKind[kind] !== false && (
+                      <button
+                        type="button"
+                        onClick={() => void openGlobalCli(kind)}
+                        className="mt-2 inline-flex w-full items-center justify-center gap-1 rounded-md border border-primary/25 bg-primary/10 px-2 py-1.5 text-[10px] font-medium text-primary transition-colors hover:border-primary/45 hover:bg-primary/20"
+                      >
+                        <Play className="h-3 w-3" />
+                        Open {AI_ACCOUNT_LABELS[kind]}
+                      </button>
+                    )}
                   </div>
                 )}
               </section>
@@ -773,7 +725,7 @@ export function AiAccountsPanel(): React.JSX.Element {
           })}
           <div className="flex items-start gap-1.5 px-1 pt-1 text-[9px] leading-relaxed text-text-muted">
             <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-success" />
-            <span>Each account uses an isolated local CLI profile. Passwords are never collected; saved sessions stay protected on this computer.</span>
+            <span>Managed accounts use isolated profiles. Existing system logins are imported automatically when detected. Removing one signs it out and closes its sessions.</span>
           </div>
         </div>
       </div>

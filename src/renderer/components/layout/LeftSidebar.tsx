@@ -16,8 +16,8 @@ export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Eleme
   const type = isChanges ? 'git-changes' : 'file-explorer'
 
   return (
-    <div className="panel-shell relative flex h-full flex-col overflow-hidden rounded-md border border-border bg-panel-bg shadow-sm">
-      <header className="flex h-7 shrink-0 items-center gap-1.5 border-b border-border bg-elevated px-2 app-no-drag">
+    <div className="glass-panel panel-shell relative flex h-full flex-col overflow-hidden rounded-xl shadow-sm">
+      <header className="flex h-7 shrink-0 items-center gap-1.5 border-b border-border/80 bg-elevated/60 px-2 app-no-drag backdrop-blur-md">
         <span className="font-mono text-xs text-text-muted">
           {isAccounts ? (
             <UsersRound className="h-3.5 w-3.5" />
@@ -31,7 +31,7 @@ export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Eleme
         <button
           type="button"
           onClick={onHide}
-          className="rounded-sm p-0.5 text-text-muted transition-colors hover:bg-hover hover:text-text-primary"
+          className="glass-icon-btn rounded-md p-0.5"
           aria-label="Hide sidebar"
           title="Hide sidebar"
         >
@@ -45,7 +45,9 @@ export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Eleme
         <div className={cn('h-full', !isChanges && 'hidden')}>
           <GitChangesPanel hideHeader />
         </div>
-        {isAccounts && <div className="h-full"><AiAccountsPanel /></div>}
+        <div className={cn('h-full', !isAccounts && 'hidden')}>
+          <AiAccountsPanel />
+        </div>
       </div>
     </div>
   )

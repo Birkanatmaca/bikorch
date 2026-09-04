@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { AppWindowEdge } from '@renderer/components/layout/AppWindowEdge'
 import { AppHeader } from '@renderer/components/layout/AppHeader'
 import { StatusBar } from '@renderer/components/layout/StatusBar'
 import { WorkspaceLayout } from '@renderer/components/layout/WorkspaceLayout'
@@ -10,6 +11,7 @@ import { COMMAND_PALETTE_EVENT, isTypingInTerminal } from '@renderer/lib/app-eve
 import { useCommandPalette } from '@renderer/hooks/use-command-palette'
 import { useOpenProject } from '@renderer/hooks/use-open-project'
 import { usePersistenceBootstrap } from '@renderer/hooks/use-persistence-bootstrap'
+import { startUsageSync } from '@renderer/lib/usage-sync'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { cn } from '@renderer/lib/utils'
 import { isMacOS, isWindows } from '@renderer/lib/electron-api'
@@ -19,7 +21,6 @@ export default function App(): React.JSX.Element {
   const { open, openPalette, closePalette } = useCommandPalette()
   const { openFolderPicker } = useOpenProject()
   const projects = useWorkspaceStore((s) => s.projects)
-  const addProject = useWorkspaceStore((s) => s.addProject)
   const addPanel = useWorkspaceStore((s) => s.addPanel)
   const platformClass = isMacOS()
     ? 'platform-macos'
@@ -41,7 +42,7 @@ export default function App(): React.JSX.Element {
 
       if (e.key.toLowerCase() === 'n') {
         e.preventDefault()
-        addProject()
+        void openFolderPicker({ forceNew: true })
       }
 
       if (e.key === '`') {
@@ -54,7 +55,7 @@ export default function App(): React.JSX.Element {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [addPanel, addProject, openFolderPicker])
+  }, [addPanel, openFolderPicker])
 
   useEffect(() => {
     const handleOpenPalette = (): void => {
@@ -65,13 +66,19 @@ export default function App(): React.JSX.Element {
     return () => window.removeEventListener(COMMAND_PALETTE_EVENT, handleOpenPalette)
   }, [openPalette])
 
+  useEffect(() => {
+    if (!isReady) return
+    return startUsageSync()
+  }, [isReady])
+
   if (!isReady) {
     return <LoadingSplash />
   }
 
   return (
     <ErrorBoundary>
-      <div className={cn('flex h-full flex-col bg-app-bg', platformClass)}>
+      <div className={cn('app-shell flex h-full flex-col', platformClass)}>
+        <AppWindowEdge />
         {error && (
           <div className="border-b border-warning/30 bg-warning/10 px-3 py-1.5 text-xs text-warning">
             {error} — using fallback workspace

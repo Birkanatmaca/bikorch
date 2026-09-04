@@ -19,6 +19,18 @@ import {
   readAntigravityCredential,
   writeAntigravityCredential
 } from '../accounts/windows-credential'
+import {
+  applyAntigravityCredentialsForAccount,
+  getAntigravitySessionAccount,
+  hasStoredAntigravityCredentials
+} from '../accounts/antigravity-credential'
+import {
+  cursorCredentialsSupported,
+  readCursorKeychainTokens,
+  restoreCursorKeychainTokens,
+  type CursorKeychainTokens
+} from '../accounts/cursor-credential'
+import { withAntigravityCredentialLock } from '../accounts/credential-lock'
 
 const USAGE_KINDS: CliUsageKind[] = ['claude', 'cursor', 'gemini', 'antigravity', 'codex']
 
@@ -43,6 +55,10 @@ interface UsageScope {
   accountId?: string
 }
 
+function usageRequestKey(request: UsageAccountRequest): string {
+  return `${request.kind}:${request.accountId}`
+}
+
 const INTERACTIVE_USAGE_READY_DELAY_MS = 300
 const INTERACTIVE_USAGE_COMMAND_ENTRY_DELAY_MS = 180
 const INTERACTIVE_USAGE_SUBMIT_DELAY_MS = 400
@@ -51,18 +67,22 @@ const INTERACTIVE_USAGE_SETTLE_DELAY_MS = 120
 const INTERACTIVE_USAGE_TIMEOUT_MS = 18000
 const INTERACTIVE_USAGE_OUTPUT_LIMIT = 120000
 
-let antigravityUsageQueue: Promise<void> = Promise.resolve()
+let cursorUsageQueue: Promise<void> = Promise.resolve()
 
-function withAntigravityUsageLock<T>(task: () => Promise<T>): Promise<T> {
-  const result = antigravityUsageQueue.then(
+function withCursorUsageLock<T>(task: () => Promise<T>): Promise<T> {
+  const result = cursorUsageQueue.then(
     () => task(),
     () => task()
   )
-  antigravityUsageQueue = result.then(
+  cursorUsageQueue = result.then(
     () => undefined,
     () => undefined
   )
   return result
+}
+
+function withAntigravityUsageLock<T>(task: () => Promise<T>): Promise<T> {
+  return withAntigravityCredentialLock(task)
 }
 
 interface CodexUsageSnapshot {
@@ -330,6 +350,7 @@ interface CursorUsageSnapshot {
 
 interface AntigravityUsageSnapshot {
   accountEmail: string | null
+  planType: string | null
   primary: CliUsageWindow | undefined
   secondary: CliUsageWindow | undefined
   breakdown: CliUsageBreakdown[]
@@ -351,6 +372,7 @@ interface InteractiveUsageOptions<T> {
   parse: (output: string) => T | null
   isReady: (output: string) => boolean
   detectFailure?: (output: string) => InteractiveUsageFailure | null
+  detectFailureAfterCommand?: boolean
   extraArgs?: string[]
   timeoutMs?: number
 }
@@ -517,12 +539,6 @@ function queryInteractiveUsage<T>(
       output = (output + chunk).slice(-INTERACTIVE_USAGE_OUTPUT_LIMIT)
       const cleanOutput = stripTerminalControlCodes(output)
 
-      const failure = options.detectFailure?.(cleanOutput)
-      if (failure) {
-        finishError(new InteractiveUsageError(failure))
-        return
-      }
-
       const snapshot = options.parse(output)
       if (snapshot) {
         if (!settleTimer) {
@@ -531,6 +547,12 @@ function queryInteractiveUsage<T>(
             INTERACTIVE_USAGE_SETTLE_DELAY_MS
           )
         }
+        return
+      }
+
+      const failure = options.detectFailure?.(cleanOutput)
+      if (failure && (!options.detectFailureAfterCommand || commandSent)) {
+        finishError(new InteractiveUsageError(failure))
         return
       }
 
@@ -563,6 +585,9 @@ function queryCursorUsage(profileEnv: Record<string, string> = {}): Promise<Curs
       command: '/usage',
       parse: parseCursorUsage,
       isReady: (output) => /Plan,\s*search,\s*build anything/i.test(output),
+      // Each account has its own Cursor data directory. New profiles otherwise
+      // stop at the interactive workspace trust prompt before /usage is sent.
+      extraArgs: ['--trust'],
       detectFailure: (output) => {
         if (/not logged in|please (?:sign|log) in|authentication required/i.test(output)) {
           return { status: 'unavailable', detail: 'Cursor hesabı yeniden giriş gerektiriyor' }
@@ -646,55 +671,101 @@ function queryGeminiUsage(profileEnv: Record<string, string> = {}): Promise<Gemi
 }
 
 function parseAntigravityUsage(output: string): AntigravityUsageSnapshot | null {
-  const lines = stripTerminalControlCodes(output)
+  const cleanOutput = stripTerminalControlCodes(output)
+  if (!/Models\s*&\s*Quota|Model Quota|Weekly Limit|Five Hour Limit/i.test(cleanOutput)) {
+    return null
+  }
+
+  const lines = cleanOutput
     .split('\n')
     .map((line) => line.trim())
-  const usageIndex = lines.findIndex((line) => /Models\s*&\s*Quota/i.test(line))
-  if (usageIndex < 0) return null
+    .filter(Boolean)
 
-  const accountLine = lines
-    .slice(usageIndex + 1, usageIndex + 5)
-    .find((line) => /^Account:/i.test(line))
-  const accountEmail = accountLine?.replace(/^Account:\s*/i, '').trim() || null
+  const accountLine = lines.find((line) => /^Account:/i.test(line))
+  const accountFromLabel = accountLine
+    ?.replace(/^Account:\s*/i, '')
+    .replace(/\s*\(.*\)\s*$/, '')
+    .trim()
+  const accountFromEmail = cleanOutput.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]
+  const accountEmail = accountFromLabel || accountFromEmail || null
+  const planType =
+    cleanOutput.match(/\(([^)\n]*(?:Quota|Plan|Pro|Ultra|Starter)[^)\n]*)\)/i)?.[1]?.trim() ??
+    null
 
   const windows: CliUsageWindow[] = []
   const breakdown: CliUsageBreakdown[] = []
   let currentGroup: string | null = null
 
-  for (let index = usageIndex + 1; index < lines.length; index += 1) {
+  for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? ''
-    if (/^[A-Z][A-Z ]+$/.test(line) && /MODELS/.test(line)) {
-      currentGroup = line.toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase())
+    if (/MODELS/i.test(line) && !/limit|quota|remaining/i.test(line)) {
+      currentGroup = line
+        .replace(/\s+/g, ' ')
+        .toLowerCase()
+        .replace(/\b\w/g, (letter) => letter.toUpperCase())
       continue
     }
-    if (!/Weekly Limit Remaining/i.test(line)) continue
 
-    const percentLine = lines[index + 1] ?? ''
-    const percentMatch = percentLine.match(/([\d.]+)%/)
-    if (!percentMatch) continue
+    const limitMatch = line.match(
+      /^(Weekly Limit(?: Remaining)?|Five Hour Limit|5[- ]Hour Limit|Included usage)\s*$/i
+    )
+    if (!limitMatch) continue
 
-    const remaining = Math.min(100, Math.max(0, Number(percentMatch[1])))
-    const nextLine = lines[index + 2] ?? ''
-    const resetMatch = nextLine.match(/^(Refreshes in .+|Quota available)$/i)
-    const label = currentGroup ?? `Limit ${windows.length + 1}`
-    const window: CliUsageWindow = {
+    const nearby = [lines[index + 1], lines[index + 2], lines[index + 3]]
+      .filter((value): value is string => Boolean(value))
+      .join(' ')
+    const remainingMatch =
+      nearby.match(/([\d.]+)\s*%\s*remaining/i) ??
+      nearby.match(/\]\s*([\d.]+)%/) ??
+      nearby.match(/([\d.]+)%/)
+    if (!remainingMatch && !/Quota available/i.test(nearby)) continue
+
+    const remaining = remainingMatch
+      ? Math.min(100, Math.max(0, Number(remainingMatch[1])))
+      : 100
+    const resetLabel =
+      nearby.match(/Refreshes in [^·\n]+/i)?.[0]?.trim() ??
+      ( /Quota available/i.test(nearby) ? 'Quota available' : null)
+    const limitName = limitMatch[1]
+    const label = currentGroup ? `${currentGroup} · ${limitName}` : limitName
+    windows.push({
       label,
       usedPercent: 100 - remaining,
-      windowDurationMins: 10080,
+      windowDurationMins: /week/i.test(limitName) ? 10080 : 300,
       resetsAt: null,
-      resetLabel: resetMatch?.[1] ?? null
-    }
-    windows.push(window)
-    breakdown.push({ label, value: `${remaining.toFixed(2)}% remaining`, usedPercent: 100 - remaining })
+      resetLabel
+    })
+    breakdown.push({
+      label,
+      value: `${remaining.toFixed(2)}% remaining`,
+      usedPercent: 100 - remaining
+    })
   }
 
   if (windows.length === 0) return null
   return {
     accountEmail,
+    planType,
     primary: windows[0],
     secondary: windows[1],
     breakdown
   }
+}
+
+function looksLikeAntigravitySignedIn(output: string): boolean {
+  return (
+    /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(output) ||
+    /Models\s*&\s*Quota|Model Quota/i.test(output) ||
+    /\((?:Antigravity|Gemini).*(?:Quota|Plan|Pro|Ultra|Starter)/i.test(output)
+  )
+}
+
+function looksLikeAntigravityLoginScreen(output: string): boolean {
+  const tail = output.slice(-2500)
+  if (looksLikeAntigravitySignedIn(output)) return false
+  return /how would you like to authenticate|waiting for authentication|opening authentication page|sign in with google/i.test(
+    tail
+  )
 }
 
 function queryAntigravityUsage(
@@ -705,16 +776,23 @@ function queryAntigravityUsage(
     {
       command: '/usage',
       parse: parseAntigravityUsage,
-      isReady: (output) => /(?:^|\n)>\s*(?:\n|$)/m.test(output),
+      isReady: (output) =>
+        /(?:^|\n)>\s*(?:\n|$)/m.test(output) && !looksLikeAntigravityLoginScreen(output),
+      detectFailureAfterCommand: true,
+      timeoutMs: 24000,
       detectFailure: (output) => {
-        if (/not signed in|please (?:sign|log) in|authentication required/i.test(output)) {
-          return { status: 'unavailable', detail: 'Antigravity hesabı yeniden giriş gerektiriyor' }
-        }
-        return null
+        if (!looksLikeAntigravityLoginScreen(output)) return null
+        return { status: 'unavailable', detail: 'Antigravity hesabı yeniden giriş gerektiriyor' }
       }
     },
     profileEnv
   )
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
 }
 
 function baseUsageInfo(
@@ -737,15 +815,50 @@ function withAccountScope(info: CliUsageInfo, accountId?: string): CliUsageInfo 
 async function readProviderUsage(
   kind: CliUsageKind,
   scope: UsageScope = {},
-  antigravityLockHeld = false
+  antigravityLockHeld = false,
+  cursorLockHeld = false
 ): Promise<CliUsageInfo> {
   if (kind === 'antigravity' && !antigravityLockHeld) {
-    return withAntigravityUsageLock(() => readProviderUsage(kind, scope, true))
+    return withAntigravityUsageLock(() => readProviderUsage(kind, scope, true, cursorLockHeld))
+  }
+  if (kind === 'cursor' && !cursorLockHeld && cursorCredentialsSupported()) {
+    return withCursorUsageLock(() => readProviderUsage(kind, scope, antigravityLockHeld, true))
+  }
+
+  const scoped = (info: CliUsageInfo): CliUsageInfo => withAccountScope(info, scope.accountId)
+
+  let preparedIdentity: CliAccountIdentity = {}
+  if (
+    scope.accountId &&
+    !(kind === 'antigravity' && antigravityLockHeld) &&
+    !(kind === 'cursor' && cursorLockHeld)
+  ) {
+    const prepared = await prepareAuthProfileLaunch(
+      { kind, accountId: scope.accountId },
+      'normal'
+    )
+    if (!prepared.ok) {
+      return scoped({
+        ...baseUsageInfo(
+          kind,
+          'error',
+          prepared.error ?? 'Hesap profili hazırlanamadı'
+        )
+      })
+    }
+    if (!prepared.ready) {
+      return scoped({
+        ...baseUsageInfo(kind, 'unavailable', 'Hesap profili hazır değil')
+      })
+    }
+    preparedIdentity = {
+      ...(prepared.identity?.email ? { accountEmail: prepared.identity.email } : {}),
+      ...(prepared.identity?.name ? { accountName: prepared.identity.name } : {})
+    }
   }
 
   const profileEnv = scope.accountId ? getAuthProfileEnv(kind, scope.accountId) : {}
-  const localIdentity = readLocalAccountIdentity(kind, profileEnv)
-  const scoped = (info: CliUsageInfo): CliUsageInfo => withAccountScope(info, scope.accountId)
+  const localIdentity = { ...readLocalAccountIdentity(kind, profileEnv), ...preparedIdentity }
   const detected = detectCli(kind)
   if (!detected.installed) {
     return scoped({ ...baseUsageInfo(kind, 'not-installed', 'CLI bulunamadı'), ...localIdentity })
@@ -781,6 +894,7 @@ async function readProviderUsage(
           ...baseUsageInfo(kind, 'available', 'Live usage pulled from /usage'),
           ...localIdentity,
           ...(snapshot.accountEmail ? { accountEmail: snapshot.accountEmail } : {}),
+          ...(snapshot.planType ? { planType: snapshot.planType } : {}),
           primary: snapshot.primary,
           secondary: snapshot.secondary,
           breakdown: snapshot.breakdown
@@ -828,6 +942,69 @@ async function readProviderUsage(
   }
 }
 
+async function readCursorAccountUsage(
+  requests: UsageAccountRequest[]
+): Promise<CliUsageInfo[]> {
+  if (!cursorCredentialsSupported()) {
+    return Promise.all(
+      requests.map((request) => readProviderUsage('cursor', { accountId: request.accountId }))
+    )
+  }
+
+  return withCursorUsageLock(async () => {
+    let previousTokens: CursorKeychainTokens | null = null
+    try {
+      previousTokens = await readCursorKeychainTokens()
+    } catch (error) {
+      const detail =
+        error instanceof Error ? error.message : 'Cursor credentials could not be read'
+      return requests.map((request) =>
+        withAccountScope(baseUsageInfo('cursor', 'error', detail), request.accountId)
+      )
+    }
+
+    const providers: CliUsageInfo[] = []
+    try {
+      for (const request of requests) {
+        const prepared = await prepareAuthProfileLaunch(request, 'normal')
+        if (!prepared.ok) {
+          providers.push(
+            withAccountScope(
+              baseUsageInfo(
+                'cursor',
+                'error',
+                prepared.error ?? 'Cursor account could not be prepared'
+              ),
+              request.accountId
+            )
+          )
+          continue
+        }
+        if (!prepared.ready) {
+          providers.push(
+            withAccountScope(
+              baseUsageInfo('cursor', 'unavailable', 'Account profile is not ready'),
+              request.accountId
+            )
+          )
+          continue
+        }
+        providers.push(
+          await readProviderUsage('cursor', { accountId: request.accountId }, false, true)
+        )
+      }
+    } finally {
+      try {
+        await restoreCursorKeychainTokens(previousTokens)
+      } catch (error) {
+        console.error('Could not restore Cursor credentials after usage check:', error)
+      }
+    }
+
+    return providers
+  })
+}
+
 async function readAntigravityAccountUsage(
   requests: UsageAccountRequest[]
 ): Promise<CliUsageInfo[]> {
@@ -846,6 +1023,19 @@ async function readAntigravityAccountUsage(
     try {
       for (const request of requests) {
         const prepared = await prepareAuthProfileLaunch(request, 'normal')
+        if (!prepared.ok) {
+          providers.push(
+            withAccountScope(
+              baseUsageInfo(
+                'antigravity',
+                'error',
+                prepared.error ?? 'Antigravity hesabı hazırlanamadı'
+              ),
+              request.accountId
+            )
+          )
+          continue
+        }
         if (!prepared.ready) {
           providers.push(
             withAccountScope(
@@ -855,14 +1045,59 @@ async function readAntigravityAccountUsage(
           )
           continue
         }
-        providers.push(
-          await readProviderUsage('antigravity', { accountId: request.accountId }, true)
-        )
+
+        await delay(600)
+        const identity: CliAccountIdentity = {
+          ...(prepared.identity?.email ? { accountEmail: prepared.identity.email } : {}),
+          ...(prepared.identity?.name ? { accountName: prepared.identity.name } : {})
+        }
+
+        try {
+          const snapshot = await queryAntigravityUsage({})
+          providers.push(
+            withAccountScope(
+              {
+                ...baseUsageInfo('antigravity', 'available', 'Live usage pulled from /usage'),
+                ...identity,
+                ...(snapshot.accountEmail ? { accountEmail: snapshot.accountEmail } : {}),
+                ...(snapshot.planType ? { planType: snapshot.planType } : {}),
+                primary: snapshot.primary,
+                secondary: snapshot.secondary,
+                breakdown: snapshot.breakdown
+              },
+              request.accountId
+            )
+          )
+        } catch (error) {
+          providers.push(
+            withAccountScope(
+              {
+                ...baseUsageInfo(
+                  'antigravity',
+                  error instanceof InteractiveUsageError ? error.status : 'error',
+                  error instanceof Error ? error.message : 'CLI usage could not be read'
+                ),
+                ...identity
+              },
+              request.accountId
+            )
+          )
+        }
       }
     } finally {
       try {
-        if (previousCredential) await writeAntigravityCredential(previousCredential)
-        else await deleteAntigravityCredential()
+        const sessionAccountId = getAntigravitySessionAccount()
+        if (sessionAccountId && hasStoredAntigravityCredentials(sessionAccountId)) {
+          await applyAntigravityCredentialsForAccount(sessionAccountId)
+        } else if (previousCredential) {
+          const currentCredential = await readAntigravityCredential()
+          if (currentCredential !== previousCredential) {
+            await writeAntigravityCredential(previousCredential)
+          }
+        } else {
+          const currentCredential = await readAntigravityCredential()
+          if (currentCredential) await deleteAntigravityCredential()
+        }
       } catch (error) {
         console.error('Could not restore Antigravity credential after usage check:', error)
       }
@@ -874,23 +1109,62 @@ async function readAntigravityAccountUsage(
 
 async function readAccountUsage(requests: UsageAccountRequest[]): Promise<CliUsageInfo[]> {
   const antigravityRequests = requests.filter((request) => request.kind === 'antigravity')
-  const otherRequests = requests.filter((request) => request.kind !== 'antigravity')
-  const [otherProviders, antigravityProviders] = await Promise.all([
-    Promise.all(
-      otherRequests.map((request) =>
-        readProviderUsage(request.kind, { accountId: request.accountId })
-      )
-    ),
+  const cursorRequests = requests.filter((request) => request.kind === 'cursor')
+  const otherRequests = requests.filter(
+    (request) => request.kind !== 'antigravity' && request.kind !== 'cursor'
+  )
+  const requestsByKind = new Map<CliUsageKind, UsageAccountRequest[]>()
+  for (const request of otherRequests) {
+    const current = requestsByKind.get(request.kind) ?? []
+    current.push(request)
+    requestsByKind.set(request.kind, current)
+  }
+
+  const providersByRequest = new Map<string, CliUsageInfo>()
+  await Promise.all(
+    [...requestsByKind.values()].map(async (kindRequests) => {
+      for (const request of kindRequests) {
+        try {
+          const provider = await readProviderUsage(request.kind, { accountId: request.accountId })
+          providersByRequest.set(usageRequestKey(request), provider)
+        } catch (error) {
+          providersByRequest.set(
+            usageRequestKey(request),
+            withAccountScope(
+              baseUsageInfo(
+                request.kind,
+                'error',
+                error instanceof Error ? error.message : 'Account usage could not be read'
+              ),
+              request.accountId
+            )
+          )
+        }
+      }
+    })
+  )
+
+  const otherProviders = otherRequests.map(
+    (request) => providersByRequest.get(usageRequestKey(request)) as CliUsageInfo
+  )
+  const cursorProviders =
+    cursorRequests.length > 0 ? await readCursorAccountUsage(cursorRequests) : []
+  const antigravityProviders =
     antigravityRequests.length > 0
-      ? readAntigravityAccountUsage(antigravityRequests)
-      : Promise.resolve([] as CliUsageInfo[])
-  ])
-  return [...otherProviders, ...antigravityProviders]
+      ? await readAntigravityAccountUsage(antigravityRequests)
+      : []
+  return [...otherProviders, ...cursorProviders, ...antigravityProviders]
 }
 
 export async function readCliUsage(request?: CliUsageRequest): Promise<CliUsageResponse> {
   const providers = request?.accounts
-    ? await readAccountUsage(request.accounts)
+    ? await readAccountUsage(
+        [
+          ...new Map(
+            request.accounts.map((account) => [usageRequestKey(account), account])
+          ).values()
+        ]
+      )
     : await Promise.all(USAGE_KINDS.map((kind) => readProviderUsage(kind)))
   return {
     checkedAt: Date.now(),

@@ -6,8 +6,16 @@ import initSqlJs, { type Database } from 'sql.js'
 import {
   type PersistedEditorState,
   type PersistedSnapshot,
+  type PersistedUsageSnapshot,
+  createEmptyUsageSnapshot,
   PERSISTENCE_SCHEMA_VERSION
 } from '@shared/contracts/persistence'
+import type {
+  CliUsageBreakdown,
+  CliUsageInfo,
+  CliUsageStatus,
+  CliUsageWindow
+} from '@shared/contracts/usage'
 import {
   type PanelDefinition,
   type PanelType,
@@ -227,6 +235,115 @@ function parseLayout(raw: unknown): WorkspaceLayout {
   }
 }
 
+function parseUsageWindow(raw: unknown): CliUsageWindow | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const window = raw as Partial<CliUsageWindow>
+  if (typeof window.usedPercent !== 'number' || typeof window.windowDurationMins !== 'number') {
+    return undefined
+  }
+
+  return {
+    ...(typeof window.label === 'string' ? { label: window.label } : {}),
+    usedPercent: window.usedPercent,
+    windowDurationMins: window.windowDurationMins,
+    resetsAt: typeof window.resetsAt === 'number' ? window.resetsAt : null,
+    ...(typeof window.resetLabel === 'string' || window.resetLabel === null
+      ? { resetLabel: window.resetLabel }
+      : {})
+  }
+}
+
+function parseUsageBreakdown(raw: unknown): CliUsageBreakdown[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const items = raw.flatMap((item): CliUsageBreakdown[] => {
+    if (!item || typeof item !== 'object') return []
+    const row = item as Partial<CliUsageBreakdown>
+    if (typeof row.label !== 'string' || typeof row.value !== 'string') return []
+    return [
+      {
+        label: row.label,
+        value: row.value,
+        ...(typeof row.usedPercent === 'number' ? { usedPercent: row.usedPercent } : {})
+      }
+    ]
+  })
+  return items.length > 0 ? items : undefined
+}
+
+function parseUsageStatus(raw: unknown): CliUsageStatus | null {
+  if (raw === 'available' || raw === 'not-installed' || raw === 'unavailable' || raw === 'error') {
+    return raw
+  }
+  return null
+}
+
+function parseUsageProvider(raw: unknown): CliUsageInfo | null {
+  if (!raw || typeof raw !== 'object') return null
+  const provider = raw as Partial<CliUsageInfo>
+  if (
+    typeof provider.kind !== 'string' ||
+    !AI_ACCOUNT_KINDS.includes(provider.kind) ||
+    typeof provider.label !== 'string' ||
+    typeof provider.detail !== 'string'
+  ) {
+    return null
+  }
+
+  const status = parseUsageStatus(provider.status)
+  if (!status) return null
+
+  const primary = parseUsageWindow(provider.primary)
+  const secondary = parseUsageWindow(provider.secondary)
+  const breakdown = parseUsageBreakdown(provider.breakdown)
+  const credits =
+    provider.credits && typeof provider.credits === 'object'
+      ? {
+          hasCredits: provider.credits.hasCredits === true,
+          unlimited: provider.credits.unlimited === true,
+          balance: typeof provider.credits.balance === 'string' ? provider.credits.balance : null
+        }
+      : undefined
+
+  return {
+    kind: provider.kind,
+    ...(typeof provider.accountId === 'string' ? { accountId: provider.accountId } : {}),
+    label: provider.label,
+    status,
+    detail: provider.detail,
+    ...(typeof provider.accountEmail === 'string' ? { accountEmail: provider.accountEmail } : {}),
+    ...(typeof provider.accountName === 'string' ? { accountName: provider.accountName } : {}),
+    ...(typeof provider.planType === 'string' || provider.planType === null
+      ? { planType: provider.planType }
+      : {}),
+    ...(primary ? { primary } : {}),
+    ...(secondary ? { secondary } : {}),
+    ...(breakdown ? { breakdown } : {}),
+    ...(credits ? { credits } : {})
+  }
+}
+
+function parseUsage(raw: unknown): PersistedUsageSnapshot {
+  if (!raw || typeof raw !== 'object') return createEmptyUsageSnapshot()
+  const snapshot = raw as Partial<PersistedUsageSnapshot>
+  const providers = Array.isArray(snapshot.providers)
+    ? snapshot.providers.flatMap((item) => {
+        const provider = parseUsageProvider(item)
+        return provider ? [provider] : []
+      })
+    : []
+
+  const checkedAtByAccountId: Record<string, number> = {}
+  if (snapshot.checkedAtByAccountId && typeof snapshot.checkedAtByAccountId === 'object') {
+    for (const [accountId, checkedAt] of Object.entries(snapshot.checkedAtByAccountId)) {
+      if (typeof checkedAt === 'number' && Number.isFinite(checkedAt)) {
+        checkedAtByAccountId[accountId] = checkedAt
+      }
+    }
+  }
+
+  return { providers, checkedAtByAccountId }
+}
+
 function parseAccounts(raw: unknown): AiAccount[] {
   if (!Array.isArray(raw)) return []
 
@@ -322,7 +439,8 @@ export function createDefaultSnapshot(): PersistedSnapshot {
     },
     accounts: [],
     activeAccountByKind: createDefaultActiveAccountByKind(),
-    tasksByProject: {}
+    tasksByProject: {},
+    usage: createEmptyUsageSnapshot()
   }
 }
 
@@ -447,6 +565,16 @@ export function loadSnapshot(): PersistedSnapshot {
     }
   }
 
+  const usageResult = database.exec("SELECT value FROM meta WHERE key = 'ai_usage'")
+  let usage = createEmptyUsageSnapshot()
+  if (usageResult.length > 0 && usageResult[0]?.values.length > 0) {
+    try {
+      usage = parseUsage(JSON.parse(usageResult[0].values[0][0] as string))
+    } catch {
+      usage = createEmptyUsageSnapshot()
+    }
+  }
+
   return {
     projects,
     activeProjectId,
@@ -454,7 +582,8 @@ export function loadSnapshot(): PersistedSnapshot {
     editor,
     accounts,
     activeAccountByKind,
-    tasksByProject
+    tasksByProject,
+    usage
   }
 }
 
@@ -471,6 +600,10 @@ export function saveSnapshot(snapshot: PersistedSnapshot): void {
     database.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [
       'active_ai_accounts',
       JSON.stringify(snapshot.activeAccountByKind ?? createDefaultActiveAccountByKind())
+    ])
+    database.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [
+      'ai_usage',
+      JSON.stringify(snapshot.usage ?? createEmptyUsageSnapshot())
     ])
     database.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [
       'active_project_id',

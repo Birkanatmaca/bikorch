@@ -63,56 +63,56 @@ export function useOrchestratorContextMenu(getCanvasRect: () => DOMRect | null):
       items: [
         {
           id: 'add-terminal',
-          label: 'Add Terminal',
+          label: 'Terminal',
           shortcut: 'Ctrl+`',
           icon: Terminal,
           action: () => addAtCursor('terminal')
         },
         {
           id: 'add-claude',
-          label: 'Add Claude Code',
+          label: 'Claude',
           icon: Bot,
           action: () => addAtCursor('claude')
         },
         {
           id: 'add-cursor',
-          label: 'Add Cursor CLI',
+          label: 'Cursor',
           icon: Sparkles,
           action: () => addAtCursor('cursor')
         },
         {
           id: 'add-gemini',
-          label: 'Open Gemini CLI',
+          label: 'Gemini',
           icon: Sparkles,
           action: () => addAtCursor('gemini')
         },
         {
           id: 'add-antigravity',
-          label: 'Open Antigravity CLI',
+          label: 'Antigravity',
           icon: Sparkles,
           action: () => addAtCursor('antigravity')
         },
         {
           id: 'add-codex',
-          label: 'Open Codex CLI',
+          label: 'Codex',
           icon: Sparkles,
           action: () => addAtCursor('codex')
         },
         {
           id: 'add-chatgpt',
-          label: 'Open ChatGPT',
+          label: 'ChatGPT',
           icon: MessageCircle,
           action: () => addAtCursor('chatgpt')
         },
         {
           id: 'add-claude-chat',
-          label: 'Open Claude',
+          label: 'Claude Chat',
           icon: Bot,
           action: () => addAtCursor('claude-chat')
         },
         {
           id: 'add-git',
-          label: 'Add Git Changes',
+          label: 'Git Changes',
           icon: GitBranch,
           action: () => addAtCursor('git-changes')
         }

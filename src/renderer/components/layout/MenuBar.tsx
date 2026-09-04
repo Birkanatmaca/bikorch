@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '@renderer/lib/utils'
 import { useOpenProject } from '@renderer/hooks/use-open-project'
 import { useHasOpenFolder } from '@renderer/hooks/use-has-open-folder'
@@ -32,26 +33,97 @@ function MenuDropdown({
   onToggle: () => void
   onClose: () => void
 }): React.JSX.Element {
-  const ref = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [menuStyle, setMenuStyle] = useState<{ top: number; left: number } | null>(null)
+
+  const updateMenuPosition = (): void => {
+    const button = buttonRef.current
+    if (!button) return
+    const rect = button.getBoundingClientRect()
+    const menuWidth = 220
+    const left = Math.min(rect.left, window.innerWidth - menuWidth - 8)
+    setMenuStyle({
+      top: rect.bottom + 2,
+      left: Math.max(8, left)
+    })
+  }
+
+  useLayoutEffect(() => {
+    if (!open) return
+    updateMenuPosition()
+  }, [open])
 
   useEffect(() => {
     if (!open) return
 
     const handleClickOutside = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose()
-      }
+      const target = e.target as Node
+      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      onClose()
+    }
+
+    const handleReposition = (): void => {
+      updateMenuPosition()
     }
 
     document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    window.addEventListener('resize', handleReposition)
+    window.addEventListener('scroll', handleReposition, true)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      window.removeEventListener('resize', handleReposition)
+      window.removeEventListener('scroll', handleReposition, true)
+    }
   }, [open, onClose])
 
+  const dropdown =
+    open && menuStyle
+      ? createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            className="header-dropdown-menu app-no-drag fixed z-[10001] min-w-[220px] overflow-hidden rounded-xl py-1 shadow-2xl animate-scale-in"
+            style={{ top: menuStyle.top, left: menuStyle.left }}
+          >
+            {menu.items.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                role="menuitem"
+                disabled={item.disabled}
+                onClick={() => {
+                  if (!item.disabled && item.action) {
+                    item.action()
+                    onClose()
+                  }
+                }}
+                className={cn(
+                  'flex w-full items-center justify-between gap-6 px-3 py-1.5 text-left text-xs transition-colors',
+                  item.disabled
+                    ? 'cursor-not-allowed text-text-muted/50'
+                    : 'text-text-secondary hover:bg-hover hover:text-text-primary'
+                )}
+              >
+                <span>{item.label}</span>
+                {item.shortcut && (
+                  <span className="font-mono text-[10px] text-text-muted">{item.shortcut}</span>
+                )}
+              </button>
+            ))}
+          </div>,
+          document.body
+        )
+      : null
+
   return (
-    <div ref={ref} className="relative">
+    <>
       <button
+        ref={buttonRef}
         type="button"
         onClick={onToggle}
+        aria-expanded={open}
+        aria-haspopup="menu"
         className={cn(
           'app-no-drag rounded px-2 py-0.5 text-xs text-text-secondary transition-colors',
           open ? 'bg-hover text-text-primary' : 'hover:bg-hover hover:text-text-primary'
@@ -59,43 +131,14 @@ function MenuDropdown({
       >
         {menu.label}
       </button>
-
-      {open && (
-        <div className="app-no-drag absolute left-0 top-full z-50 mt-0.5 min-w-[220px] overflow-hidden rounded-md border border-border bg-elevated py-1 shadow-xl">
-          {menu.items.map((item) => (
-            <button
-              key={item.label}
-              type="button"
-              disabled={item.disabled}
-              onClick={() => {
-                if (!item.disabled && item.action) {
-                  item.action()
-                  onClose()
-                }
-              }}
-              className={cn(
-                'flex w-full items-center justify-between gap-6 px-3 py-1.5 text-left text-xs',
-                item.disabled
-                  ? 'cursor-not-allowed text-text-muted/50'
-                  : 'text-text-secondary hover:bg-hover hover:text-text-primary'
-              )}
-            >
-              <span>{item.label}</span>
-              {item.shortcut && (
-                <span className="font-mono text-[10px] text-text-muted">{item.shortcut}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+      {dropdown}
+    </>
   )
 }
 
 export function MenuBar({ onCommandPalette, className }: MenuBarProps): React.JSX.Element {
   const [openMenu, setOpenMenu] = useState<string | null>(null)
   const { openFolderPicker } = useOpenProject()
-  const addProject = useWorkspaceStore((s) => s.addProject)
   const addPanel = useWorkspaceStore((s) => s.addPanel)
   const activeProjectId = useWorkspaceStore((s) => s.activeProjectId)
   const toggleSidebar = useWorkspaceStore((s) => s.toggleSidebar)
@@ -113,7 +156,7 @@ export function MenuBar({ onCommandPalette, className }: MenuBarProps): React.JS
         {
           label: 'New Project',
           shortcut: 'Ctrl+N',
-          action: () => addProject()
+          action: () => void openFolderPicker({ forceNew: true })
         },
         { label: 'Save Workspace', disabled: true },
         { label: 'Close Window', action: () => void window.api.window.close() }
@@ -174,36 +217,36 @@ export function MenuBar({ onCommandPalette, className }: MenuBarProps): React.JS
       label: 'Terminal',
       items: [
         {
-          label: 'New Terminal',
+          label: 'Terminal',
           shortcut: 'Ctrl+`',
           action: () => addPanel('terminal')
         },
         {
-          label: 'New Claude Code',
+          label: 'Claude',
           action: () => addPanel('claude')
         },
         {
-          label: 'New Cursor CLI',
+          label: 'Cursor',
           action: () => addPanel('cursor')
         },
         {
-          label: 'Open Gemini CLI',
+          label: 'Gemini',
           action: () => addPanel('gemini')
         },
         {
-          label: 'Open Antigravity CLI',
+          label: 'Antigravity',
           action: () => addPanel('antigravity')
         },
         {
-          label: 'Open Codex CLI',
+          label: 'Codex',
           action: () => addPanel('codex')
         },
         {
-          label: 'Open ChatGPT',
+          label: 'ChatGPT',
           action: () => addPanel('chatgpt')
         },
         {
-          label: 'Open Claude',
+          label: 'Claude Chat',
           action: () => addPanel('claude-chat')
         }
       ]

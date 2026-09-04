@@ -140,25 +140,58 @@ export function TerminalView({
     let idleTimer: number | null = null
     let authInspectTimer: number | null = null
     let authCaptured = false
+    let authCaptureInFlight = false
+    let lastAuthCaptureError: string | null = null
     let receivedSinceBusy = false
 
     const inspectAuthenticatedProfile = async (): Promise<void> => {
-      if (launchMode !== 'login' || !accountId || kind === 'terminal' || authCaptured) return
-      const emailMatches = outputTail.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)
-      const email = emailMatches?.at(-1)
-      const request = { kind, accountId, ...(email ? { email } : {}) }
-      const result =
-        kind === 'antigravity' && email
-          ? await window.api.authProfiles.importCurrent(request)
-          : await window.api.authProfiles.inspect(request)
-      if (!result.ready) return
-      authCaptured = true
-      window.dispatchEvent(
-        new CustomEvent(AI_ACCOUNT_AUTHENTICATED_EVENT, {
-          detail: { accountId, kind, identity: result.identity }
-        })
-      )
-      window.dispatchEvent(new Event(AI_ACCOUNTS_REFRESH_EVENT))
+      if (
+        launchMode !== 'login' ||
+        !accountId ||
+        kind === 'terminal' ||
+        authCaptured ||
+        authCaptureInFlight
+      ) {
+        return
+      }
+      authCaptureInFlight = true
+      try {
+        const emailMatches = outputTail.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)
+        const email = emailMatches?.at(-1)
+        if (kind === 'antigravity' && !email) return
+        const request = { kind, accountId, ...(email ? { email } : {}) }
+        const result =
+          kind === 'antigravity' || kind === 'cursor'
+            ? await window.api.authProfiles.importCurrent(request)
+            : await window.api.authProfiles.inspect(request)
+        if (!result.ok) {
+          const message = result.error ?? 'Could not save this CLI account session'
+          if (message !== lastAuthCaptureError) {
+            lastAuthCaptureError = message
+            terminal.writeln(`\r\n\x1b[33m[Account] ${message}\x1b[0m`)
+          }
+          return
+        }
+        if (!result.ready) return
+        authCaptured = true
+        window.dispatchEvent(
+          new CustomEvent(AI_ACCOUNT_AUTHENTICATED_EVENT, {
+            detail: { accountId, kind, identity: result.identity }
+          })
+        )
+        window.dispatchEvent(new Event(AI_ACCOUNTS_REFRESH_EVENT))
+      } catch (captureError) {
+        const message =
+          captureError instanceof Error
+            ? captureError.message
+            : 'Could not save this CLI account session'
+        if (message !== lastAuthCaptureError) {
+          lastAuthCaptureError = message
+          terminal.writeln(`\r\n\x1b[33m[Account] ${message}\x1b[0m`)
+        }
+      } finally {
+        authCaptureInFlight = false
+      }
     }
 
     const scheduleAuthInspect = (): void => {
@@ -167,7 +200,7 @@ export function TerminalView({
       authInspectTimer = window.setTimeout(() => {
         authInspectTimer = null
         void inspectAuthenticatedProfile()
-      }, 900)
+      }, kind === 'antigravity' ? 1600 : 900)
     }
 
     const applyCliStatus = (next: 'waiting' | 'busy'): void => {

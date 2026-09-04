@@ -6,6 +6,17 @@ import { ADD_PANEL_MENU_EVENT } from '@renderer/lib/app-events'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { cn } from '@renderer/lib/utils'
 
+const PANEL_MENU_LABELS: Partial<Record<PanelType, string>> = {
+  terminal: 'Terminal',
+  claude: 'Claude',
+  cursor: 'Cursor',
+  gemini: 'Gemini',
+  antigravity: 'Antigravity',
+  codex: 'Codex',
+  chatgpt: 'ChatGPT',
+  'claude-chat': 'Claude Chat'
+}
+
 const ADDABLE_PANEL_TYPES: PanelType[] = [
   'terminal',
   'claude',
@@ -100,7 +111,7 @@ export function AddPanelMenu(): React.JSX.Element {
   const menu = open && menuStyle ? (
     <div
       ref={menuRef}
-      className="fixed z-[9999] min-w-[200px] overflow-hidden rounded-lg border border-border bg-elevated py-1 shadow-xl animate-slide-up"
+      className="header-dropdown-menu fixed z-[10001] min-w-[200px] overflow-hidden rounded-xl py-1 shadow-2xl animate-scale-in"
       style={{ top: menuStyle.top, left: menuStyle.left }}
     >
       <p className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-text-muted">
@@ -116,17 +127,7 @@ export function AddPanelMenu(): React.JSX.Element {
           }}
           className="flex w-full items-center px-3 py-2 text-left text-xs text-text-secondary transition-colors hover:bg-hover hover:text-text-primary"
         >
-          {type === 'gemini'
-            ? 'Open Gemini CLI'
-            : type === 'antigravity'
-              ? 'Open Antigravity CLI'
-              : type === 'codex'
-                ? 'Open Codex CLI'
-                : type === 'chatgpt'
-                  ? 'Open ChatGPT'
-                  : type === 'claude-chat'
-                    ? 'Open Claude'
-              : PANEL_TYPE_LABELS[type]}
+          {PANEL_MENU_LABELS[type] ?? PANEL_TYPE_LABELS[type]}
         </button>
       ))}
     </div>
@@ -139,9 +140,8 @@ export function AddPanelMenu(): React.JSX.Element {
         type="button"
         onClick={() => (open ? closeMenu() : openMenu())}
         className={cn(
-          'app-no-drag flex h-7 items-center gap-1 rounded-md border border-border px-2.5 text-[11px] text-text-secondary transition-all duration-150',
-          'hover:border-primary/40 hover:bg-hover hover:text-text-primary',
-          open && 'border-primary/50 bg-hover text-text-primary shadow-sm'
+          'glass-button app-no-drag h-7 px-2.5 text-[11px]',
+          open && 'glass-button-primary shadow-sm'
         )}
         title="Add panel"
         aria-expanded={open}

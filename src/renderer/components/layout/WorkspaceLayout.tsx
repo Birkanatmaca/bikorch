@@ -20,12 +20,17 @@ const DRAG_TYPE = 'application/x-panel-id'
 const LAYOUT_EPSILON = 0.5
 const LEFT_MIN = 10
 const LEFT_MAX = 32
+const LEFT_ACCOUNTS_MIN = 18
+const LEFT_ACCOUNTS_SIZE = 24
+const LEFT_ACCOUNTS_MAX = 36
 const RIGHT_MIN = 14
 const RIGHT_MAX = 80
 const CENTER_MIN = 12
 
-function clampLeftSize(size: number): number {
-  return Math.min(LEFT_MAX, Math.max(LEFT_MIN, size))
+function clampLeftSize(size: number, accountsView = false): number {
+  const min = accountsView ? LEFT_ACCOUNTS_MIN : LEFT_MIN
+  const max = accountsView ? LEFT_ACCOUNTS_MAX : LEFT_MAX
+  return Math.min(max, Math.max(min, size))
 }
 
 function hasLayoutChange(
@@ -103,8 +108,8 @@ function ZoneDropArea({
   return (
     <div
       className={cn(
-        'relative h-full min-h-0 transition-colors',
-        isDragOver && 'ring-2 ring-inset ring-primary/40'
+        'relative h-full min-h-0 transition-[background-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
+        isDragOver && 'ring-2 ring-inset ring-primary/35 bg-primary/5'
       )}
     >
       {panels.length === 0 ? (
@@ -214,6 +219,7 @@ export function WorkspaceLayout(): React.JSX.Element {
 
   const [dragOverZone, setDragOverZone] = useState<PanelZone | null>(null)
   const [draggingPanelId, setDraggingPanelId] = useState<string | null>(null)
+  const [layoutResizing, setLayoutResizing] = useState(false)
   const draggingPanelIdRef = useRef<string | null>(null)
   const verticalGroupRef = useRef<ImperativePanelGroupHandle>(null)
   const horizontalGroupRef = useRef<ImperativePanelGroupHandle>(null)
@@ -278,13 +284,14 @@ export function WorkspaceLayout(): React.JSX.Element {
       const hasLeftVisible = hasLeftPanel && !leftCollapsed
       const hasRight =
         (workspaceState?.panels.filter((p) => p.zone === 'right').length ?? 0) > 0
+      const accountsView = (workspaceState?.layout.leftSidebarView ?? 'files') === 'accounts'
 
       // Do not persist sizes while Files is collapsed — keep the last open width.
       if (leftCollapsed) return
 
       if (hasLeftVisible && hasRight && sizes.length >= 3) {
         const partial = {
-          leftSize: clampLeftSize(sizes[0]),
+          leftSize: clampLeftSize(sizes[0], accountsView),
           centerSize: sizes[1],
           rightSize: sizes[2]
         }
@@ -295,7 +302,7 @@ export function WorkspaceLayout(): React.JSX.Element {
 
       if (hasLeftVisible && sizes.length >= 2) {
         const partial = {
-          leftSize: clampLeftSize(sizes[0]),
+          leftSize: clampLeftSize(sizes[0], accountsView),
           centerSize: sizes[1]
         }
         if (!hasLayoutChange(current, partial)) return
@@ -317,6 +324,8 @@ export function WorkspaceLayout(): React.JSX.Element {
 
   const leftCollapsed = workspace?.layout.leftCollapsed ?? false
   const hasLeftPanel = workspace?.panels.some((p) => p.zone === 'left') ?? false
+  const leftSidebarView = workspace?.layout.leftSidebarView ?? 'files'
+  const isAccountsView = leftSidebarView === 'accounts'
 
   useEffect(() => {
     const panel = leftPanelRef.current
@@ -327,13 +336,21 @@ export function WorkspaceLayout(): React.JSX.Element {
     }
 
     panel.expand()
-    const savedSize = clampLeftSize(
-      useWorkspaceStore.getState().workspaces[activeProjectId ?? '']?.layout.leftSize ?? 14
-    )
+    const layoutState =
+      useWorkspaceStore.getState().workspaces[activeProjectId ?? '']?.layout
+    const savedSize = clampLeftSize(layoutState?.leftSize ?? 14, isAccountsView)
+    const targetSize = isAccountsView ? Math.max(savedSize, LEFT_ACCOUNTS_SIZE) : savedSize
     requestAnimationFrame(() => {
-      leftPanelRef.current?.resize(savedSize)
+      leftPanelRef.current?.resize(targetSize)
     })
-  }, [activeProjectId, hasLeftPanel, leftCollapsed])
+    if (
+      isAccountsView &&
+      activeProjectId &&
+      targetSize !== layoutState?.leftSize
+    ) {
+      updateLayout(activeProjectId, { leftSize: targetSize })
+    }
+  }, [activeProjectId, hasLeftPanel, leftCollapsed, isAccountsView, updateLayout])
 
   if (!workspace || !activeProjectId) {
     return (
@@ -350,14 +367,24 @@ export function WorkspaceLayout(): React.JSX.Element {
   const rightPanels = byZone('right')
   const bottomPanels = byZone('bottom')
   const showLeftSidebar = hasLeftPanel && !leftCollapsed
-  const leftSize = clampLeftSize(layout.leftSize || 14)
+  const leftSize = isAccountsView
+    ? Math.max(clampLeftSize(layout.leftSize || 14, true), LEFT_ACCOUNTS_SIZE)
+    : clampLeftSize(layout.leftSize || 14)
+  const leftMinSize = isAccountsView ? LEFT_ACCOUNTS_MIN : LEFT_MIN
+  const leftMaxSize = isAccountsView ? LEFT_ACCOUNTS_MAX : LEFT_MAX
   const hasRight = rightPanels.length > 0
   const hasBottom = bottomPanels.length > 0
+
+  const layoutGroupClass = cn(
+    'layout-panel-group h-full',
+    layoutResizing ? 'layout-resizing' : 'layout-idle'
+  )
 
   const mainContent = (
     <PanelGroup
       ref={horizontalGroupRef}
       direction="horizontal"
+      className={layoutGroupClass}
       onLayout={handleHorizontalLayout}
       style={{ direction: 'ltr' }}
     >
@@ -370,8 +397,8 @@ export function WorkspaceLayout(): React.JSX.Element {
             collapsible
             collapsedSize={0}
             defaultSize={leftSize}
-            minSize={LEFT_MIN}
-            maxSize={LEFT_MAX}
+            minSize={leftMinSize}
+            maxSize={leftMaxSize}
           >
             <ZoneDropArea
               zone="left"
@@ -383,13 +410,14 @@ export function WorkspaceLayout(): React.JSX.Element {
               onDragLeave={() => setDragOverZone(null)}
             >
               <LeftSidebar
-                view={layout.leftSidebarView ?? 'files'}
+                view={leftSidebarView}
                 onHide={() => toggleSidebar(activeProjectId)}
               />
             </ZoneDropArea>
           </Panel>
           <PanelResizeHandle
             disabled={!showLeftSidebar}
+            onDragging={setLayoutResizing}
             className={cn('app-no-drag', !showLeftSidebar && 'resize-handle-hidden')}
           />
         </>
@@ -422,7 +450,7 @@ export function WorkspaceLayout(): React.JSX.Element {
 
       {hasRight && (
         <>
-          <PanelResizeHandle className="app-no-drag" />
+          <PanelResizeHandle className="app-no-drag" onDragging={setLayoutResizing} />
           <Panel
             id="diff-sidebar"
             order={3}
@@ -454,7 +482,7 @@ export function WorkspaceLayout(): React.JSX.Element {
   )
 
   return (
-    <div className="flex min-h-0 flex-1">
+    <div className="workspace-frame flex min-h-0 flex-1">
       <SidebarActivityBar
         isOpen={!leftCollapsed}
         view={layout.leftSidebarView ?? 'files'}
@@ -468,12 +496,16 @@ export function WorkspaceLayout(): React.JSX.Element {
         <PanelGroup
           ref={verticalGroupRef}
           direction="vertical"
+          className={layoutGroupClass}
           onLayout={handleVerticalLayout}
         >
           <Panel defaultSize={layout.mainVerticalSize} minSize={30}>
             {mainContent}
           </Panel>
-          <PanelResizeHandle className="h-1 bg-border transition-colors hover:bg-primary/40" />
+          <PanelResizeHandle
+            className="app-no-drag"
+            onDragging={setLayoutResizing}
+          />
           <Panel defaultSize={layout.bottomSize} minSize={10} maxSize={60}>
             <ZoneDropArea
               zone="bottom"

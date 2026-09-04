@@ -30,7 +30,7 @@ export function StatusBar(): React.JSX.Element {
   }, [projectId, projectRoot, refresh])
 
   return (
-    <footer className="flex h-6 shrink-0 items-center justify-between border-t border-border bg-panel-bg px-3 font-mono text-[10px] text-text-muted">
+    <footer className="app-status-bar glass-surface flex h-6 shrink-0 items-center justify-between border-t px-3 font-mono text-[10px] text-text-muted">
       <div className="flex min-w-0 items-center gap-3">
         <span className="truncate text-text-secondary">{projectName ?? 'No project'}</span>
         {projectRoot && (
