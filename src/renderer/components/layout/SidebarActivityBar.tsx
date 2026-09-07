@@ -1,15 +1,16 @@
-import { BarChart3, CheckSquare2, Files, GitBranch, UsersRound } from 'lucide-react'
+import { BarChart3, CheckSquare2, Files, GitBranch, Music2, UsersRound } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 
 interface SidebarActivityBarProps {
   isOpen: boolean
-  view: 'files' | 'changes' | 'accounts' | 'tasks' | 'profile'
+  view: 'files' | 'changes' | 'accounts' | 'tasks' | 'profile' | 'music'
   changesCount: number
   onSelectFiles: () => void
   onSelectChanges: () => void
   onSelectAccounts: () => void
   onSelectTasks: () => void
   onSelectProfile: () => void
+  onSelectMusic: () => void
 }
 
 export function SidebarActivityBar({
@@ -20,13 +21,15 @@ export function SidebarActivityBar({
   onSelectChanges,
   onSelectAccounts,
   onSelectTasks,
-  onSelectProfile
+  onSelectProfile,
+  onSelectMusic
 }: SidebarActivityBarProps): React.JSX.Element {
   const filesActive = isOpen && view === 'files'
   const changesActive = isOpen && view === 'changes'
   const accountsActive = isOpen && view === 'accounts'
   const tasksActive = isOpen && view === 'tasks'
   const profileActive = isOpen && view === 'profile'
+  const musicActive = isOpen && view === 'music'
   const badge = changesCount > 99 ? '99+' : String(changesCount)
 
   return (
@@ -82,6 +85,19 @@ export function SidebarActivityBar({
         )}
       >
         <UsersRound className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={onSelectMusic}
+        aria-pressed={musicActive}
+        title={musicActive ? 'Hide music' : 'Show music'}
+        aria-label={musicActive ? 'Hide music' : 'Show music'}
+        className={cn(
+          'glass-icon-btn h-9 w-9',
+          musicActive && 'glass-icon-btn-active'
+        )}
+      >
+        <Music2 className="h-4 w-4" />
       </button>
       <button
         type="button"

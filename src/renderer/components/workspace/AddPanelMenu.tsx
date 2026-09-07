@@ -16,7 +16,8 @@ const PANEL_MENU_LABELS: Partial<Record<PanelType, string>> = {
   antigravity: 'Antigravity',
   codex: 'Codex',
   chatgpt: 'ChatGPT',
-  'claude-chat': 'Claude Chat'
+  'claude-chat': 'Claude Chat',
+  player: 'Player'
 }
 
 const ADDABLE_PANEL_TYPES: PanelType[] = [
@@ -31,7 +32,8 @@ const ADDABLE_PANEL_TYPES: PanelType[] = [
   'file-explorer',
   'git-changes',
   'diff',
-  'logs'
+  'logs',
+  'player'
 ]
 
 export { ADD_PANEL_MENU_EVENT } from '@renderer/lib/app-events'

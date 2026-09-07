@@ -14,6 +14,8 @@ import { usePersistenceBootstrap } from '@renderer/hooks/use-persistence-bootstr
 import { startUsageSync } from '@renderer/lib/usage-sync'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
+import { useMusicStore } from '@renderer/stores/music-store'
+import { MusicPlayerHost } from '@renderer/components/music/MusicPlayerHost'
 import { cn } from '@renderer/lib/utils'
 import { isMacOS, isWindows } from '@renderer/lib/electron-api'
 
@@ -70,6 +72,7 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     if (!isReady) return
     void useDeveloperIntelligenceStore.getState().loadSettings()
+    void useMusicStore.getState().bootstrap()
     return startUsageSync()
   }, [isReady])
 
@@ -89,6 +92,7 @@ export default function App(): React.JSX.Element {
         <AppHeader showWorkspaceControls={projects.length > 0} onCommandPalette={openPalette} />
         {projects.length > 0 ? <WorkspaceLayout /> : <WelcomeScreen />}
         <StatusBar />
+        <MusicPlayerHost />
         <CommandPalette open={open} onClose={closePalette} />
       </div>
     </ErrorBoundary>

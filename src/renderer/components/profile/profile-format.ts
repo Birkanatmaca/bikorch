@@ -101,6 +101,38 @@ export function monthlySubscriptionLabel(subscriptions: SubscriptionRecord[]): s
   return `${formatMoney(total, currency)} / mo`
 }
 
+export function totalAiSpendLabel(
+  subscriptions: SubscriptionRecord[],
+  apiSpend: MeasuredNumber,
+  rangeKey: string
+): string {
+  const subLabel = monthlySubscriptionLabel(subscriptions)
+  const subTotals = monthlySubscriptionTotals(subscriptions)
+  const hasApi = apiSpend.availability !== 'unavailable' && apiSpend.value !== null
+  const apiText = hasApi
+    ? apiSpend.availability === 'estimated'
+      ? `~$${apiSpend.value!.toFixed(2)} API`
+      : `$${apiSpend.value!.toFixed(2)} API`
+    : null
+
+  if (subLabel === UNAVAILABLE && !apiText) return UNAVAILABLE
+  if (subTotals.size > 1) {
+    if (apiText) return `${subLabel} + ${apiText} (${rangeKey})`
+    return subLabel
+  }
+  if (subTotals.size === 1 && apiText) {
+    const [currency, monthly] = [...subTotals.entries()][0]
+    if (currency === 'USD') {
+      const total = monthly + apiSpend.value!
+      const prefix = apiSpend.availability === 'estimated' ? '~' : ''
+      return `${prefix}${formatMoney(total, 'USD')} / mo + API (${rangeKey})`
+    }
+    return `${subLabel} + ${apiText} (${rangeKey})`
+  }
+  if (subLabel !== UNAVAILABLE) return `${subLabel} (subscriptions only)`
+  return apiText ?? UNAVAILABLE
+}
+
 export function providerLabel(provider: string | null | undefined): string {
   if (!provider) return 'Unknown provider'
   return (AI_ACCOUNT_LABELS as Record<string, string>)[provider] ?? provider

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DeveloperMemory, DeveloperMetrics, PromptRecord } from '@shared/contracts/developer-intelligence'
 import { extractMemoryCandidates, rankMemoriesForContext } from '../memory-extract'
-import { computeMetrics, resolveMetricsRange, type MetricsInput } from '../metrics'
+import { computeMetrics, resolveMetricsRange, aggregatePromptMetrics, type MetricsInput } from '../metrics'
 
 const NOW = new Date(2026, 8, 7, 15, 0, 0).getTime()
 const HOUR = 60 * 60 * 1000
@@ -92,6 +92,7 @@ function emptyMetrics(overrides: Partial<DeveloperMetrics> = {}): DeveloperMetri
       { projectId: 'proj-1', fileCount: 20, byLanguage: { typescript: 16, go: 4 }, frameworks: ['React', 'Electron'] }
     ],
     promptFrameworkHints: { React: 4 },
+    promptAggregates: aggregatePromptMetrics([]),
     settings: { useGitActivity: true, useProjectFileContext: true }
   }
   return { ...computeMetrics(input), ...overrides }
@@ -130,6 +131,7 @@ describe('extractMemoryCandidates', () => {
       projectNames: {},
       projectCensus: [],
       promptFrameworkHints: {},
+      promptAggregates: aggregatePromptMetrics([]),
       settings: { useGitActivity: true, useProjectFileContext: true }
     })
     expect(extractMemoryCandidates({ metrics, projectCensus: [], prompts: [], projectNames: {} })).toEqual([])

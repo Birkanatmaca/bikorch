@@ -21,13 +21,15 @@ import {
   looksCliSignedIn,
   mapProcessStatus
 } from '@renderer/lib/cli-activity'
-import { PromptComposer } from '@renderer/lib/prompt-capture'
+import { PromptComposer, isLikelyPrompt } from '@renderer/lib/prompt-capture'
+import { formatMemoryContextBlock } from '@renderer/lib/developer-context'
 import {
   beginAgentSession,
   endAgentSession,
   notePromptInSession,
   recordPromptSent
 } from '@renderer/lib/developer-events'
+import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 
 interface TerminalViewProps {
   sessionId: string
@@ -311,28 +313,53 @@ export function TerminalView({
     })
 
     terminal.onData((data) => {
-      void window.api.pty.write({ sessionId, data })
-      if (!cli) return
-      if (composer) {
-        for (const prompt of composer.feed(data)) {
-          notePromptInSession(sessionId)
-          void recordPromptSent({
-            prompt,
-            source: 'terminal',
-            sessionId,
-            provider: agentKind,
-            ...(projectIdAtMount ? { projectId: projectIdAtMount } : {}),
-            ...(accountId ? { accountId } : {})
-          })
+      void (async () => {
+        if (cli && composer && isPromptSubmit(data)) {
+          const peek = composer.peek().trim()
+          const isEnterOnly = data === '\r' || data === '\n' || data === '\r\n'
+          if (isEnterOnly && isLikelyPrompt(peek)) {
+            const { settings, settingsLoaded } = useDeveloperIntelligenceStore.getState()
+            if (settingsLoaded && settings.includeMemoryInPrompts) {
+              try {
+                const context = await window.api.developerIntelligence.getContext({
+                  ...(projectIdAtMount ? { projectId: projectIdAtMount } : {}),
+                  query: peek,
+                  limit: 5
+                })
+                const prefix = formatMemoryContextBlock(context)
+                if (prefix) {
+                  await window.api.pty.write({ sessionId, data: prefix })
+                }
+              } catch {
+                // Injection is best-effort; never block the prompt.
+              }
+            }
+          }
         }
-      }
-      if (isInterrupt(data)) {
-        applyCliStatus('waiting')
-        return
-      }
-      if (isPromptSubmit(data)) {
-        applyCliStatus('busy')
-      }
+
+        await window.api.pty.write({ sessionId, data })
+        if (!cli) return
+        if (composer) {
+          for (const prompt of composer.feed(data)) {
+            notePromptInSession(sessionId)
+            void recordPromptSent({
+              prompt,
+              source: 'terminal',
+              sessionId,
+              provider: agentKind,
+              ...(projectIdAtMount ? { projectId: projectIdAtMount } : {}),
+              ...(accountId ? { accountId } : {})
+            })
+          }
+        }
+        if (isInterrupt(data)) {
+          applyCliStatus('waiting')
+          return
+        }
+        if (isPromptSubmit(data)) {
+          applyCliStatus('busy')
+        }
+      })()
     })
 
     const startSession = async (term: Terminal, nextLaunchMode: PtyLaunchMode = launchMode): Promise<void> => {

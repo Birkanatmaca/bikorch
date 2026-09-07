@@ -27,6 +27,11 @@ const LogsPanel = lazy(() =>
 const TasksPanel = lazy(() =>
   import('@renderer/components/tasks/TasksPanel').then((m) => ({ default: m.TasksPanel }))
 )
+const WorkspacePlayerPanel = lazy(() =>
+  import('@renderer/components/music/WorkspacePlayerPanel').then((m) => ({
+    default: m.WorkspacePlayerPanel
+  }))
+)
 
 interface PanelContentProps {
   panelId: string
@@ -134,6 +139,14 @@ export function PanelContent({ panelId, type, launchMode, accountId }: PanelCont
       return (
         <Suspense fallback={<PanelLoading />}>
           <TasksPanel />
+        </Suspense>
+      )
+    case 'player':
+      return (
+        <Suspense fallback={<PanelLoading />}>
+          <div className="h-full min-h-0">
+            <WorkspacePlayerPanel />
+          </div>
         </Suspense>
       )
     default:

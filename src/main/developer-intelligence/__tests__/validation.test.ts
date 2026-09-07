@@ -52,6 +52,31 @@ describe('parseEventInput', () => {
     }
   })
 
+  it('accepts git file change and usage snapshot events', () => {
+    const fileChange = parseEventInput({
+      type: 'git.file.changed',
+      projectId: 'p1',
+      payload: { files: ['a.ts'], fileCount: 1, stagedCount: 1, unstagedCount: 0 }
+    })
+    expect(fileChange?.type).toBe('git.file.changed')
+
+    const usage = parseEventInput({
+      type: 'usage.snapshot',
+      provider: 'claude',
+      accountId: 'acc1',
+      payload: { kind: 'claude', primaryUsedPercent: 42.5, planType: 'Pro' }
+    })
+    expect(usage).toMatchObject({
+      type: 'usage.snapshot',
+      provider: 'claude',
+      accountId: 'acc1',
+      payload: { kind: 'claude', primaryUsedPercent: 42.5, planType: 'Pro' }
+    })
+    expect(parseEventInput({ type: 'usage.snapshot', payload: { kind: 'claude', primaryUsedPercent: 200 } })).toMatchObject({
+      payload: { primaryUsedPercent: 100 }
+    })
+  })
+
   it('validates task payloads', () => {
     expect(parseEventInput({ type: 'task.completed', payload: { taskId: 't', title: 'Do it', priority: 'high' } })).toMatchObject({
       type: 'task.completed'

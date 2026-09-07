@@ -494,8 +494,10 @@ export function WorkspaceLayout(): React.JSX.Element {
         onSelectAccounts={() => selectLeftSidebar(activeProjectId, 'accounts')}
         onSelectTasks={() => selectLeftSidebar(activeProjectId, 'tasks')}
         onSelectProfile={() => selectLeftSidebar(activeProjectId, 'profile')}
+        onSelectMusic={() => selectLeftSidebar(activeProjectId, 'music')}
       />
-      <div className="min-h-0 min-w-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="min-h-0 min-w-0 flex-1">
         {hasBottom ? (
         <PanelGroup
           ref={verticalGroupRef}
@@ -533,6 +535,7 @@ export function WorkspaceLayout(): React.JSX.Element {
         ) : (
           mainContent
         )}
+        </div>
       </div>
     </div>
   )

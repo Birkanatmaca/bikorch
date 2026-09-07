@@ -13,7 +13,7 @@ import { PanelShell } from '@renderer/components/panels/PanelShell'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { cn } from '@renderer/lib/utils'
-import { focusTerminal, lockTerminalLayout, unlockTerminalLayout } from '@renderer/lib/app-events'
+import { FOCUS_PANEL_EVENT, focusTerminal, lockTerminalLayout, unlockTerminalLayout } from '@renderer/lib/app-events'
 import { cliFrameClass, getCliChromePhase } from '@renderer/lib/cli-chrome'
 import { isMacOS } from '@renderer/lib/electron-api'
 import { ContextMenu } from '@renderer/components/ui/ContextMenu'
@@ -259,6 +259,17 @@ export function OrchestratorZone({
     const addedPanel = panels.filter((panel) => !previousPanelIds.current.has(panel.id)).at(-1)
     previousPanelIds.current = new Set(panels.map((panel) => panel.id))
     if (addedPanel) setFocusedId(addedPanel.id)
+  }, [panels])
+
+  useEffect(() => {
+    const onFocusPanel = (event: Event): void => {
+      const panelId = (event as CustomEvent<string>).detail
+      if (typeof panelId === 'string' && panels.some((panel) => panel.id === panelId)) {
+        setFocusedId(panelId)
+      }
+    }
+    window.addEventListener(FOCUS_PANEL_EVENT, onFocusPanel)
+    return () => window.removeEventListener(FOCUS_PANEL_EVENT, onFocusPanel)
   }, [panels])
 
   useEffect(() => {

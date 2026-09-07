@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DeveloperEvent } from '@shared/contracts/developer-intelligence'
-import { computeMetrics, resolveMetricsRange, type MetricsInput } from '../metrics'
+import { computeMetrics, resolveMetricsRange, aggregatePromptMetrics, type MetricsInput } from '../metrics'
 
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
@@ -51,6 +51,7 @@ function baseInput(events: DeveloperEvent[], overrides: Partial<MetricsInput> = 
     projectNames: { p1: 'Bikorch', p2: 'Backend' },
     projectCensus: [],
     promptFrameworkHints: {},
+    promptAggregates: aggregatePromptMetrics([]),
     settings: { useGitActivity: true, useProjectFileContext: true },
     ...overrides
   }
@@ -238,5 +239,70 @@ describe('computeMetrics', () => {
     expect(metrics.interpretations.some((item) => item.text.includes('TypeScript'))).toBe(true)
     expect(metrics.interpretations.some((item) => item.text.includes('Claude Code'))).toBe(true)
     expect(metrics.interpretations.some((item) => /increased|decreased/.test(item.text))).toBe(true)
+  })
+
+  it('aggregates prompt token and cost fields when present', () => {
+    const metrics = computeMetrics(
+      baseInput([], {
+        promptAggregates: aggregatePromptMetrics([
+          {
+            id: 'p1',
+            createdAt: NOW,
+            prompt: 'hi',
+            source: 'terminal',
+            redactedCount: 0,
+            inputTokenCount: 100,
+            outputTokenCount: 50,
+            costUsd: 0.12,
+            costSource: 'official'
+          },
+          {
+            id: 'p2',
+            createdAt: NOW,
+            prompt: 'yo',
+            source: 'terminal',
+            redactedCount: 0,
+            inputTokenCount: 20,
+            outputTokenCount: 10,
+            costUsd: 0.03,
+            costSource: 'estimated'
+          }
+        ])
+      })
+    )
+    expect(metrics.overview.totalTokens).toEqual({ value: 180, availability: 'measured' })
+    expect(metrics.overview.apiSpendUsd).toEqual({ value: 0.15, availability: 'estimated' })
+  })
+
+  it('includes git file changes and usage snapshots in language and usage metrics', () => {
+    const events: DeveloperEvent[] = [
+      event({
+        type: 'git.file.changed',
+        occurredAt: NOW - HOUR,
+        projectId: 'p1',
+        payload: {
+          fileCount: 2,
+          files: ['a.go', 'b.go'],
+          languages: { go: 2 },
+          stagedCount: 1,
+          unstagedCount: 1
+        }
+      }),
+      event({
+        type: 'usage.snapshot',
+        occurredAt: NOW - 30 * 60 * 1000,
+        provider: 'claude',
+        payload: { kind: 'claude', primaryUsedPercent: 40 }
+      }),
+      event({
+        type: 'usage.snapshot',
+        occurredAt: NOW - 20 * 60 * 1000,
+        provider: 'claude',
+        payload: { kind: 'claude', primaryUsedPercent: 60 }
+      })
+    ]
+    const metrics = computeMetrics(baseInput(events))
+    expect(metrics.languages.entries.some((entry) => entry.label === 'go')).toBe(true)
+    expect(metrics.overview.averagePrimaryLimitUsed).toEqual({ value: 50, availability: 'measured' })
   })
 })

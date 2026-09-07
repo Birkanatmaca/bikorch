@@ -207,6 +207,10 @@ export function MenuBar({ onCommandPalette, className }: MenuBarProps): React.JS
         {
           label: 'Claude Chat',
           action: () => addPanel('claude-chat')
+        },
+        {
+          label: 'Player',
+          action: () => addPanel('player')
         }
       ]
     },

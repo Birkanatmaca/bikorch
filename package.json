@@ -9,6 +9,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -24,11 +25,26 @@
       "app-logo.png",
       "build/icon.icns"
     ],
+    "extraResources": [
+      {
+        "from": "resources/bin",
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "mac": {
       "icon": "build/icon.icns",
       "category": "public.app-category.developer-tools",
       "target": [
         "dmg",
+        "dir"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
         "dir"
       ]
     }

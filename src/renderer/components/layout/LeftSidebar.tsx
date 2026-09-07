@@ -1,15 +1,16 @@
-import { BarChart3, PanelLeftClose, UsersRound } from 'lucide-react'
+import { BarChart3, Music2, PanelLeftClose, UsersRound } from 'lucide-react'
 import { AiAccountsPanel } from '@renderer/components/accounts/AiAccountsPanel'
 import { FileExplorerPanel } from '@renderer/components/file-explorer/FileExplorerPanel'
 import { GitChangesPanel } from '@renderer/components/git/GitChangesPanel'
 import { TasksPanel } from '@renderer/components/tasks/TasksPanel'
 import { ProfilePanel } from '@renderer/components/profile/ProfilePanel'
+import { MusicPanel } from '@renderer/components/music/MusicPanel'
 import { cn } from '@renderer/lib/utils'
 import { PanelIcon } from '@renderer/components/ui/PanelIcon'
 import { Button } from '@renderer/components/ui/Button'
 
 interface LeftSidebarProps {
-  view: 'files' | 'changes' | 'accounts' | 'tasks' | 'profile'
+  view: 'files' | 'changes' | 'accounts' | 'tasks' | 'profile' | 'music'
   onHide: () => void
 }
 
@@ -18,6 +19,7 @@ export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Eleme
   const isAccounts = view === 'accounts'
   const isTasks = view === 'tasks'
   const isProfile = view === 'profile'
+  const isMusic = view === 'music'
   const title = isChanges
     ? 'Changes'
     : isAccounts
@@ -26,7 +28,9 @@ export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Eleme
         ? 'Tasks'
         : isProfile
           ? 'Profile'
-          : 'Files'
+          : isMusic
+            ? 'Music'
+            : 'Files'
   const type = isChanges ? 'git-changes' : isTasks ? 'tasks' : 'file-explorer'
 
   return (
@@ -37,6 +41,8 @@ export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Eleme
             <UsersRound className="h-3.5 w-3.5" />
           ) : isProfile ? (
             <BarChart3 className="h-3.5 w-3.5" />
+          ) : isMusic ? (
+            <Music2 className="h-3.5 w-3.5" />
           ) : (
             <PanelIcon type={type} />
           )}
@@ -56,7 +62,7 @@ export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Eleme
         </Button>
       </header>
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        <div className={cn('h-full', (isChanges || isAccounts || isTasks || isProfile) && 'hidden')}>
+        <div className={cn('h-full', (isChanges || isAccounts || isTasks || isProfile || isMusic) && 'hidden')}>
           <FileExplorerPanel />
         </div>
         <div className={cn('h-full', !isChanges && 'hidden')}>
@@ -70,6 +76,9 @@ export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Eleme
         </div>
         <div className={cn('h-full', !isProfile && 'hidden')}>
           <ProfilePanel visible={isProfile} />
+        </div>
+        <div className={cn('h-full', !isMusic && 'hidden')}>
+          <MusicPanel />
         </div>
       </div>
     </div>

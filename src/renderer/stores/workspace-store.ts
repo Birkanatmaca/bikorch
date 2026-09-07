@@ -66,6 +66,7 @@ interface WorkspaceStore extends WorkspaceSnapshot {
   ensureProjectWorkspace: (projectId: string, openSidebar?: boolean) => void
 
   getActiveWorkspace: () => ProjectWorkspaceState | null
+  openPlayerPanel: () => string
   addPanel: (
     type: PanelType,
     zone?: PanelZone,
@@ -84,7 +85,7 @@ interface WorkspaceStore extends WorkspaceSnapshot {
   toggleSidebar: (projectId: string) => void
   selectLeftSidebar: (
     projectId: string,
-    view: 'files' | 'changes' | 'accounts' | 'tasks' | 'profile'
+    view: 'files' | 'changes' | 'accounts' | 'tasks' | 'profile' | 'music'
   ) => void
   clearPanelLaunchMode: (panelId: string) => void
 }
@@ -131,6 +132,7 @@ function getDefaultZone(type: PanelType): PanelZone {
     case 'antigravity':
     case 'codex':
     case 'git-changes':
+    case 'player':
       return 'center'
     case 'chatgpt':
     case 'claude-chat':
@@ -275,6 +277,19 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     const { activeProjectId, workspaces } = get()
     if (!activeProjectId) return null
     return workspaces[activeProjectId] ?? null
+  },
+
+  openPlayerPanel: () => {
+    const { activeProjectId, workspaces } = get()
+    if (!activeProjectId) return ''
+    const workspace = workspaces[activeProjectId]
+    if (!workspace) return ''
+    const existing = workspace.panels.find((panel) => panel.type === 'player')
+    if (existing) {
+      window.dispatchEvent(new CustomEvent('bikorch:focus-panel', { detail: existing.id }))
+      return existing.id
+    }
+    return get().addPanel('player', 'center')
   },
 
   addPanel: (type, zone, rect, launchMode, accountId, titleOverride) => {

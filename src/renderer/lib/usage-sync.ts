@@ -3,6 +3,7 @@ import {
   AI_ACCOUNT_AUTHENTICATED_EVENT,
   AI_ACCOUNTS_REFRESH_EVENT
 } from '@renderer/lib/app-events'
+import { recordDeveloperEvent } from '@renderer/lib/developer-events'
 import { useAiAccountsStore } from '@renderer/stores/ai-accounts-store'
 import { useUsageStore } from '@renderer/stores/usage-store'
 import type { CliUsageKind } from '@shared/contracts/usage'
@@ -43,6 +44,21 @@ async function readAccounts(accounts: AiAccount[]): Promise<void> {
       useUsageStore.getState().applyResponse(response, [account.id])
       const provider =
         response.providers.find((item) => item.accountId === account.id) ?? response.providers[0]
+      if (provider) {
+        recordDeveloperEvent({
+          type: 'usage.snapshot',
+          provider: account.kind,
+          accountId: account.id,
+          payload: {
+            kind: account.kind as CliUsageKind,
+            primaryUsedPercent: provider.primary?.usedPercent ?? null,
+            ...(provider.secondary?.usedPercent !== undefined
+              ? { secondaryUsedPercent: provider.secondary.usedPercent }
+              : {}),
+            ...(provider.planType ? { planType: provider.planType } : {})
+          }
+        })
+      }
       if (provider && (provider.accountEmail || provider.planType)) {
         useAiAccountsStore.getState().updateAccount(account.id, {
           ...(provider.accountEmail ? { email: provider.accountEmail } : {}),

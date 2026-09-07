@@ -125,6 +125,35 @@ export function parseEventInput(payload: unknown): DeveloperEventInput | null {
         payload: { message, fileCount, files, languages: {} }
       }
     }
+    case 'git.file.changed': {
+      const files = stringList(body['files'], MAX_FILES, 1000)
+      const fileCount = Math.max(files.length, Math.floor(finiteNumber(body['fileCount']) ?? 0))
+      const stagedCount = Math.max(0, Math.floor(finiteNumber(body['stagedCount']) ?? 0))
+      const unstagedCount = Math.max(0, Math.floor(finiteNumber(body['unstagedCount']) ?? 0))
+      return {
+        type: 'git.file.changed',
+        ...common,
+        payload: { fileCount, files, languages: {}, stagedCount, unstagedCount }
+      }
+    }
+    case 'usage.snapshot': {
+      const kind = body['kind']
+      if (typeof kind !== 'string' || !KINDS.has(kind)) return null
+      const primary = finiteNumber(body['primaryUsedPercent'])
+      const secondary = finiteNumber(body['secondaryUsedPercent'])
+      const planType =
+        typeof body['planType'] === 'string' && body['planType'].length <= 100 ? body['planType'] : undefined
+      return {
+        type: 'usage.snapshot',
+        ...common,
+        payload: {
+          kind: kind as 'claude',
+          primaryUsedPercent: primary === null ? null : Math.max(0, Math.min(100, primary)),
+          ...(secondary !== null ? { secondaryUsedPercent: Math.max(0, Math.min(100, secondary)) } : {}),
+          ...(planType ? { planType } : {})
+        }
+      }
+    }
     case 'project.opened': {
       const name = requiredText(body['name']) ?? 'Untitled'
       const folderPath = typeof body['folderPath'] === 'string' && body['folderPath'].length <= 4096

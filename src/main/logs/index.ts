@@ -84,7 +84,11 @@ export function recordRendererConsole(
 ): AppLogEntry {
   const logLevel: AppLogLevel = level >= 3 ? 'error' : level === 2 ? 'warn' : level === 0 ? 'debug' : 'info'
   const source = sourceId ? `renderer · ${basename(sourceId)}` : 'renderer'
-  return append(logLevel, message, source)
+  const entry = append(logLevel, message, source)
+  if (message.includes('[spotify]') || logLevel === 'error' || logLevel === 'warn') {
+    process.stdout.write(`[${entry.level}] ${entry.message}\n`)
+  }
+  return entry
 }
 
 export function installConsoleCapture(): void {

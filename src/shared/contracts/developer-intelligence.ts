@@ -19,7 +19,9 @@ export type DeveloperEventType =
   | 'agent.session.started'
   | 'agent.session.ended'
   | 'git.commit'
+  | 'git.file.changed'
   | 'project.opened'
+  | 'usage.snapshot'
   | 'task.started'
   | 'task.completed'
 
@@ -76,6 +78,23 @@ export interface GitCommitPayload {
   category?: WorkCategory
 }
 
+export interface GitFileChangedPayload {
+  fileCount: number
+  /** Repo-relative file paths (capped). */
+  files: string[]
+  /** Language census derived from file extensions in the main process. */
+  languages: Record<string, number>
+  stagedCount: number
+  unstagedCount: number
+}
+
+export interface UsageSnapshotPayload {
+  kind: CliUsageKind
+  primaryUsedPercent: number | null
+  secondaryUsedPercent?: number | null
+  planType?: string | null
+}
+
 export interface ProjectOpenedPayload {
   name: string
   folderPath: string | null
@@ -92,7 +111,9 @@ export interface DeveloperEventPayloadMap {
   'agent.session.started': SessionStartedPayload
   'agent.session.ended': SessionEndedPayload
   'git.commit': GitCommitPayload
+  'git.file.changed': GitFileChangedPayload
   'project.opened': ProjectOpenedPayload
+  'usage.snapshot': UsageSnapshotPayload
   'task.started': TaskPayload
   'task.completed': TaskPayload
 }
@@ -374,6 +395,8 @@ export interface DeveloperMetrics {
     outputTokens: MeasuredNumber
     cachedTokens: MeasuredNumber
     apiSpendUsd: MeasuredNumber
+    /** Average primary usage limit from recorded usage snapshots in this range. */
+    averagePrimaryLimitUsed: MeasuredNumber
     /** Change versus the previous period of equal length, in percent. */
     promptsDeltaPercent: number | null
     sessionsDeltaPercent: number | null
@@ -452,7 +475,9 @@ export const DEVELOPER_EVENT_TYPES: DeveloperEventType[] = [
   'agent.session.started',
   'agent.session.ended',
   'git.commit',
+  'git.file.changed',
   'project.opened',
+  'usage.snapshot',
   'task.started',
   'task.completed'
 ]

@@ -75,6 +75,133 @@ import {
   type RecordPromptRequest,
   type RecordPromptResponse
 } from '@shared/contracts/developer-intelligence'
+import {
+  MUSIC_IPC,
+  type AddLinkResult,
+  type CreatePlaylistRequest,
+  type ImportTracksRequest,
+  type ImportTracksResult,
+  type MusicLibrarySummary,
+  type MusicPlaybackSnapshot,
+  type MusicPlaylist,
+  type MusicSettings,
+  type MusicStorageMode,
+  type MusicTrack,
+  type RecordPlayRequest,
+  type RenamePlaylistRequest,
+  type SpotifyAccessTokenResponse,
+  type SpotifyCatalogTrack,
+  type SpotifyConnectionStatus,
+  type SpotifyTimeRange
+} from '@shared/contracts/music'
+import {
+  MUSIC_DOWNLOAD_IPC,
+  type AnalyzeResult,
+  type DownloadEngineStatus,
+  type EngineInstallResult,
+  type DownloadEvent,
+  type DownloadJob,
+  type DownloadRequest,
+  type DownloadSettings,
+  type StartDownloadResult
+} from '@shared/contracts/downloads'
+
+export interface MusicApi {
+  library: {
+    list: () => Promise<MusicTrack[]>
+    importFiles: (mode?: MusicStorageMode) => Promise<ImportTracksResult & { canceled?: boolean }>
+    importFolder: (mode?: MusicStorageMode) => Promise<ImportTracksResult & { canceled?: boolean }>
+    importPaths: (request: ImportTracksRequest) => Promise<ImportTracksResult>
+    remove: (trackId: string) => Promise<{ ok: boolean }>
+    updateDuration: (trackId: string, durationMs: number) => Promise<{ ok: boolean }>
+    summary: () => Promise<MusicLibrarySummary>
+    search: (query: string) => Promise<MusicTrack[]>
+  }
+  favorites: {
+    list: () => Promise<MusicTrack[]>
+    toggle: (trackId: string) => Promise<{ favorited: boolean }>
+  }
+  history: {
+    list: () => Promise<unknown[]>
+    recordPlay: (request: RecordPlayRequest) => Promise<{ historyId: string | null }>
+    recordListen: (historyId: string, listenedMs: number) => Promise<{ ok: true }>
+  }
+  playlists: {
+    list: () => Promise<MusicPlaylist[]>
+    create: (request: CreatePlaylistRequest) => Promise<MusicPlaylist | null>
+    rename: (request: RenamePlaylistRequest) => Promise<{ ok: boolean }>
+    delete: (playlistId: string) => Promise<{ ok: boolean }>
+    addTracks: (playlistId: string, trackIds: string[]) => Promise<{ ok: true }>
+    removeTrack: (playlistId: string, trackId: string) => Promise<{ ok: true }>
+    reorder: (playlistId: string, trackIds: string[]) => Promise<{ ok: true }>
+    getTracks: (playlistId: string) => Promise<MusicTrack[]>
+  }
+  queue: {
+    get: () => Promise<string[]>
+    set: (trackIds: string[]) => Promise<{ ok: true }>
+    add: (trackIds: string[]) => Promise<{ ok: true }>
+    remove: (trackId: string) => Promise<{ ok: true }>
+    clear: () => Promise<{ ok: true }>
+    reorder: (trackIds: string[]) => Promise<{ ok: true }>
+  }
+  getSettings: () => Promise<MusicSettings>
+  updateSettings: (updates: Partial<MusicSettings>) => Promise<MusicSettings>
+  getPlayback: () => Promise<MusicPlaybackSnapshot | null>
+  savePlayback: (snapshot: MusicPlaybackSnapshot) => Promise<{ ok: true }>
+  checkTrack: (trackId: string) => Promise<{ ok: boolean; reason?: string }>
+  ensurePlayable: (
+    trackId: string,
+    force?: boolean
+  ) => Promise<{ ok: true; converted: boolean; filePath: string } | { ok: false; error: string }>
+  readPlayback: (
+    trackId: string
+  ) => Promise<{ ok: true; mime: string; data: Uint8Array } | { ok: false; error: string }>
+  recentlyPlayed: () => Promise<MusicTrack[]>
+  addLink: (url: string) => Promise<AddLinkResult>
+  openExternal: (url: string) => Promise<{ ok: true }>
+  spotify: {
+    status: () => Promise<SpotifyConnectionStatus>
+    setClientId: (clientId: string) => Promise<SpotifyConnectionStatus>
+    connect: () => Promise<{ ok: true } | { ok: false; error: string }>
+    disconnect: () => Promise<{ ok: true }>
+    accessToken: () => Promise<SpotifyAccessTokenResponse>
+    topTracks: (request?: {
+      timeRange?: SpotifyTimeRange
+      limit?: number
+    }) => Promise<SpotifyCatalogTrack[]>
+    importTop: (request?: {
+      timeRange?: SpotifyTimeRange
+      limit?: number
+    }) => Promise<{ imported: number; skipped: number; tracks: MusicTrack[] }>
+    importOne: (
+      sourceId: string
+    ) => Promise<{ ok: true; track: MusicTrack; duplicate: boolean } | { ok: false; error: string }>
+    resolvePlayback: (request: {
+      title: string
+      artist?: string
+      sourceId?: string
+    }) => Promise<{ ok: true; videoId: string; title?: string } | { ok: false; error: string }>
+  }
+  downloads: {
+    engineStatus: () => Promise<DownloadEngineStatus>
+    installEngine: () => Promise<EngineInstallResult>
+    analyze: (url: string) => Promise<AnalyzeResult>
+    start: (request: DownloadRequest & { analysis?: { title?: string; creator?: string; sourceType?: string } }) => Promise<StartDownloadResult>
+    list: () => Promise<DownloadJob[]>
+    cancel: (jobId: string) => Promise<{ ok: boolean }>
+    retry: (jobId: string) => Promise<{ ok: boolean; error?: string }>
+    delete: (jobId: string) => Promise<{ ok: boolean; error?: string }>
+    clearHistory: () => Promise<{ ok: true; removed: number }>
+    getSettings: () => Promise<DownloadSettings>
+    updateSettings: (updates: Partial<DownloadSettings>) => Promise<DownloadSettings>
+    pickFolder: () => Promise<string | null>
+    openFile: (jobId: string) => Promise<{ ok: boolean; error?: string }>
+    openFolder: (jobId: string) => Promise<{ ok: boolean; error?: string }>
+    openDir: () => Promise<{ ok: boolean; error?: string }>
+    copyPath: (jobId: string) => Promise<{ ok: boolean; path?: string; error?: string }>
+    onEvent: (callback: (event: DownloadEvent) => void) => () => void
+  }
+}
 
 export interface CliApi {
   detect: (kind: Exclude<PtyKind, 'terminal'>) => Promise<{
@@ -176,6 +303,7 @@ export interface AppApi {
   authProfiles: AuthProfilesApi
   window: WindowApi
   developerIntelligence: DeveloperIntelligenceApi
+  music: MusicApi
 }
 
 const ptyApi: PtyApi = {
@@ -277,6 +405,100 @@ const developerIntelligenceApi: DeveloperIntelligenceApi = {
   getContext: (request) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.GET_CONTEXT, request ?? {})
 }
 
+const musicApi: MusicApi = {
+  library: {
+    list: () => ipcRenderer.invoke(MUSIC_IPC.LIBRARY_LIST),
+    importFiles: (mode) => ipcRenderer.invoke(MUSIC_IPC.LIBRARY_IMPORT_FILES, mode ?? null),
+    importFolder: (mode) => ipcRenderer.invoke(MUSIC_IPC.LIBRARY_IMPORT_FOLDER, mode ?? null),
+    importPaths: (request) => ipcRenderer.invoke(MUSIC_IPC.LIBRARY_IMPORT_PATHS, request),
+    remove: (trackId) => ipcRenderer.invoke(MUSIC_IPC.LIBRARY_REMOVE, trackId),
+    updateDuration: (trackId, durationMs) =>
+      ipcRenderer.invoke(MUSIC_IPC.LIBRARY_UPDATE_DURATION, { trackId, durationMs }),
+    summary: () => ipcRenderer.invoke(MUSIC_IPC.LIBRARY_SUMMARY),
+    search: (query) => ipcRenderer.invoke(MUSIC_IPC.SEARCH, query)
+  },
+  favorites: {
+    list: () => ipcRenderer.invoke(MUSIC_IPC.FAVORITES_LIST),
+    toggle: (trackId) => ipcRenderer.invoke(MUSIC_IPC.FAVORITES_TOGGLE, trackId)
+  },
+  history: {
+    list: () => ipcRenderer.invoke(MUSIC_IPC.HISTORY_LIST),
+    recordPlay: (request) => ipcRenderer.invoke(MUSIC_IPC.HISTORY_RECORD_PLAY, request),
+    recordListen: (historyId, listenedMs) =>
+      ipcRenderer.invoke(MUSIC_IPC.HISTORY_RECORD_LISTEN, { historyId, listenedMs })
+  },
+  playlists: {
+    list: () => ipcRenderer.invoke(MUSIC_IPC.PLAYLISTS_LIST),
+    create: (request) => ipcRenderer.invoke(MUSIC_IPC.PLAYLISTS_CREATE, request),
+    rename: (request) => ipcRenderer.invoke(MUSIC_IPC.PLAYLISTS_RENAME, request),
+    delete: (playlistId) => ipcRenderer.invoke(MUSIC_IPC.PLAYLISTS_DELETE, playlistId),
+    addTracks: (playlistId, trackIds) =>
+      ipcRenderer.invoke(MUSIC_IPC.PLAYLISTS_ADD_TRACKS, { playlistId, trackIds }),
+    removeTrack: (playlistId, trackId) =>
+      ipcRenderer.invoke(MUSIC_IPC.PLAYLISTS_REMOVE_TRACK, { playlistId, trackId }),
+    reorder: (playlistId, trackIds) =>
+      ipcRenderer.invoke(MUSIC_IPC.PLAYLISTS_REORDER, { playlistId, trackIds }),
+    getTracks: (playlistId) => ipcRenderer.invoke(MUSIC_IPC.PLAYLISTS_GET_TRACKS, playlistId)
+  },
+  queue: {
+    get: () => ipcRenderer.invoke(MUSIC_IPC.QUEUE_GET),
+    set: (trackIds) => ipcRenderer.invoke(MUSIC_IPC.QUEUE_SET, { trackIds }),
+    add: (trackIds) => ipcRenderer.invoke(MUSIC_IPC.QUEUE_ADD, { trackIds }),
+    remove: (trackId) => ipcRenderer.invoke(MUSIC_IPC.QUEUE_REMOVE, trackId),
+    clear: () => ipcRenderer.invoke(MUSIC_IPC.QUEUE_CLEAR),
+    reorder: (trackIds) => ipcRenderer.invoke(MUSIC_IPC.QUEUE_REORDER, { trackIds })
+  },
+  getSettings: () => ipcRenderer.invoke(MUSIC_IPC.GET_SETTINGS),
+  updateSettings: (updates) => ipcRenderer.invoke(MUSIC_IPC.UPDATE_SETTINGS, updates),
+  getPlayback: () => ipcRenderer.invoke(MUSIC_IPC.GET_PLAYBACK),
+  savePlayback: (snapshot) => ipcRenderer.invoke(MUSIC_IPC.SAVE_PLAYBACK, snapshot),
+  checkTrack: (trackId) => ipcRenderer.invoke(MUSIC_IPC.CHECK_TRACK, trackId),
+  ensurePlayable: (trackId, force) =>
+    ipcRenderer.invoke(MUSIC_IPC.ENSURE_PLAYABLE, { trackId, force: force === true }),
+  readPlayback: (trackId) => ipcRenderer.invoke(MUSIC_IPC.LIBRARY_READ_PLAYBACK, trackId),
+  recentlyPlayed: () => ipcRenderer.invoke('music:recently-played'),
+  addLink: (url) => ipcRenderer.invoke(MUSIC_IPC.ADD_LINK, url),
+  openExternal: (url) => ipcRenderer.invoke(MUSIC_IPC.OPEN_EXTERNAL, url),
+  spotify: {
+    status: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_STATUS),
+    setClientId: (clientId) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_SET_CLIENT_ID, clientId),
+    connect: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_CONNECT),
+    disconnect: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_DISCONNECT),
+    accessToken: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_ACCESS_TOKEN),
+    topTracks: (request) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_TOP_TRACKS, request ?? {}),
+    importTop: (request) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_IMPORT_TOP, request ?? {}),
+    importOne: (sourceId) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_IMPORT_ONE, { sourceId }),
+    resolvePlayback: (request) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_RESOLVE_PLAYBACK, request)
+  },
+  downloads: {
+    engineStatus: () => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.ENGINE_STATUS),
+    installEngine: () => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.ENGINE_INSTALL),
+    analyze: (url) => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.ANALYZE, url),
+    start: (request) => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.START, request),
+    list: () => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.LIST),
+    cancel: (jobId) => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.CANCEL, jobId),
+    retry: (jobId) => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.RETRY, jobId),
+    delete: (jobId) => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.DELETE, jobId),
+    clearHistory: () => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.CLEAR_HISTORY),
+    getSettings: () => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.GET_SETTINGS),
+    updateSettings: (updates) => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.UPDATE_SETTINGS, updates),
+    pickFolder: () => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.PICK_FOLDER),
+    openFile: (jobId) => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.OPEN_FILE, jobId),
+    openFolder: (jobId) => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.OPEN_FOLDER, jobId),
+    openDir: () => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.OPEN_DIR),
+    copyPath: (jobId) => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.COPY_PATH, jobId),
+    onEvent: (callback) => {
+      const listener = (_event: IpcRendererEvent, payload: DownloadEvent): void => {
+        callback(payload)
+      }
+      ipcRenderer.on(MUSIC_DOWNLOAD_IPC.EVENT, listener)
+      return () => {
+        ipcRenderer.removeListener(MUSIC_DOWNLOAD_IPC.EVENT, listener)
+      }
+    }
+  }
+}
+
 const api: AppApi = {
   platform: process.platform,
   selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),
@@ -289,7 +511,8 @@ const api: AppApi = {
   logs: logsApi,
   authProfiles: authProfilesApi,
   window: windowApi,
-  developerIntelligence: developerIntelligenceApi
+  developerIntelligence: developerIntelligenceApi,
+  music: musicApi
 }
 
 contextBridge.exposeInMainWorld('api', api)

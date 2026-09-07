@@ -20,6 +20,7 @@ export function getPanelTypeIcon(type: string): string {
     diff: '◇',
     logs: '≡',
     tasks: '☑',
+    player: '♫',
     usage: '◷'
   }
   return icons[type] ?? '□'

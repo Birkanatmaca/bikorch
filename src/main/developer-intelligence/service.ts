@@ -31,7 +31,7 @@ import {
   detectLanguageHints,
   languageCensusFromFiles
 } from './classification'
-import { computeMetrics, resolveMetricsRange, type ProjectCensus } from './metrics'
+import { computeMetrics, resolveMetricsRange, aggregatePromptMetrics, type ProjectCensus } from './metrics'
 import { scanProjectLanguages } from './project-scan'
 import { redactSecrets } from './redaction'
 import { DeveloperIntelligenceStore } from './store'
@@ -107,7 +107,9 @@ export function recordDeveloperEvent(input: DeveloperEventInput): { ok: true; id
   const current = getStore()
   const settings = getDeveloperIntelligenceSettings()
   if (!current || !settings.keepActivityHistory) return { ok: true, id: null }
-  if (input.type === 'git.commit' && !settings.useGitActivity) return { ok: true, id: null }
+  if ((input.type === 'git.commit' || input.type === 'git.file.changed') && !settings.useGitActivity) {
+    return { ok: true, id: null }
+  }
 
   const id = randomUUID()
   const occurredAt = input.occurredAt ?? Date.now()
@@ -125,6 +127,19 @@ export function recordDeveloperEvent(input: DeveloperEventInput): { ok: true; id
         files: input.payload.files,
         languages: languageCensusFromFiles(input.payload.files),
         ...(message ? { category: classifyWorkCategory(message) } : {})
+      }
+    }
+  } else if (input.type === 'git.file.changed') {
+    event = {
+      ...input,
+      id,
+      occurredAt,
+      payload: {
+        fileCount: input.payload.fileCount,
+        files: input.payload.files,
+        languages: languageCensusFromFiles(input.payload.files),
+        stagedCount: input.payload.stagedCount,
+        unstagedCount: input.payload.unstagedCount
       }
     }
   } else {
@@ -242,6 +257,11 @@ export async function getMetrics(request: MetricsRequest): Promise<DeveloperMetr
     }
   }
 
+  const promptRecords = current
+    ? current.listPrompts({ from: range.from, to: range.to, limit: 10_000 }).items
+    : []
+  const promptAggregates = aggregatePromptMetrics(promptRecords)
+
   return computeMetrics({
     events,
     range,
@@ -249,6 +269,7 @@ export async function getMetrics(request: MetricsRequest): Promise<DeveloperMetr
     projectNames,
     projectCensus,
     promptFrameworkHints,
+    promptAggregates,
     settings: {
       useGitActivity: settings.useGitActivity,
       useProjectFileContext: settings.useProjectFileContext

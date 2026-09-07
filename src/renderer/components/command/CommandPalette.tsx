@@ -126,6 +126,26 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
         }
       },
       {
+        id: 'add-player',
+        label: 'Player',
+        group: 'Quick',
+        keywords: 'add player music visualizer workspace',
+        action: () => {
+          addPanel('player')
+          onClose()
+        }
+      },
+      {
+        id: 'show-music',
+        label: 'Show Music',
+        group: 'Workspace',
+        keywords: 'music library player sidebar downloads',
+        action: () => {
+          if (projectId) selectLeftSidebar(projectId, 'music')
+          onClose()
+        }
+      },
+      {
         id: 'show-tasks',
         label: 'Show Tasks',
         group: 'Workspace',

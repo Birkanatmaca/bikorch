@@ -330,7 +330,7 @@ export function MemoryManager(): React.JSX.Element {
         <div className="profile-list-toolbar">
           <span className="text-[9px] text-text-muted">
             {settings.includeMemoryInPrompts
-              ? 'Injection is opted in; terminals do not auto-insert this yet.'
+              ? 'Injection is on — relevant memories are prepended when you submit a CLI prompt.'
               : 'Injection is off — preview only.'}
           </span>
           <span className="flex gap-1">

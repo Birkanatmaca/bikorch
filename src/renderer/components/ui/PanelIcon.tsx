@@ -1,4 +1,4 @@
-import { Bot, CheckSquare2, Files, GitBranch, GitCompareArrows, ListTree, MessageSquare, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { Bot, CheckSquare2, Files, GitBranch, GitCompareArrows, ListTree, MessageSquare, Music2, SquareTerminal, type LucideIcon } from 'lucide-react'
 import type { PanelType } from '@shared/types'
 import { cn } from '@renderer/lib/utils'
 
@@ -9,6 +9,7 @@ const icons: Partial<Record<PanelType, LucideIcon>> = {
   diff: GitCompareArrows,
   logs: ListTree,
   tasks: CheckSquare2,
+  player: Music2,
   chatgpt: MessageSquare,
   'claude-chat': MessageSquare
 }

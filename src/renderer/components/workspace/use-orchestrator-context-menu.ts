@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { Bot, GitBranch, Keyboard, MessageCircle, Sparkles, Terminal, X } from 'lucide-react'
+import { Bot, GitBranch, Keyboard, MessageCircle, Music2, Sparkles, Terminal, X } from 'lucide-react'
 import { clampOrchestratorRect, DEFAULT_ORCHESTRATOR_RECT } from '@shared/types'
 import type { PanelType } from '@shared/types'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
@@ -109,6 +109,12 @@ export function useOrchestratorContextMenu(getCanvasRect: () => DOMRect | null):
           label: 'Claude Chat',
           icon: Bot,
           action: () => addAtCursor('claude-chat')
+        },
+        {
+          id: 'add-player',
+          label: 'Player',
+          icon: Music2,
+          action: () => addAtCursor('player')
         },
         {
           id: 'add-git',

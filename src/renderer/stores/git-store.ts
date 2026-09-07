@@ -44,6 +44,30 @@ interface GitStore {
 
 const EMPTY_CHANGES: GitChange[] = []
 const latestRefreshByProject = new Map<string, number>()
+const lastRecordedFileChanges = new Map<string, string>()
+
+function recordGitFileChanges(projectId: string, repoRoot: string, changes: GitChange[]): void {
+  if (changes.length === 0) return
+  const files = [...changes.map((change) => change.path)].sort().slice(0, 200)
+  const fingerprint = `${repoRoot}\0${files.join('\0')}`
+  const key = `${projectId}:${repoRoot}`
+  if (lastRecordedFileChanges.get(key) === fingerprint) return
+  lastRecordedFileChanges.set(key, fingerprint)
+
+  const stagedCount = changes.filter((change) => change.staged).length
+  const unstagedCount = changes.length - stagedCount
+  recordDeveloperEvent({
+    type: 'git.file.changed',
+    projectId,
+    payload: {
+      fileCount: changes.length,
+      files,
+      languages: {},
+      stagedCount,
+      unstagedCount
+    }
+  })
+}
 
 export const EMPTY_GIT_STATE: GitState = {
   branch: null,
@@ -190,6 +214,10 @@ export const useGitStore = create<GitStore>((set, get) => ({
       }
 
       if (latestRefreshByProject.get(projectId) !== refreshId) return
+
+      if (selectedRoot) {
+        recordGitFileChanges(projectId, selectedRoot, byRoot[selectedRoot]?.changes ?? [])
+      }
 
       set((state) => ({
         stateByProject: {

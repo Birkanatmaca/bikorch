@@ -15,7 +15,6 @@ import {
 } from 'lucide-react'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import { useSubscriptionStore } from '@renderer/stores/subscription-store'
-import { useUsageStore } from '@renderer/stores/usage-store'
 import {
   formatCount,
   formatDateTime,
@@ -24,6 +23,7 @@ import {
   formatMeasured,
   monthlySubscriptionLabel,
   providerLabel,
+  totalAiSpendLabel,
   UNAVAILABLE
 } from './profile-format'
 import { AvailabilityChip, KeyValueList, SectionCard, Sparkline, StatCard } from './ProfilePrimitives'
@@ -34,15 +34,6 @@ export function ProfileOverview(): React.JSX.Element {
   const error = useDeveloperIntelligenceStore((state) => state.metricsError)
   const settings = useDeveloperIntelligenceStore((state) => state.settings)
   const subscriptions = useSubscriptionStore((state) => state.subscriptions)
-  const usageHistory = useUsageStore((state) => state.history)
-
-  const rangeStart = metrics?.range.from ?? 0
-  const usageInRange = usageHistory.filter((record) => record.checkedAt >= rangeStart)
-  const usageValues = usageInRange
-    .map((record) => record.primaryUsedPercent)
-    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
-  const averageUsed =
-    usageValues.length > 0 ? usageValues.reduce((sum, value) => sum + value, 0) / usageValues.length : null
 
   if (!metrics && loading) {
     return <div className="profile-empty-state">Computing metrics from local history…</div>
@@ -164,25 +155,26 @@ export function ProfileOverview(): React.JSX.Element {
           <div className="profile-cost-unavailable">
             <Ruler className="h-3 w-3" aria-hidden />
             <span>Total AI spend</span>
-            <strong>{UNAVAILABLE}</strong>
+            <strong>{totalAiSpendLabel(subscriptions, overview.apiSpendUsd, metrics.range.key)}</strong>
           </div>
           <div>
             <Gauge className="h-3 w-3" aria-hidden />
             <span>Average primary limit used</span>
-            <strong>{averageUsed === null ? UNAVAILABLE : `${Math.round(averageUsed)}%`}</strong>
+            <strong>
+              {formatMeasured(overview.averagePrimaryLimitUsed, (value) => `${Math.round(value)}%`)}
+            </strong>
           </div>
         </div>
         <p className="profile-cost-note">
-          Total spend stays unavailable until a metered API cost source is connected; subscription
-          totals come from your manual records in Costs.
+          Total spend combines manual subscription records with API costs recorded on prompts in this
+          range. Usage averages come from locally recorded usage snapshots.
         </p>
       </SectionCard>
 
       <div className="profile-privacy-note">
         <Activity className="h-3.5 w-3.5 shrink-0" aria-hidden />
         <span>
-          Counts are measured from locally recorded events
-          {usageInRange.length > 0 ? ` and ${formatCount(usageInRange.length)} usage checks` : ''}.
+          Counts are measured from locally recorded events.
           Nothing is sent anywhere.
         </span>
       </div>

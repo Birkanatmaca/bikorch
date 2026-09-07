@@ -6,8 +6,10 @@ import type {
   FrameworkSignal,
   LanguageDistribution,
   MeasuredNumber,
+  MetricAvailability,
   MetricInterpretation,
   MetricsRangeKey,
+  PromptRecord,
   WorkCategory
 } from '@shared/contracts/developer-intelligence'
 
@@ -18,6 +20,15 @@ export interface ProjectCensus {
   frameworks: string[]
 }
 
+export interface PromptAggregates {
+  inputTokens: number
+  outputTokens: number
+  cachedTokens: number
+  apiSpendUsd: number
+  hasTokenData: boolean
+  costAvailability: MetricAvailability
+}
+
 export interface MetricsInput {
   /** All events that may be relevant: current range plus the previous period of equal length. */
   events: DeveloperEvent[]
@@ -26,6 +37,7 @@ export interface MetricsInput {
   projectNames: Record<string, string>
   projectCensus: ProjectCensus[]
   promptFrameworkHints: Record<string, number>
+  promptAggregates: PromptAggregates
   settings: { useGitActivity: boolean; useProjectFileContext: boolean }
 }
 
@@ -54,10 +66,65 @@ function unavailable(): MeasuredNumber {
   return { value: null, availability: 'unavailable' }
 }
 
+export function aggregatePromptMetrics(prompts: PromptRecord[]): PromptAggregates {
+  let inputTokens = 0
+  let outputTokens = 0
+  let cachedTokens = 0
+  let apiSpendUsd = 0
+  let hasTokenData = false
+  let hasOfficialCost = false
+  let hasEstimatedCost = false
+
+  for (const prompt of prompts) {
+    if (typeof prompt.inputTokenCount === 'number') {
+      inputTokens += prompt.inputTokenCount
+      hasTokenData = true
+    }
+    if (typeof prompt.outputTokenCount === 'number') {
+      outputTokens += prompt.outputTokenCount
+      hasTokenData = true
+    }
+    if (typeof prompt.cachedTokenCount === 'number') {
+      cachedTokens += prompt.cachedTokenCount
+      hasTokenData = true
+    }
+    if (typeof prompt.costUsd === 'number' && Number.isFinite(prompt.costUsd)) {
+      apiSpendUsd += prompt.costUsd
+      if (prompt.costSource === 'official') hasOfficialCost = true
+      else hasEstimatedCost = true
+    }
+  }
+
+  let costAvailability: MetricAvailability = 'unavailable'
+  if (hasOfficialCost && !hasEstimatedCost) costAvailability = 'measured'
+  else if (hasOfficialCost || hasEstimatedCost) costAvailability = 'estimated'
+
+  return {
+    inputTokens,
+    outputTokens,
+    cachedTokens,
+    apiSpendUsd,
+    hasTokenData,
+    costAvailability
+  }
+}
+
 function measured(value: number | null): MeasuredNumber {
   return value === null || !Number.isFinite(value)
     ? unavailable()
     : { value, availability: 'measured' }
+}
+
+function tokenMetric(value: number, hasData: boolean): MeasuredNumber {
+  return hasData ? measured(value) : unavailable()
+}
+
+function costMetric(aggregates: PromptAggregates): MeasuredNumber {
+  if (aggregates.costAvailability === 'unavailable') return unavailable()
+  return {
+    value: aggregates.apiSpendUsd,
+    availability: aggregates.costAvailability
+  }
 }
 
 function mean(values: number[]): number | null {
@@ -190,7 +257,7 @@ function combineLanguageSources(sources: LanguageSource[]): LanguageDistribution
 }
 
 export function computeMetrics(input: MetricsInput): DeveloperMetrics {
-  const { events, range, now, projectNames, projectCensus, settings } = input
+  const { events, range, now, projectNames, projectCensus, settings, promptAggregates } = input
   const span = range.key === 'all' ? 0 : range.to - range.from
   const previousFrom = range.from - span
 
@@ -204,6 +271,10 @@ export function computeMetrics(input: MetricsInput): DeveloperMetrics {
   const sessionStarts = inRange.filter((event) => event.type === 'agent.session.started')
   const sessionEnds = inRange.filter((event) => event.type === 'agent.session.ended')
   const commits = settings.useGitActivity ? inRange.filter((event) => event.type === 'git.commit') : []
+  const fileChanges = settings.useGitActivity
+    ? inRange.filter((event) => event.type === 'git.file.changed')
+    : []
+  const usageSnapshots = inRange.filter((event) => event.type === 'usage.snapshot')
   const tasksCompleted = inRange.filter((event) => event.type === 'task.completed')
 
   const previousPrompts = previous.filter((event) => event.type === 'prompt.sent').length
@@ -228,8 +299,8 @@ export function computeMetrics(input: MetricsInput): DeveloperMetrics {
   // --- Languages -----------------------------------------------------------
   const gitLanguages: Record<string, number> = {}
   let gitFileCount = 0
-  for (const event of commits) {
-    if (event.type !== 'git.commit') continue
+  for (const event of [...commits, ...fileChanges]) {
+    if (event.type !== 'git.commit' && event.type !== 'git.file.changed') continue
     gitFileCount += event.payload.fileCount
     for (const [language, count] of Object.entries(event.payload.languages)) {
       gitLanguages[language] = (gitLanguages[language] ?? 0) + count
@@ -327,7 +398,12 @@ export function computeMetrics(input: MetricsInput): DeveloperMetrics {
   const projectActivity = new Map<string, number>()
   for (const event of inRange) {
     if (!event.projectId) continue
-    if (event.type === 'prompt.sent' || event.type === 'agent.session.started' || event.type === 'git.commit') {
+    if (
+      event.type === 'prompt.sent' ||
+      event.type === 'agent.session.started' ||
+      event.type === 'git.commit' ||
+      event.type === 'git.file.changed'
+    ) {
       projectActivity.set(event.projectId, (projectActivity.get(event.projectId) ?? 0) + 1)
     }
   }
@@ -406,6 +482,15 @@ export function computeMetrics(input: MetricsInput): DeveloperMetrics {
     null
   )
 
+  const usagePercents = usageSnapshots.flatMap((event) => {
+    if (event.type !== 'usage.snapshot') return []
+    return typeof event.payload.primaryUsedPercent === 'number' ? [event.payload.primaryUsedPercent] : []
+  })
+
+  const totalTokens = promptAggregates.hasTokenData
+    ? promptAggregates.inputTokens + promptAggregates.outputTokens + promptAggregates.cachedTokens
+    : 0
+
   const overview: DeveloperMetrics['overview'] = {
     promptsSent: prompts.length,
     sessions: sessionStarts.length,
@@ -419,11 +504,12 @@ export function computeMetrics(input: MetricsInput): DeveloperMetrics {
       ...prompts.map((event) => event.occurredAt),
       ...sessionStarts.map((event) => event.occurredAt)
     ]),
-    totalTokens: unavailable(),
-    inputTokens: unavailable(),
-    outputTokens: unavailable(),
-    cachedTokens: unavailable(),
-    apiSpendUsd: unavailable(),
+    totalTokens: tokenMetric(totalTokens, promptAggregates.hasTokenData),
+    inputTokens: tokenMetric(promptAggregates.inputTokens, promptAggregates.hasTokenData),
+    outputTokens: tokenMetric(promptAggregates.outputTokens, promptAggregates.hasTokenData),
+    cachedTokens: tokenMetric(promptAggregates.cachedTokens, promptAggregates.hasTokenData),
+    apiSpendUsd: costMetric(promptAggregates),
+    averagePrimaryLimitUsed: measured(mean(usagePercents)),
     promptsDeltaPercent: deltaPercent(prompts.length, previousPrompts),
     sessionsDeltaPercent: deltaPercent(sessionStarts.length, previousSessions)
   }
