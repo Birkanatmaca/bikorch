@@ -21,7 +21,16 @@ import {
   importPaths,
   importSpotifyTopTracks,
   importSpotifyTrackById,
-  resolveSpotifyPlayback,
+  getSpotifyPlaybackState,
+  listSpotifyDevices,
+  nextSpotifyConnect,
+  pauseSpotifyConnect,
+  playSpotifyConnect,
+  previousSpotifyConnect,
+  resumeSpotifyConnect,
+  seekSpotifyConnect,
+  selectSpotifyDevice,
+  setSpotifyConnectVolume,
   librarySummary,
   listFavorites,
   listHistory,
@@ -61,9 +70,12 @@ import {
   parseSearchQuery,
   parseSettingsUpdate,
   parseSpotifyClientId,
-  parseSpotifyResolveRequest,
+  parseSpotifyDeviceId,
+  parseSpotifyPlayRequest,
+  parseSpotifySeekRequest,
   parseSpotifySourceId,
   parseSpotifyTopRequest,
+  parseSpotifyVolumeRequest,
   parseStorageMode,
   parseEnsurePlayable,
   parseTrackId,
@@ -336,11 +348,38 @@ export function registerMusicHandlers(): void {
     if (!sourceId) throw new Error('Invalid Spotify track')
     return importSpotifyTrackById(sourceId)
   })
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_RESOLVE_PLAYBACK, async (_event, payload: unknown) => {
-    const request = parseSpotifyResolveRequest(payload)
-    if (!request) throw new Error('Invalid Spotify track')
-    return resolveSpotifyPlayback(request)
+  ipcMain.handle(MUSIC_IPC.SPOTIFY_DEVICES, () => listSpotifyDevices())
+  ipcMain.handle(MUSIC_IPC.SPOTIFY_SELECT_DEVICE, (_event, payload: unknown) => {
+    if (
+      payload === null ||
+      (typeof payload === 'object' && payload !== null && (payload as { deviceId?: unknown }).deviceId === null)
+    ) {
+      return selectSpotifyDevice(null)
+    }
+    const deviceId = parseSpotifyDeviceId(payload)
+    if (!deviceId) throw new Error('Invalid Spotify device')
+    return selectSpotifyDevice(deviceId)
   })
+  ipcMain.handle(MUSIC_IPC.SPOTIFY_PLAY, async (_event, payload: unknown) => {
+    const request = parseSpotifyPlayRequest(payload)
+    if (!request) throw new Error('Invalid Spotify track')
+    return playSpotifyConnect(request.sourceId, request.deviceId)
+  })
+  ipcMain.handle(MUSIC_IPC.SPOTIFY_PAUSE, () => pauseSpotifyConnect())
+  ipcMain.handle(MUSIC_IPC.SPOTIFY_RESUME, () => resumeSpotifyConnect())
+  ipcMain.handle(MUSIC_IPC.SPOTIFY_NEXT, () => nextSpotifyConnect())
+  ipcMain.handle(MUSIC_IPC.SPOTIFY_PREVIOUS, () => previousSpotifyConnect())
+  ipcMain.handle(MUSIC_IPC.SPOTIFY_SEEK, async (_event, payload: unknown) => {
+    const positionMs = parseSpotifySeekRequest(payload)
+    if (positionMs === null) throw new Error('Invalid seek position')
+    return seekSpotifyConnect(positionMs)
+  })
+  ipcMain.handle(MUSIC_IPC.SPOTIFY_VOLUME, async (_event, payload: unknown) => {
+    const volume = parseSpotifyVolumeRequest(payload)
+    if (volume === null) throw new Error('Invalid volume')
+    return setSpotifyConnectVolume(volume)
+  })
+  ipcMain.handle(MUSIC_IPC.SPOTIFY_PLAYBACK_STATE, () => getSpotifyPlaybackState())
 
   ipcMain.handle('music:recently-played', () => listRecentlyPlayed())
 

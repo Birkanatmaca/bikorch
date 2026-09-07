@@ -16,12 +16,11 @@ export function StreamingPlayerPanel(): React.JSX.Element {
   const tracks = useMusicStore((state) => state.tracks)
   const status = useMusicStore((state) => state.status)
   const volume = useMusicStore((state) => state.volume)
-  const spotifyYouTubeId = useMusicStore((state) => state.spotifyYouTubeId)
   const syncStreamingProgress = useMusicStore((state) => state.syncStreamingProgress)
 
   const current = tracks.find((track) => track.id === currentTrackId)
   const source: MusicSource | null = current?.source ?? null
-  const usesYouTube = source === 'youtube' || Boolean(spotifyYouTubeId)
+  const usesYouTube = source === 'youtube'
 
   useEffect(() => {
     setYouTubeEndedHandler(() => {

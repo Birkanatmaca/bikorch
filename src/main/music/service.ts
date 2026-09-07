@@ -252,7 +252,7 @@ export function checkTrackAvailable(trackId: string): { ok: boolean; reason?: st
       : { ok: false, reason: 'Invalid YouTube reference' }
   }
   if (track.source === 'spotify') {
-    return track.title ? { ok: true } : { ok: false, reason: 'Invalid Spotify reference' }
+    return track.sourceId ? { ok: true } : { ok: false, reason: 'Invalid Spotify reference' }
   }
   if (!track.filePath) return { ok: false, reason: 'Streaming reference — not playable offline' }
   if (!existsSync(track.filePath)) return { ok: false, reason: 'File missing or moved' }
@@ -274,6 +274,8 @@ export function spotifyStatusForRenderer(): import('@shared/contracts/music').Sp
   const clientId = getSpotifyClientId()
   return {
     ...status,
+    mode: 'connect',
+    selectedDeviceId: readMusicSettings().spotifyDeviceId,
     ...(clientId ? { clientId } : {})
   }
 }
@@ -292,7 +294,19 @@ export {
   listSpotifyTopTracks
 } from './spotify-api'
 
-export { resolveSpotifyPlayback } from './spotify-youtube'
+export {
+  getSelectedSpotifyDeviceId,
+  getSpotifyPlaybackState,
+  listSpotifyDevices,
+  nextSpotifyConnect,
+  pauseSpotifyConnect,
+  playSpotifyConnect,
+  previousSpotifyConnect,
+  resumeSpotifyConnect,
+  seekSpotifyConnect,
+  selectSpotifyDevice,
+  setSpotifyConnectVolume
+} from './spotify-playback'
 
 export function recordPlay(request: { trackId: string; projectId?: string }): { historyId: string | null } {
   const store = getMusicStore()

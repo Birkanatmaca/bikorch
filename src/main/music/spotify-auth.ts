@@ -18,9 +18,22 @@ const SCOPES = [
   'user-read-private',
   'user-modify-playback-state',
   'user-read-playback-state',
+  'user-read-currently-playing',
   'user-top-read',
   'user-library-read'
 ].join(' ')
+
+const ALLOWED_EXTERNAL_HOSTS = new Set([
+  'open.spotify.com',
+  'accounts.spotify.com',
+  'developer.spotify.com',
+  'www.youtube.com',
+  'youtube.com',
+  'youtu.be',
+  'music.youtube.com'
+])
+
+let refreshInFlight: Promise<SpotifyTokens> | null = null
 
 interface SpotifyTokens {
   accessToken: string
@@ -51,7 +64,10 @@ function readClientId(): string | null {
 }
 
 export function setSpotifyClientId(clientId: string): void {
-  writeMetaValue('music_spotify_client_id', clientId.trim())
+  const next = clientId.trim()
+  const previous = readClientId()
+  writeMetaValue('music_spotify_client_id', next)
+  if (previous && previous !== next) clearTokens()
 }
 
 export function getSpotifyClientId(): string | null {
@@ -81,7 +97,9 @@ function loadTokens(): SpotifyTokens | null {
 }
 
 function saveTokens(tokens: SpotifyTokens): void {
-  if (!safeStorage.isEncryptionAvailable()) return
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Secure storage is unavailable. Spotify credentials cannot be saved on this machine.')
+  }
   writeFileSync(credentialPath(), safeStorage.encryptString(JSON.stringify(tokens)))
 }
 
@@ -103,11 +121,16 @@ async function exchangeCode(clientId: string, code: string, verifier: string): P
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString()
   })
-  if (!response.ok) throw new Error('Spotify token exchange failed')
+  if (!response.ok) {
+    throw new Error(await tokenErrorMessage(response, 'Spotify token exchange failed'))
+  }
   const payload = (await response.json()) as {
-    access_token: string
-    refresh_token: string
-    expires_in: number
+    access_token?: string
+    refresh_token?: string
+    expires_in?: number
+  }
+  if (!payload.access_token || !payload.refresh_token || typeof payload.expires_in !== 'number') {
+    throw new Error('Spotify did not return a complete token response.')
   }
   const tokens: SpotifyTokens = {
     accessToken: payload.access_token,
@@ -120,34 +143,58 @@ async function exchangeCode(clientId: string, code: string, verifier: string): P
   return tokens
 }
 
+async function tokenErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const text = await response.text()
+    if (!text) return fallback
+    const parsed = JSON.parse(text) as { error_description?: string; error?: string }
+    if (typeof parsed.error_description === 'string' && parsed.error_description.trim()) {
+      return parsed.error_description.slice(0, 200)
+    }
+    if (typeof parsed.error === 'string' && parsed.error.trim()) return parsed.error.slice(0, 200)
+  } catch {
+    // Keep the generic fallback. Never include the raw token response.
+  }
+  return fallback
+}
+
 async function refreshAccessToken(clientId: string, refreshToken: string): Promise<SpotifyTokens> {
-  const previous = loadTokens()
-  const body = new URLSearchParams({
-    client_id: clientId,
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken
+  if (refreshInFlight) return refreshInFlight
+  refreshInFlight = (async () => {
+    const previous = loadTokens()
+    const body = new URLSearchParams({
+      client_id: clientId,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken
+    })
+    const response = await net.fetch(SPOTIFY_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString()
+    })
+    if (!response.ok) throw new Error(await tokenErrorMessage(response, 'Spotify refresh failed'))
+    const payload = (await response.json()) as {
+      access_token?: string
+      expires_in?: number
+      refresh_token?: string
+    }
+    if (!payload.access_token || typeof payload.expires_in !== 'number') {
+      throw new Error('Spotify did not return a refreshed access token.')
+    }
+    const tokens: SpotifyTokens = {
+      accessToken: payload.access_token,
+      refreshToken: payload.refresh_token ?? refreshToken,
+      expiresAt: Date.now() + payload.expires_in * 1000 - 30_000,
+      ...(previous?.email ? { email: previous.email } : {}),
+      ...(previous?.displayName ? { displayName: previous.displayName } : {}),
+      ...(previous?.product ? { product: previous.product } : {})
+    }
+    saveTokens(tokens)
+    return tokens
+  })().finally(() => {
+    refreshInFlight = null
   })
-  const response = await net.fetch(SPOTIFY_TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString()
-  })
-  if (!response.ok) throw new Error('Spotify refresh failed')
-  const payload = (await response.json()) as {
-    access_token: string
-    expires_in: number
-    refresh_token?: string
-  }
-  const tokens: SpotifyTokens = {
-    accessToken: payload.access_token,
-    refreshToken: payload.refresh_token ?? refreshToken,
-    expiresAt: Date.now() + payload.expires_in * 1000 - 30_000,
-    ...(previous?.email ? { email: previous.email } : {}),
-    ...(previous?.displayName ? { displayName: previous.displayName } : {}),
-    ...(previous?.product ? { product: previous.product } : {})
-  }
-  saveTokens(tokens)
-  return tokens
+  return refreshInFlight
 }
 
 async function fetchProfile(
@@ -179,21 +226,24 @@ export function getSpotifyStatus(): SpotifyConnectionStatus {
     redirectUri: REDIRECT_URI,
     premiumRequiredNote:
       tokens?.product === 'free'
-        ? 'This account is Free. You can browse and add tracks, but in-app playback needs Spotify Premium.'
-        : 'In-app Spotify playback uses the official Web Playback SDK and needs Premium.'
+        ? 'This account is Free. Spotify Connect playback usually needs Premium on an official Spotify device.'
+        : 'Playback uses Spotify Connect on a device you select. Audio plays in the official Spotify app, not inside Bikorch.'
   }
 }
 
-export async function getSpotifyAccessToken(): Promise<{ token: string | null; error?: string }> {
+export async function getSpotifyAccessToken(
+  options?: { forceRefresh?: boolean }
+): Promise<{ token: string | null; error?: string }> {
   const clientId = readClientId()
-  if (!clientId) return { token: null, error: 'Add a Spotify Client ID in Music settings first.' }
+  if (!clientId) return { token: null, error: 'Add a Spotify Client ID in Music → Integration first.' }
   let tokens = loadTokens()
   if (!tokens?.refreshToken) return { token: null, error: 'Spotify is not connected.' }
-  if (tokens.expiresAt <= Date.now()) {
+  if (options?.forceRefresh || tokens.expiresAt <= Date.now()) {
     try {
       tokens = await refreshAccessToken(clientId, tokens.refreshToken)
     } catch {
-      clearTokens()
+      if (options?.forceRefresh) clearTokens()
+      else if (tokens.expiresAt <= Date.now()) clearTokens()
       return { token: null, error: 'Spotify session expired. Connect again.' }
     }
   }
@@ -232,6 +282,7 @@ function waitForOAuthCode(authUrl: string, expectedState: string): Promise<strin
       else finish(code)
     })
 
+    server.on('error', () => finish(null))
     server.listen(REDIRECT_PORT, '127.0.0.1', () => {
       void shell.openExternal(authUrl)
     })
@@ -245,7 +296,7 @@ export async function connectSpotify(): Promise<{ ok: true } | { ok: false; erro
   if (!clientId) {
     return {
       ok: false,
-      error: 'Set a Spotify Client ID in Music → Privacy, then register the redirect URI in your Spotify app.'
+      error: 'Set a Spotify Client ID in Music → Integration, then register the redirect URI in your Spotify app.'
     }
   }
 
@@ -280,7 +331,21 @@ export function disconnectSpotify(): { ok: true } {
   return { ok: true }
 }
 
-export function openExternalUrl(url: string): { ok: true } {
+export function isAllowedMusicExternalUrl(url: string): boolean {
+  const trimmed = url.trim()
+  if (trimmed.startsWith('spotify:')) return /^spotify:[a-z]+:[A-Za-z0-9]+/i.test(trimmed)
+  try {
+    const parsed = new URL(trimmed)
+    return parsed.protocol === 'https:' && ALLOWED_EXTERNAL_HOSTS.has(parsed.hostname)
+  } catch {
+    return false
+  }
+}
+
+export function openExternalUrl(url: string): { ok: true } | { ok: false; error: string } {
+  if (!isAllowedMusicExternalUrl(url)) {
+    return { ok: false, error: 'That link is not allowed to open from Music.' }
+  }
   void shell.openExternal(url)
   return { ok: true }
 }

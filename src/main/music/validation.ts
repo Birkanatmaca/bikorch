@@ -151,6 +151,9 @@ export function parseSettingsUpdate(payload: unknown): Partial<MusicSettings> | 
     updates.libraryMode = payload['libraryMode']
   }
   if (typeof payload['persistQueue'] === 'boolean') updates.persistQueue = payload['persistQueue']
+  if (payload['spotifyDeviceId'] === null) updates.spotifyDeviceId = null
+  const deviceId = parseSpotifyDeviceId(payload['spotifyDeviceId'])
+  if (deviceId) updates.spotifyDeviceId = deviceId
   return updates
 }
 
@@ -201,6 +204,34 @@ export function parseSpotifySourceId(payload: unknown): string | null {
   const trimmed = value.trim()
   if (!/^[A-Za-z0-9]{16,32}$/.test(trimmed)) return null
   return trimmed
+}
+
+export function parseSpotifyDeviceId(payload: unknown): string | null {
+  const value = isRecord(payload) ? payload['deviceId'] ?? payload['spotifyDeviceId'] : payload
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(trimmed)) return null
+  return trimmed
+}
+
+export function parseSpotifyPlayRequest(payload: unknown): { sourceId: string; deviceId?: string } | null {
+  if (!isRecord(payload)) return null
+  const sourceId = parseSpotifySourceId(payload)
+  if (!sourceId) return null
+  const deviceId = parseSpotifyDeviceId(payload)
+  return deviceId ? { sourceId, deviceId } : { sourceId }
+}
+
+export function parseSpotifySeekRequest(payload: unknown): number | null {
+  const value = isRecord(payload) ? payload['positionMs'] : payload
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return Math.max(0, Math.round(value))
+}
+
+export function parseSpotifyVolumeRequest(payload: unknown): number | null {
+  const value = isRecord(payload) ? payload['volume'] : payload
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return Math.min(1, Math.max(0, value))
 }
 
 export function parsePlaybackSnapshot(payload: unknown): MusicPlaybackSnapshot | null {

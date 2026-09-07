@@ -1,28 +1,17 @@
 import { randomUUID } from 'crypto'
-import { net } from 'electron'
 import type { MusicTrack, SpotifyCatalogTrack, SpotifyTimeRange } from '@shared/contracts/music'
 import { downloadRemoteArtwork } from './artwork'
 import { mapSpotifyApiTrack, isSpotifyTrackId } from './spotify-map'
-import { getSpotifyAccessToken } from './spotify-auth'
+import { spotifyRequest } from './spotify-client'
+import { formatSpotifyError } from './spotify-errors'
 import { getMusicStore } from './store'
-
-const API_ROOT = 'https://api.spotify.com/'
 
 export { isSpotifyTimeRange, isSpotifyTrackId, mapSpotifyApiTrack } from './spotify-map'
 
-async function spotifyGet<T>(endpoint: string): Promise<T> {
-  const auth = await getSpotifyAccessToken()
-  if (!auth.token) throw new Error(auth.error ?? 'Spotify is not connected.')
-  const response = await net.fetch(`${API_ROOT}${endpoint}`, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${auth.token}` }
-  })
-  if (response.status === 401) throw new Error('Spotify session expired. Connect again.')
-  if (response.status === 403) {
-    throw new Error('Spotify denied this request. Reconnect and grant the extra permissions.')
-  }
-  if (!response.ok) throw new Error('Spotify request failed.')
-  return (await response.json()) as T
+async function spotifyGet<T>(path: string): Promise<T> {
+  const result = await spotifyRequest({ method: 'GET', path })
+  if (!result.ok) throw new Error(formatSpotifyError(result.error))
+  return (result.json ?? {}) as T
 }
 
 function markLibraryState(items: SpotifyCatalogTrack[]): SpotifyCatalogTrack[] {
@@ -39,7 +28,7 @@ export async function listSpotifyTopTracks(
 ): Promise<SpotifyCatalogTrack[]> {
   const safeLimit = Math.min(50, Math.max(1, Math.round(limit)))
   const payload = await spotifyGet<{ items?: unknown[] }>(
-    `v1/me/top/tracks?time_range=${timeRange}&limit=${safeLimit}`
+    `/v1/me/top/tracks?time_range=${timeRange}&limit=${safeLimit}`
   )
   const items = (payload.items ?? [])
     .map(mapSpotifyApiTrack)
@@ -106,7 +95,7 @@ export async function importSpotifyTrackById(
   const existing = store.findBySource('spotify', sourceId)
   if (existing) return { ok: true, track: existing, duplicate: true }
   try {
-    const raw = await spotifyGet<unknown>(`v1/tracks/${encodeURIComponent(sourceId)}`)
+    const raw = await spotifyGet<unknown>(`/v1/tracks/${encodeURIComponent(sourceId)}`)
     const mapped = mapSpotifyApiTrack(raw)
     if (!mapped) return { ok: false, error: 'Spotify did not return a playable track' }
     const result = await importSpotifyCatalogTracks([mapped])

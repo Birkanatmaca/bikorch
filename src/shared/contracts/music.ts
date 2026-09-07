@@ -51,6 +51,58 @@ export interface AddLinkResult {
   error?: string
 }
 
+export type SpotifyPlaybackMode = 'connect' | 'sdk' | 'external'
+
+export type SpotifyErrorCode =
+  | 'NOT_CONNECTED'
+  | 'TOKEN_EXPIRED'
+  | 'INSUFFICIENT_SCOPE'
+  | 'APP_ACCESS_RESTRICTED'
+  | 'PREMIUM_REQUIRED'
+  | 'NO_ACTIVE_DEVICE'
+  | 'DEVICE_NOT_READY'
+  | 'PLAYBACK_RESTRICTED'
+  | 'DRM_UNAVAILABLE'
+  | 'RATE_LIMITED'
+  | 'NETWORK_ERROR'
+  | 'UNKNOWN'
+
+export interface SpotifyError {
+  code: SpotifyErrorCode
+  message: string
+  httpStatus?: number
+  retryAfterMs?: number
+}
+
+export interface SpotifyDevice {
+  id: string
+  name: string
+  type: string
+  isActive: boolean
+  isRestricted?: boolean
+  supportsVolume?: boolean
+}
+
+export interface SpotifyPlaybackState {
+  trackId: string | null
+  title?: string
+  artist?: string
+  deviceId: string | null
+  deviceName?: string
+  isPlaying: boolean
+  positionMs: number
+  durationMs: number
+  volume: number | null
+}
+
+export interface SpotifyPlaybackResult {
+  ok: boolean
+  mode: SpotifyPlaybackMode
+  deviceId?: string
+  state?: SpotifyPlaybackState
+  error?: SpotifyError
+}
+
 export interface SpotifyConnectionStatus {
   connected: boolean
   email?: string
@@ -59,6 +111,8 @@ export interface SpotifyConnectionStatus {
   hasClientId: boolean
   redirectUri: string
   clientId?: string
+  mode: SpotifyPlaybackMode
+  selectedDeviceId: string | null
   premiumRequiredNote: string
 }
 
@@ -86,6 +140,8 @@ export interface MusicSettings {
   /** Default import mode for new files. */
   libraryMode: MusicStorageMode
   persistQueue: boolean
+  /** Explicitly selected Spotify Connect device. Never auto-picked. */
+  spotifyDeviceId: string | null
 }
 
 export interface MusicLibrarySummary {
@@ -163,7 +219,8 @@ export function createDefaultMusicSettings(): MusicSettings {
     associateWithProjects: false,
     useInDeveloperInsights: false,
     libraryMode: 'reference',
-    persistQueue: true
+    persistQueue: true,
+    spotifyDeviceId: null
   }
 }
 
@@ -257,5 +314,14 @@ export const MUSIC_IPC = {
   SPOTIFY_TOP_TRACKS: 'music:spotify:top-tracks',
   SPOTIFY_IMPORT_TOP: 'music:spotify:import-top',
   SPOTIFY_IMPORT_ONE: 'music:spotify:import-one',
-  SPOTIFY_RESOLVE_PLAYBACK: 'music:spotify:resolve-playback'
+  SPOTIFY_DEVICES: 'music:spotify:devices',
+  SPOTIFY_SELECT_DEVICE: 'music:spotify:select-device',
+  SPOTIFY_PLAY: 'music:spotify:play',
+  SPOTIFY_PAUSE: 'music:spotify:pause',
+  SPOTIFY_RESUME: 'music:spotify:resume',
+  SPOTIFY_NEXT: 'music:spotify:next',
+  SPOTIFY_PREVIOUS: 'music:spotify:previous',
+  SPOTIFY_SEEK: 'music:spotify:seek',
+  SPOTIFY_VOLUME: 'music:spotify:volume',
+  SPOTIFY_PLAYBACK_STATE: 'music:spotify:playback-state'
 } as const

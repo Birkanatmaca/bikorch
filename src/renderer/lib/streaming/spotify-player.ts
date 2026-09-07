@@ -1,4 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * Optional Web Playback SDK helpers. Not used by the music store.
+ * Supported playback is Spotify Connect via the main-process controller.
+ */
 
 function spotifyLog(message: string, extra?: unknown): void {
   if (extra === undefined) {

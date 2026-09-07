@@ -91,7 +91,7 @@ Language percentages must describe what they measure. Prompt mentions alone are 
 
 ## 6. Music / Focus Player — approved scope
 
-See [`2026-09-07_MUSIC_FOCUS_PLAYER.md`](./2026-09-07_MUSIC_FOCUS_PLAYER.md).
+See [`2026-09-07_MUSIC_FOCUS_PLAYER.md`](./2026-09-07_MUSIC_FOCUS_PLAYER.md) and [`2026-09-08_SPOTIFY_PLAYBACK_INTEGRATION.md`](./2026-09-08_SPOTIFY_PLAYBACK_INTEGRATION.md).
 
 Required areas:
 

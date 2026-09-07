@@ -92,6 +92,10 @@ import {
   type SpotifyAccessTokenResponse,
   type SpotifyCatalogTrack,
   type SpotifyConnectionStatus,
+  type SpotifyDevice,
+  type SpotifyError,
+  type SpotifyPlaybackResult,
+  type SpotifyPlaybackState,
   type SpotifyTimeRange
 } from '@shared/contracts/music'
 import {
@@ -158,7 +162,7 @@ export interface MusicApi {
   ) => Promise<{ ok: true; mime: string; data: Uint8Array } | { ok: false; error: string }>
   recentlyPlayed: () => Promise<MusicTrack[]>
   addLink: (url: string) => Promise<AddLinkResult>
-  openExternal: (url: string) => Promise<{ ok: true }>
+  openExternal: (url: string) => Promise<{ ok: true } | { ok: false; error: string }>
   spotify: {
     status: () => Promise<SpotifyConnectionStatus>
     setClientId: (clientId: string) => Promise<SpotifyConnectionStatus>
@@ -176,11 +180,18 @@ export interface MusicApi {
     importOne: (
       sourceId: string
     ) => Promise<{ ok: true; track: MusicTrack; duplicate: boolean } | { ok: false; error: string }>
-    resolvePlayback: (request: {
-      title: string
-      artist?: string
-      sourceId?: string
-    }) => Promise<{ ok: true; videoId: string; title?: string } | { ok: false; error: string }>
+    devices: () => Promise<{ ok: true; devices: SpotifyDevice[] } | { ok: false; error: SpotifyError }>
+    selectDevice: (deviceId: string | null) => Promise<{ ok: true; deviceId: string | null }>
+    play: (request: { sourceId: string; deviceId?: string }) => Promise<SpotifyPlaybackResult>
+    pause: () => Promise<SpotifyPlaybackResult>
+    resume: () => Promise<SpotifyPlaybackResult>
+    next: () => Promise<SpotifyPlaybackResult>
+    previous: () => Promise<SpotifyPlaybackResult>
+    seek: (positionMs: number) => Promise<SpotifyPlaybackResult>
+    setVolume: (volume: number) => Promise<SpotifyPlaybackResult>
+    playbackState: () => Promise<
+      { ok: true; state: SpotifyPlaybackState } | { ok: false; error: SpotifyError }
+    >
   }
   downloads: {
     engineStatus: () => Promise<DownloadEngineStatus>
@@ -468,7 +479,16 @@ const musicApi: MusicApi = {
     topTracks: (request) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_TOP_TRACKS, request ?? {}),
     importTop: (request) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_IMPORT_TOP, request ?? {}),
     importOne: (sourceId) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_IMPORT_ONE, { sourceId }),
-    resolvePlayback: (request) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_RESOLVE_PLAYBACK, request)
+    devices: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_DEVICES),
+    selectDevice: (deviceId) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_SELECT_DEVICE, { deviceId }),
+    play: (request) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_PLAY, request),
+    pause: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_PAUSE),
+    resume: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_RESUME),
+    next: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_NEXT),
+    previous: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_PREVIOUS),
+    seek: (positionMs) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_SEEK, { positionMs }),
+    setVolume: (volume) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_VOLUME, { volume }),
+    playbackState: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_PLAYBACK_STATE)
   },
   downloads: {
     engineStatus: () => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.ENGINE_STATUS),

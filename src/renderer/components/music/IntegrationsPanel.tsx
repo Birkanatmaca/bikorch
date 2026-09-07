@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { FolderOpen, Play, Upload } from 'lucide-react'
+import { FolderOpen, Play, RefreshCw, Upload } from 'lucide-react'
 import { Button } from '@renderer/components/ui/Button'
 import { formatTrackDuration, useMusicStore } from '@renderer/stores/music-store'
 import type { SpotifyTimeRange } from '@shared/contracts/music'
@@ -14,16 +14,35 @@ export function IntegrationsPanel(): React.JSX.Element {
   const importFiles = useMusicStore((state) => state.importFiles)
   const importFolder = useMusicStore((state) => state.importFolder)
   const spotifyStatus = useMusicStore((state) => state.spotifyStatus)
+  const spotifyDevices = useMusicStore((state) => state.spotifyDevices)
+  const spotifyPlayback = useMusicStore((state) => state.spotifyPlayback)
   const spotifyTopTracks = useMusicStore((state) => state.spotifyTopTracks)
+  const settings = useMusicStore((state) => state.settings)
   const setSpotifyClientId = useMusicStore((state) => state.setSpotifyClientId)
   const connectSpotify = useMusicStore((state) => state.connectSpotify)
   const disconnectSpotify = useMusicStore((state) => state.disconnectSpotify)
+  const refreshSpotifyDevices = useMusicStore((state) => state.refreshSpotifyDevices)
+  const selectSpotifyDevice = useMusicStore((state) => state.selectSpotifyDevice)
   const loadSpotifyTopTracks = useMusicStore((state) => state.loadSpotifyTopTracks)
   const importSpotifyTopTracks = useMusicStore((state) => state.importSpotifyTopTracks)
   const playSpotifyCatalogTrack = useMusicStore((state) => state.playSpotifyCatalogTrack)
   const openExternal = useMusicStore((state) => state.openExternal)
-  const settings = useMusicStore((state) => state.settings)
+  const openSpotifyTrack = useMusicStore((state) => state.openSpotifyTrack)
   const updateSettings = useMusicStore((state) => state.updateSettings)
+
+  const selectedDevice =
+    spotifyDevices.find((device) => device.id === settings.spotifyDeviceId) ?? null
+  const deviceStatus = !spotifyStatus?.connected
+    ? 'Disconnected'
+    : selectedDevice?.isRestricted
+      ? 'Restricted'
+      : selectedDevice
+        ? selectedDevice.isActive
+          ? 'Ready'
+          : 'Selected'
+        : spotifyDevices.length === 0
+          ? 'No devices'
+          : 'Select a device'
 
   useEffect(() => {
     if (spotifyStatus?.clientId) setSpotifyClientIdLocal(spotifyStatus.clientId)
@@ -34,7 +53,8 @@ export function IntegrationsPanel(): React.JSX.Element {
     void loadSpotifyTopTracks(timeRange, 5).then((error) => {
       if (error) setMessage(error)
     })
-  }, [loadSpotifyTopTracks, spotifyStatus?.connected, timeRange])
+    void refreshSpotifyDevices()
+  }, [loadSpotifyTopTracks, refreshSpotifyDevices, spotifyStatus?.connected, timeRange])
 
   return (
     <div className="music-page">
@@ -71,9 +91,8 @@ export function IntegrationsPanel(): React.JSX.Element {
       <section className="music-page-card">
         <h3>Spotify</h3>
         <p>
-          Connect your account with a Spotify app Client ID to import your top tracks. Bikorch
-          plays them in its own player by finding a public YouTube match. Spotify streams are not
-          ripped.
+          Connect your account, pick an official Spotify device, then play catalog tracks through
+          Spotify Connect. Audio plays on that device — not as a YouTube substitute inside Bikorch.
         </p>
         <button
           type="button"
@@ -128,16 +147,85 @@ export function IntegrationsPanel(): React.JSX.Element {
               Connect
             </Button>
           )}
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void openSpotifyTrack()}>
+            Open Spotify
+          </Button>
         </div>
+
         {spotifyStatus?.connected && (
-          <p className="text-[10px] text-text-muted">
-            Connected as {spotifyStatus.displayName ?? spotifyStatus.email ?? 'Spotify'}
-            {spotifyStatus.product === 'premium' ? ' · Premium' : ''}
-          </p>
+          <div className="music-spotify-status">
+            <p>
+              Spotify connected
+              {spotifyStatus.displayName || spotifyStatus.email
+                ? ` · ${spotifyStatus.displayName ?? spotifyStatus.email}`
+                : ''}
+              {spotifyStatus.product && spotifyStatus.product !== 'unknown'
+                ? ` · ${spotifyStatus.product === 'premium' ? 'Premium' : 'Free'}`
+                : ''}
+            </p>
+            <p>Mode: Spotify Connect</p>
+            <p>Device: {selectedDevice?.name ?? 'None selected'}</p>
+            <p>Status: {deviceStatus}</p>
+            {spotifyPlayback?.title && (
+              <p>
+                Now: {spotifyPlayback.isPlaying ? 'Playing' : 'Paused'} {spotifyPlayback.title}
+              </p>
+            )}
+          </div>
         )}
+
+        <p className="text-[10px] text-text-muted">{spotifyStatus?.premiumRequiredNote}</p>
         <p className="text-[10px] text-text-muted">
-          {spotifyStatus?.premiumRequiredNote}
+          In-app Spotify audio is unavailable in this runtime. Select an authorized Spotify Connect
+          device or open Spotify. If a command fails, the real provider reason is shown — not every
+          403 means Premium is missing.
         </p>
+
+        {spotifyStatus?.connected && (
+          <div className="mt-2 flex flex-col gap-2">
+            <label className="block">
+              <span className="mb-1 block text-text-muted">Playback device</span>
+              <select
+                className="profile-search w-full"
+                value={settings.spotifyDeviceId ?? ''}
+                onChange={(event) => {
+                  const value = event.target.value
+                  void selectSpotifyDevice(value || null)
+                }}
+              >
+                <option value="">Select a Spotify device…</option>
+                {spotifyDevices.map((device) => (
+                  <option key={device.id} value={device.id} disabled={device.isRestricted}>
+                    {device.name}
+                    {device.isActive ? ' · active' : ''}
+                    {device.isRestricted ? ' · restricted' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true)
+                void refreshSpotifyDevices().then((error) => {
+                  setBusy(false)
+                  setMessage(error ?? (spotifyDevices.length === 0 ? 'No devices yet. Open Spotify, then refresh.' : 'Devices refreshed.'))
+                })
+              }}
+            >
+              <RefreshCw className="h-3 w-3" />
+              Refresh devices
+            </Button>
+            {spotifyDevices.length === 0 && (
+              <p className="text-[10px] text-text-muted">
+                Open Spotify Desktop or another official device, then refresh. Bikorch will not pick
+                a device for you.
+              </p>
+            )}
+          </div>
+        )}
 
         {spotifyStatus?.connected && (
           <div className="mt-3 flex flex-col gap-2">

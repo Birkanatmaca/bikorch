@@ -4,7 +4,9 @@ import {
   parseEnsurePlayable,
   parseImportPaths,
   parsePlaybackSnapshot,
-  parseSettingsUpdate
+  parseSettingsUpdate,
+  parseSpotifyDeviceId,
+  parseSpotifyPlayRequest
 } from '../validation'
 
 describe('music validation', () => {
@@ -51,5 +53,16 @@ describe('music validation', () => {
       trackId: 'track-1',
       force: true
     })
+  })
+
+  it('parses Spotify device and play requests', () => {
+    expect(parseSpotifyDeviceId('desk-1')).toBe('desk-1')
+    expect(parseSpotifyDeviceId({ deviceId: 'phone_2' })).toBe('phone_2')
+    expect(parseSpotifyDeviceId('bad id')).toBeNull()
+    expect(parseSpotifyPlayRequest({ sourceId: '11dFghVXANMlKmJXsNCbNl', deviceId: 'desk-1' })).toEqual({
+      sourceId: '11dFghVXANMlKmJXsNCbNl',
+      deviceId: 'desk-1'
+    })
+    expect(parseSettingsUpdate({ spotifyDeviceId: 'desk-1' })).toEqual({ spotifyDeviceId: 'desk-1' })
   })
 })

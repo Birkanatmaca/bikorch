@@ -1,4 +1,9 @@
-import type { SpotifyCatalogTrack, SpotifyTimeRange } from '@shared/contracts/music'
+import type {
+  SpotifyCatalogTrack,
+  SpotifyDevice,
+  SpotifyPlaybackState,
+  SpotifyTimeRange
+} from '@shared/contracts/music'
 
 export function isSpotifyTrackId(value: string): boolean {
   return /^[A-Za-z0-9]{16,32}$/.test(value)
@@ -47,5 +52,65 @@ export function mapSpotifyApiTrack(raw: unknown): SpotifyCatalogTrack | null {
     durationMs,
     sourceUrl: `https://open.spotify.com/track/${sourceId}`,
     ...(artworkUrl ? { artworkUrl } : {})
+  }
+}
+
+export function mapSpotifyDevices(payload: unknown): SpotifyDevice[] {
+  if (!isRecord(payload) || !Array.isArray(payload.devices)) return []
+  return payload.devices.flatMap((item) => {
+    if (!isRecord(item) || typeof item.id !== 'string' || !item.id.trim()) return []
+    return [
+      {
+        id: item.id,
+        name: typeof item.name === 'string' && item.name.trim() ? item.name : 'Spotify device',
+        type: typeof item.type === 'string' ? item.type : 'unknown',
+        isActive: item.is_active === true,
+        isRestricted: item.is_restricted === true,
+        supportsVolume: item.supports_volume !== false
+      }
+    ]
+  })
+}
+
+export function mapSpotifyPlaybackState(payload: unknown): SpotifyPlaybackState | null {
+  if (payload == null) {
+    return {
+      trackId: null,
+      deviceId: null,
+      isPlaying: false,
+      positionMs: 0,
+      durationMs: 0,
+      volume: null
+    }
+  }
+  if (!isRecord(payload)) return null
+  const item = isRecord(payload.item) ? payload.item : null
+  const device = isRecord(payload.device) ? payload.device : null
+  const artists = item && Array.isArray(item.artists)
+    ? item.artists
+        .filter((artist): artist is Record<string, unknown> => isRecord(artist))
+        .map((artist) => (typeof artist.name === 'string' ? artist.name : ''))
+        .filter(Boolean)
+        .join(', ')
+    : undefined
+  return {
+    trackId: item && typeof item.id === 'string' ? item.id : null,
+    ...(item && typeof item.name === 'string' ? { title: item.name } : {}),
+    ...(artists ? { artist: artists } : {}),
+    deviceId: device && typeof device.id === 'string' ? device.id : null,
+    ...(device && typeof device.name === 'string' ? { deviceName: device.name } : {}),
+    isPlaying: payload.is_playing === true,
+    positionMs:
+      typeof payload.progress_ms === 'number' && Number.isFinite(payload.progress_ms)
+        ? Math.max(0, payload.progress_ms)
+        : 0,
+    durationMs:
+      item && typeof item.duration_ms === 'number' && Number.isFinite(item.duration_ms)
+        ? Math.max(0, item.duration_ms)
+        : 0,
+    volume:
+      device && typeof device.volume_percent === 'number' && Number.isFinite(device.volume_percent)
+        ? Math.min(100, Math.max(0, device.volume_percent))
+        : null
   }
 }

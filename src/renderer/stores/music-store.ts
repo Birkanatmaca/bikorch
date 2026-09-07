@@ -6,14 +6,17 @@ import type {
   MusicSettings,
   MusicTrack,
   PlaybackStatus,
-  RepeatMode
+  RepeatMode,
+  SpotifyDevice,
+  SpotifyPlaybackResult,
+  SpotifyPlaybackState
 } from '@shared/contracts/music'
 import { createDefaultMusicSettings, trackPlaybackUrl } from '@shared/contracts/music'
 import type { MusicSource, SpotifyCatalogTrack, SpotifyConnectionStatus, SpotifyTimeRange } from '@shared/contracts/music'
+import { resolveSpotifyPlayRoute, spotifyTrackUri, spotifyWebTrackUrl } from '@shared/music-playback'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { attachPlaybackAnalyser, resumePlaybackAnalyser } from '@renderer/lib/audio-analyser'
 import { pauseYouTube, playYouTubeVideo, resumeYouTube, seekYouTube, setYouTubeVolume, stopYouTube } from '@renderer/lib/streaming/youtube-player'
-import { disconnectSpotifyPlayer, pauseSpotify, playSpotifyTrack, resumeSpotify, setSpotifyVolume } from '@renderer/lib/streaming/spotify-player'
 
 function api(): Window['api']['music'] | null {
   return typeof window !== 'undefined' && window.api?.music ? window.api.music : null
@@ -121,8 +124,8 @@ function playsFromFile(track: MusicTrack | null): boolean {
   return Boolean(track?.isOfflineAvailable && track.filePath)
 }
 
-function playsSpotifyViaYouTube(track: MusicTrack | null, videoId: string | null): boolean {
-  return Boolean(track?.source === 'spotify' && videoId)
+function usesSpotifyConnect(track: MusicTrack | null): boolean {
+  return Boolean(track && resolveSpotifyPlayRoute(track).kind === 'connect')
 }
 
 function buildPlayOrder(state: MusicState): string[] {
@@ -160,7 +163,8 @@ interface MusicState {
   repeat: RepeatMode
   error: string | null
   spotifyStatus: SpotifyConnectionStatus | null
-  spotifyYouTubeId: string | null
+  spotifyDevices: SpotifyDevice[]
+  spotifyPlayback: SpotifyPlaybackState | null
   showStreamingPlayer: boolean
 
   bootstrap: () => Promise<void>
@@ -175,9 +179,12 @@ interface MusicState {
   addLink: (url: string) => Promise<string | null>
   openExternal: (url: string) => Promise<void>
   refreshSpotifyStatus: () => Promise<void>
+  refreshSpotifyDevices: () => Promise<string | null>
+  selectSpotifyDevice: (deviceId: string | null) => Promise<void>
   setSpotifyClientId: (clientId: string) => Promise<void>
   connectSpotify: () => Promise<string | null>
   disconnectSpotify: () => Promise<void>
+  openSpotifyTrack: (sourceId?: string) => Promise<void>
   loadSpotifyTopTracks: (timeRange?: SpotifyTimeRange, limit?: number) => Promise<string | null>
   importSpotifyTopTracks: (timeRange?: SpotifyTimeRange, limit?: number) => Promise<string | null>
   playSpotifyCatalogTrack: (sourceId: string) => Promise<string | null>
@@ -211,6 +218,65 @@ interface MusicState {
   currentSource: () => MusicSource | null
 }
 
+function applySpotifyResult(
+  result: SpotifyPlaybackResult,
+  setState: (partial: Partial<MusicState>) => void
+): void {
+  if (!result.state) return
+  setState({
+    spotifyPlayback: result.state,
+    ...(result.state.durationMs > 0 ? { durationMs: result.state.durationMs } : {}),
+    positionMs: result.state.positionMs
+  })
+}
+
+let spotifyPollTimer: ReturnType<typeof setInterval> | null = null
+let endingFromPoll = false
+
+function stopSpotifyPoll(): void {
+  if (!spotifyPollTimer) return
+  clearInterval(spotifyPollTimer)
+  spotifyPollTimer = null
+}
+
+function startSpotifyPoll(): void {
+  stopSpotifyPoll()
+  spotifyPollTimer = setInterval(() => {
+    void pollSpotifyPlayback()
+  }, 1000)
+}
+
+async function pollSpotifyPlayback(): Promise<void> {
+  const snapshot = useMusicStore.getState()
+  if (!usesSpotifyConnect(trackById(snapshot.tracks, snapshot.currentTrackId))) {
+    stopSpotifyPoll()
+    return
+  }
+  const result = await api()?.spotify.playbackState()
+  if (!result?.ok) return
+  const playback = result.state
+  useMusicStore.setState({
+    spotifyPlayback: playback,
+    positionMs: playback.positionMs,
+    ...(playback.durationMs > 0 ? { durationMs: playback.durationMs } : {}),
+    status: snapshot.status === 'loading' ? snapshot.status : playback.isPlaying ? 'playing' : 'paused'
+  })
+  if (
+    !endingFromPoll &&
+    !playback.isPlaying &&
+    playback.durationMs > 0 &&
+    playback.positionMs >= playback.durationMs - 1500
+  ) {
+    endingFromPoll = true
+    void useMusicStore
+      .getState()
+      .handleEnded()
+      .finally(() => {
+        endingFromPoll = false
+      })
+  }
+}
+
 export const useMusicStore = create<MusicState>((set, get) => ({
   loaded: false,
   loading: false,
@@ -234,7 +300,8 @@ export const useMusicStore = create<MusicState>((set, get) => ({
   repeat: 'off',
   error: null,
   spotifyStatus: null,
-  spotifyYouTubeId: null,
+  spotifyDevices: [],
+  spotifyPlayback: null,
   spotifyTopTracks: [],
   showStreamingPlayer: false,
 
@@ -272,6 +339,7 @@ export const useMusicStore = create<MusicState>((set, get) => ({
         currentTrackId: playback?.trackId ?? null,
         positionMs: playback?.positionMs ?? 0
       })
+      if (spotifyStatus?.connected) void get().refreshSpotifyDevices()
       const element = getAudio()
       element.volume = playback?.volume ?? 0.8
       if (playback?.trackId) {
@@ -374,6 +442,24 @@ export const useMusicStore = create<MusicState>((set, get) => ({
     set({ spotifyStatus })
   },
 
+  refreshSpotifyDevices: async () => {
+    const bridge = api()
+    if (!bridge) return 'Music API unavailable'
+    const result = await bridge.spotify.devices()
+    if (!result.ok) return result.error.message
+    set({ spotifyDevices: result.devices })
+    return null
+  },
+
+  selectSpotifyDevice: async (deviceId) => {
+    const bridge = api()
+    if (!bridge) return
+    await bridge.spotify.selectDevice(deviceId)
+    const settings = { ...get().settings, spotifyDeviceId: deviceId }
+    set({ settings })
+    await get().refreshSpotifyStatus()
+  },
+
   setSpotifyClientId: async (clientId) => {
     const bridge = api()
     if (!bridge) return
@@ -386,16 +472,31 @@ export const useMusicStore = create<MusicState>((set, get) => ({
     if (!bridge) return 'Music API unavailable'
     const result = await bridge.spotify.connect()
     await get().refreshSpotifyStatus()
-    return result.ok ? null : result.error ?? 'Spotify connection failed'
+    if (result.ok) {
+      const deviceError = await get().refreshSpotifyDevices()
+      return deviceError
+    }
+    return result.error ?? 'Spotify connection failed'
   },
 
   disconnectSpotify: async () => {
     const bridge = api()
     if (!bridge) return
-    disconnectSpotifyPlayer()
+    stopSpotifyPoll()
     await bridge.spotify.disconnect()
-    set({ spotifyTopTracks: [] })
+    set({ spotifyTopTracks: [], spotifyDevices: [], spotifyPlayback: null })
     await get().refreshSpotifyStatus()
+  },
+
+  openSpotifyTrack: async (sourceId) => {
+    const id = sourceId ?? trackById(get().tracks, get().currentTrackId)?.sourceId
+    if (id) {
+      const desktop = await api()?.openExternal(spotifyTrackUri(id))
+      if (desktop && 'ok' in desktop && desktop.ok) return
+      await api()?.openExternal(spotifyWebTrackUrl(id))
+      return
+    }
+    await api()?.openExternal('https://open.spotify.com')
   },
 
   loadSpotifyTopTracks: async (timeRange = 'long_term', limit = 5) => {
@@ -537,17 +638,21 @@ export const useMusicStore = create<MusicState>((set, get) => ({
 
     getAudio().pause()
     stopYouTube()
+    stopSpotifyPoll()
+    if (get().spotifyPlayback?.isPlaying && track?.source !== 'spotify') {
+      void bridge.spotify.pause()
+    }
     set({
       status: 'loading',
       error: null,
       currentTrackId: trackId,
       positionMs: 0,
-      showStreamingPlayer: !playsFromFile(track) && (track?.source === 'youtube' || track?.source === 'spotify'),
-      spotifyYouTubeId: null
+      showStreamingPlayer: !playsFromFile(track) && track?.source === 'youtube',
+      spotifyPlayback: track?.source === 'spotify' ? get().spotifyPlayback : null
     })
 
     try {
-      if (playsFromFile(track)) {
+      if (playsFromFile(track) || (track && resolveSpotifyPlayRoute(track).kind === 'local')) {
         set({ error: 'Preparing this track…' })
         await playLocalFile(trackId, get().volume)
         set({ status: 'playing', error: null })
@@ -557,19 +662,27 @@ export const useMusicStore = create<MusicState>((set, get) => ({
         await playYouTubeVideo(track.sourceId)
         set({ status: 'playing' })
       } else if (track?.source === 'spotify') {
-        console.log('[spotify] store playTrack', track.title, track.sourceId)
-        set({ error: 'Finding a playable copy…' })
-        const resolved = await bridge.spotify.resolvePlayback({
-          title: track.title,
-          ...(track.artist ? { artist: track.artist } : {}),
-          ...(track.sourceId ? { sourceId: track.sourceId } : {})
+        const route = resolveSpotifyPlayRoute(track)
+        if (route.kind !== 'connect') {
+          throw new Error(route.kind === 'unavailable' ? route.reason : 'This Spotify track is not ready to play')
+        }
+        set({ error: 'Starting on the selected Spotify device…' })
+        const selectedDeviceId = get().settings.spotifyDeviceId
+        const result = await bridge.spotify.play({
+          sourceId: route.sourceId,
+          ...(selectedDeviceId ? { deviceId: selectedDeviceId } : {})
         })
-        if (!resolved.ok) throw new Error(resolved.error)
-        console.log('[spotify] playing via YouTube', resolved.videoId)
-        set({ spotifyYouTubeId: resolved.videoId, error: null })
-        await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
-        await playYouTubeVideo(resolved.videoId)
-        set({ status: 'playing', durationMs: track.durationMs ?? 0 })
+        applySpotifyResult(result, set)
+        if (!result.ok) throw new Error(result.error?.message ?? 'Spotify playback failed')
+        set({
+          status: result.state?.isPlaying === false ? 'paused' : 'playing',
+          error: result.state?.isPlaying === false
+            ? 'Command sent. Confirm Spotify is playing on the selected device.'
+            : null,
+          durationMs: result.state?.durationMs || track.durationMs || 0,
+          positionMs: result.state?.positionMs ?? 0
+        })
+        startSpotifyPoll()
       } else {
         await playLocalFile(trackId, get().volume)
         set({ status: 'playing' })
@@ -583,9 +696,6 @@ export const useMusicStore = create<MusicState>((set, get) => ({
       scheduleSavePlayback(get())
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Playback failed'
-      if (track?.source === 'spotify') {
-        console.error('[spotify] store playTrack failed', message)
-      }
       set({
         status: 'error',
         error: message
@@ -617,14 +727,20 @@ export const useMusicStore = create<MusicState>((set, get) => ({
     useWorkspaceStore.getState().openPlayerPanel()
     const current = trackById(get().tracks, currentTrackId)
     if (!playsFromFile(current)) {
-      const source = current?.source
-      if (source === 'youtube' || playsSpotifyViaYouTube(current, get().spotifyYouTubeId)) {
+      if (current?.source === 'youtube') {
         set({ status: 'playing', error: null })
         resumeYouTube()
         return
       }
-      if (source === 'spotify') {
-        await get().playTrack(currentTrackId)
+      if (usesSpotifyConnect(current)) {
+        const result = await api()?.spotify.resume()
+        if (result) applySpotifyResult(result, set)
+        if (!result?.ok) {
+          set({ status: 'error', error: result?.error?.message ?? 'Could not resume Spotify' })
+          return
+        }
+        set({ status: result.state?.isPlaying === false ? 'paused' : 'playing', error: null })
+        startSpotifyPoll()
         return
       }
     }
@@ -640,10 +756,14 @@ export const useMusicStore = create<MusicState>((set, get) => ({
   },
 
   pause: () => {
-    const source = get().currentSource()
+    const current = trackById(get().tracks, get().currentTrackId)
     getAudio().pause()
-    if (source === 'youtube' || get().spotifyYouTubeId) pauseYouTube()
-    if (source === 'spotify' && !get().spotifyYouTubeId) void pauseSpotify()
+    if (current?.source === 'youtube') pauseYouTube()
+    if (usesSpotifyConnect(current)) {
+      void api()?.spotify.pause().then((result) => {
+        if (result) applySpotifyResult(result, useMusicStore.setState)
+      })
+    }
     set({ status: 'paused' })
     void flushListen()
     scheduleSavePlayback(get())
@@ -663,6 +783,12 @@ export const useMusicStore = create<MusicState>((set, get) => ({
   },
 
   previous: async () => {
+    const current = trackById(get().tracks, get().currentTrackId)
+    if (usesSpotifyConnect(current) && get().positionMs > 3000) {
+      await api()?.spotify.seek(0)
+      set({ positionMs: 0 })
+      return
+    }
     const element = getAudio()
     if (element.currentTime > 3) {
       element.currentTime = 0
@@ -679,15 +805,15 @@ export const useMusicStore = create<MusicState>((set, get) => ({
   seek: (positionMs) => {
     const current = trackById(get().tracks, get().currentTrackId)
     if (!playsFromFile(current)) {
-      const source = current?.source
-      if (source === 'youtube' || playsSpotifyViaYouTube(current, get().spotifyYouTubeId)) {
+      if (current?.source === 'youtube') {
         seekYouTube(positionMs / 1000)
         set({ positionMs })
         scheduleSavePlayback(get())
         return
       }
-      if (source === 'spotify') {
+      if (usesSpotifyConnect(current)) {
         set({ positionMs })
+        void api()?.spotify.seek(positionMs)
         scheduleSavePlayback(get())
         return
       }
@@ -702,8 +828,10 @@ export const useMusicStore = create<MusicState>((set, get) => ({
     const next = Math.min(1, Math.max(0, volume))
     const source = get().currentSource()
     getAudio().volume = next
-    if (source === 'youtube' || get().spotifyYouTubeId) setYouTubeVolume(next * 100)
-    if (source === 'spotify' && !get().spotifyYouTubeId) void setSpotifyVolume(next)
+    if (source === 'youtube') setYouTubeVolume(next * 100)
+    if (usesSpotifyConnect(trackById(get().tracks, get().currentTrackId))) {
+      void api()?.spotify.setVolume(next)
+    }
     set({ volume: next })
     scheduleSavePlayback(get())
   },

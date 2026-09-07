@@ -460,7 +460,11 @@ export function readMusicSettings(): MusicSettings {
     associateWithProjects: typeof parsed.associateWithProjects === 'boolean' ? parsed.associateWithProjects : defaults.associateWithProjects,
     useInDeveloperInsights: typeof parsed.useInDeveloperInsights === 'boolean' ? parsed.useInDeveloperInsights : defaults.useInDeveloperInsights,
     libraryMode: parsed.libraryMode === 'managed' ? 'managed' : defaults.libraryMode,
-    persistQueue: typeof parsed.persistQueue === 'boolean' ? parsed.persistQueue : defaults.persistQueue
+    persistQueue: typeof parsed.persistQueue === 'boolean' ? parsed.persistQueue : defaults.persistQueue,
+    spotifyDeviceId:
+      typeof parsed.spotifyDeviceId === 'string' && parsed.spotifyDeviceId.trim()
+        ? parsed.spotifyDeviceId.trim()
+        : null
   }
 }
 

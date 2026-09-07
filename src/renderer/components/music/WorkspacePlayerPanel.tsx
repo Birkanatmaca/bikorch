@@ -20,6 +20,9 @@ export function WorkspacePlayerPanel(): React.JSX.Element {
   const durationMs = useMusicStore((state) => state.durationMs)
   const volume = useMusicStore((state) => state.volume)
   const error = useMusicStore((state) => state.error)
+  const spotifyPlayback = useMusicStore((state) => state.spotifyPlayback)
+  const settings = useMusicStore((state) => state.settings)
+  const spotifyDevices = useMusicStore((state) => state.spotifyDevices)
   const playTrack = useMusicStore((state) => state.playTrack)
   const togglePlay = useMusicStore((state) => state.togglePlay)
   const next = useMusicStore((state) => state.next)
@@ -29,6 +32,9 @@ export function WorkspacePlayerPanel(): React.JSX.Element {
 
   const current = tracks.find((track) => track.id === currentTrackId) ?? null
   const playing = status === 'playing'
+  const spotifyDevice =
+    spotifyDevices.find((device) => device.id === settings.spotifyDeviceId)?.name ??
+    spotifyPlayback?.deviceName
   const total = durationMs || current?.durationMs || 0
   const cover = trackCoverUrl(current)
 
@@ -83,7 +89,10 @@ export function WorkspacePlayerPanel(): React.JSX.Element {
               {current?.title ?? 'Nothing playing'}
             </p>
             <p className="truncate text-[11px] text-text-muted">
-              {error ?? current?.artist ?? 'Choose a track from the list'}
+              {error ??
+                (current?.source === 'spotify' && spotifyDevice
+                  ? `${current.artist ?? 'Spotify'} · on ${spotifyDevice}`
+                  : current?.artist ?? 'Choose a track from the list')}
             </p>
           </div>
           <div className="music-eq-bezel">
