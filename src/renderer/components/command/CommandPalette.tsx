@@ -34,7 +34,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
   const commands: CommandItem[] = useMemo(() => {
     const panelCommands: CommandItem[] = (
       Object.entries(PANEL_TYPE_LABELS) as [PanelType, string][]
-    ).map(([type, label]) => ({
+    ).filter(([type]) => type !== 'tasks').map(([type, label]) => ({
       id: `panel-${type}`,
       label,
       group: 'Panels',
@@ -126,6 +126,26 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
         }
       },
       {
+        id: 'show-tasks',
+        label: 'Show Tasks',
+        group: 'Workspace',
+        keywords: 'task planning checklist sidebar',
+        action: () => {
+          if (projectId) selectLeftSidebar(projectId, 'tasks')
+          onClose()
+        }
+      },
+      {
+        id: 'show-profile',
+        label: 'Show Profile',
+        group: 'Workspace',
+        keywords: 'developer intelligence insights usage costs account statistics',
+        action: () => {
+          if (projectId) selectLeftSidebar(projectId, 'profile')
+          onClose()
+        }
+      },
+      {
         id: 'refresh-git',
         label: 'Refresh Git Changes',
         group: 'Git',
@@ -199,17 +219,19 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
   let lastGroup = ''
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-start justify-center bg-black/50 pt-[15vh] backdrop-blur-sm animate-fade-in">
-      <div className="w-full max-w-md overflow-hidden rounded-lg border border-border bg-elevated shadow-2xl animate-slide-up">
+    <div className="command-overlay fixed inset-0 z-[110] flex items-start justify-center bg-black/50 px-4 pt-[15vh] backdrop-blur-sm animate-fade-in">
+      <div className="command-surface w-full max-w-md overflow-hidden rounded-lg border border-border bg-elevated shadow-2xl animate-slide-up" role="dialog" aria-label="Command palette" aria-modal="true">
         <div className="flex items-center gap-2 border-b border-border px-3">
           <Search className="h-4 w-4 shrink-0 text-text-muted" />
           <input
             ref={inputRef}
+            aria-label="Search commands"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Type a command..."
             className="h-11 flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted"
           />
+          <kbd className="command-shortcut">Esc</kbd>
         </div>
         <div className="max-h-72 overflow-auto p-1">
           {filtered.length === 0 && (
@@ -240,6 +262,10 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
               </div>
             )
           })}
+        </div>
+        <div className="command-footer flex items-center gap-3 border-t px-3 py-2 text-[10px] text-text-muted">
+          <span><kbd>↑ ↓</kbd> Navigate</span>
+          <span><kbd>↵</kbd> Run command</span>
         </div>
       </div>
       <button

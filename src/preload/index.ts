@@ -55,6 +55,26 @@ import {
   type AuthProfileSummary,
   type SystemAuthDiscovery
 } from '@shared/contracts/auth-profiles'
+import {
+  DEVELOPER_INTELLIGENCE_IPC,
+  type AnalyzeMemoriesResult,
+  type ClearTarget,
+  type DeveloperEventInput,
+  type DeveloperIntelligenceExportResult,
+  type DeveloperIntelligenceSettings,
+  type DeveloperIntelligenceStats,
+  type DeveloperMemory,
+  type DeveloperMetrics,
+  type MemoryContextPackage,
+  type MemoryContextRequest,
+  type MemoryDraft,
+  type MemoryUpdate,
+  type MetricsRequest,
+  type PromptHistoryFilter,
+  type PromptHistoryPage,
+  type RecordPromptRequest,
+  type RecordPromptResponse
+} from '@shared/contracts/developer-intelligence'
 
 export interface CliApi {
   detect: (kind: Exclude<PtyKind, 'terminal'>) => Promise<{
@@ -122,6 +142,27 @@ export interface AuthProfilesApi {
   remove: (request: AuthProfileRequest) => Promise<AuthProfileResult>
 }
 
+export interface DeveloperIntelligenceApi {
+  recordEvent: (event: DeveloperEventInput) => Promise<{ ok: true; id: string | null }>
+  recordPrompt: (request: RecordPromptRequest) => Promise<RecordPromptResponse>
+  listPrompts: (filter?: PromptHistoryFilter) => Promise<PromptHistoryPage>
+  deletePrompts: (ids: string[] | 'all') => Promise<{ removed: number }>
+  getMetrics: (request: MetricsRequest) => Promise<DeveloperMetrics>
+  listMemories: () => Promise<DeveloperMemory[]>
+  createMemory: (draft: MemoryDraft) => Promise<DeveloperMemory | null>
+  updateMemory: (id: string, updates: MemoryUpdate) => Promise<DeveloperMemory | null>
+  deleteMemory: (id: string) => Promise<{ ok: boolean }>
+  getSettings: () => Promise<DeveloperIntelligenceSettings>
+  updateSettings: (
+    updates: Partial<DeveloperIntelligenceSettings>
+  ) => Promise<DeveloperIntelligenceSettings>
+  getStats: () => Promise<DeveloperIntelligenceStats>
+  exportData: () => Promise<DeveloperIntelligenceExportResult>
+  clear: (target: ClearTarget) => Promise<{ ok: true }>
+  analyzeMemories: (request: MetricsRequest) => Promise<AnalyzeMemoriesResult>
+  getContext: (request?: MemoryContextRequest) => Promise<MemoryContextPackage>
+}
+
 export interface AppApi {
   platform: NodeJS.Platform
   selectFolder: () => Promise<string | null>
@@ -134,6 +175,7 @@ export interface AppApi {
   logs: LogsApi
   authProfiles: AuthProfilesApi
   window: WindowApi
+  developerIntelligence: DeveloperIntelligenceApi
 }
 
 const ptyApi: PtyApi = {
@@ -215,6 +257,26 @@ const windowApi: WindowApi = {
   isMaximized: () => ipcRenderer.invoke(WINDOW_IPC.IS_MAXIMIZED)
 }
 
+const developerIntelligenceApi: DeveloperIntelligenceApi = {
+  recordEvent: (event) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.RECORD_EVENT, event),
+  recordPrompt: (request) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.RECORD_PROMPT, request),
+  listPrompts: (filter) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.LIST_PROMPTS, filter ?? {}),
+  deletePrompts: (ids) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.DELETE_PROMPTS, ids),
+  getMetrics: (request) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.GET_METRICS, request),
+  listMemories: () => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.LIST_MEMORIES),
+  createMemory: (draft) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.CREATE_MEMORY, draft),
+  updateMemory: (id, updates) =>
+    ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.UPDATE_MEMORY, { id, updates }),
+  deleteMemory: (id) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.DELETE_MEMORY, id),
+  getSettings: () => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.GET_SETTINGS),
+  updateSettings: (updates) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.UPDATE_SETTINGS, updates),
+  getStats: () => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.GET_STATS),
+  exportData: () => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.EXPORT),
+  clear: (target) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.CLEAR, target),
+  analyzeMemories: (request) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.ANALYZE, request),
+  getContext: (request) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.GET_CONTEXT, request ?? {})
+}
+
 const api: AppApi = {
   platform: process.platform,
   selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),
@@ -226,7 +288,8 @@ const api: AppApi = {
   usage: usageApi,
   logs: logsApi,
   authProfiles: authProfilesApi,
-  window: windowApi
+  window: windowApi,
+  developerIntelligence: developerIntelligenceApi
 }
 
 contextBridge.exposeInMainWorld('api', api)

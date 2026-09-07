@@ -20,16 +20,16 @@ const DRAG_TYPE = 'application/x-panel-id'
 const LAYOUT_EPSILON = 0.5
 const LEFT_MIN = 10
 const LEFT_MAX = 32
-const LEFT_ACCOUNTS_MIN = 18
-const LEFT_ACCOUNTS_SIZE = 24
-const LEFT_ACCOUNTS_MAX = 36
+const LEFT_WIDE_MIN = 18
+const LEFT_WIDE_SIZE = 24
+const LEFT_WIDE_MAX = 36
 const RIGHT_MIN = 14
 const RIGHT_MAX = 80
 const CENTER_MIN = 12
 
-function clampLeftSize(size: number, accountsView = false): number {
-  const min = accountsView ? LEFT_ACCOUNTS_MIN : LEFT_MIN
-  const max = accountsView ? LEFT_ACCOUNTS_MAX : LEFT_MAX
+function clampLeftSize(size: number, wideSidebarView = false): number {
+  const min = wideSidebarView ? LEFT_WIDE_MIN : LEFT_MIN
+  const max = wideSidebarView ? LEFT_WIDE_MAX : LEFT_MAX
   return Math.min(max, Math.max(min, size))
 }
 
@@ -179,7 +179,7 @@ function ZonePanels({
   }
 
   return (
-    <div className="flex h-full flex-col gap-1 overflow-hidden">
+    <div className="flex h-full flex-col gap-2 overflow-hidden">
       {panels.map((panel) => (
         <div key={panel.id} className="min-h-0 flex-1">
           <PanelShell
@@ -284,14 +284,16 @@ export function WorkspaceLayout(): React.JSX.Element {
       const hasLeftVisible = hasLeftPanel && !leftCollapsed
       const hasRight =
         (workspaceState?.panels.filter((p) => p.zone === 'right').length ?? 0) > 0
-      const accountsView = (workspaceState?.layout.leftSidebarView ?? 'files') === 'accounts'
+      const wideSidebarView = ['accounts', 'profile'].includes(
+        workspaceState?.layout.leftSidebarView ?? 'files'
+      )
 
       // Do not persist sizes while Files is collapsed — keep the last open width.
       if (leftCollapsed) return
 
       if (hasLeftVisible && hasRight && sizes.length >= 3) {
         const partial = {
-          leftSize: clampLeftSize(sizes[0], accountsView),
+          leftSize: clampLeftSize(sizes[0], wideSidebarView),
           centerSize: sizes[1],
           rightSize: sizes[2]
         }
@@ -302,7 +304,7 @@ export function WorkspaceLayout(): React.JSX.Element {
 
       if (hasLeftVisible && sizes.length >= 2) {
         const partial = {
-          leftSize: clampLeftSize(sizes[0], accountsView),
+          leftSize: clampLeftSize(sizes[0], wideSidebarView),
           centerSize: sizes[1]
         }
         if (!hasLayoutChange(current, partial)) return
@@ -325,7 +327,7 @@ export function WorkspaceLayout(): React.JSX.Element {
   const leftCollapsed = workspace?.layout.leftCollapsed ?? false
   const hasLeftPanel = workspace?.panels.some((p) => p.zone === 'left') ?? false
   const leftSidebarView = workspace?.layout.leftSidebarView ?? 'files'
-  const isAccountsView = leftSidebarView === 'accounts'
+  const isWideSidebarView = leftSidebarView === 'accounts' || leftSidebarView === 'profile'
 
   useEffect(() => {
     const panel = leftPanelRef.current
@@ -338,19 +340,19 @@ export function WorkspaceLayout(): React.JSX.Element {
     panel.expand()
     const layoutState =
       useWorkspaceStore.getState().workspaces[activeProjectId ?? '']?.layout
-    const savedSize = clampLeftSize(layoutState?.leftSize ?? 14, isAccountsView)
-    const targetSize = isAccountsView ? Math.max(savedSize, LEFT_ACCOUNTS_SIZE) : savedSize
+    const savedSize = clampLeftSize(layoutState?.leftSize ?? 14, isWideSidebarView)
+    const targetSize = isWideSidebarView ? Math.max(savedSize, LEFT_WIDE_SIZE) : savedSize
     requestAnimationFrame(() => {
       leftPanelRef.current?.resize(targetSize)
     })
     if (
-      isAccountsView &&
+      isWideSidebarView &&
       activeProjectId &&
       targetSize !== layoutState?.leftSize
     ) {
       updateLayout(activeProjectId, { leftSize: targetSize })
     }
-  }, [activeProjectId, hasLeftPanel, leftCollapsed, isAccountsView, updateLayout])
+  }, [activeProjectId, hasLeftPanel, leftCollapsed, isWideSidebarView, updateLayout])
 
   if (!workspace || !activeProjectId) {
     return (
@@ -367,11 +369,11 @@ export function WorkspaceLayout(): React.JSX.Element {
   const rightPanels = byZone('right')
   const bottomPanels = byZone('bottom')
   const showLeftSidebar = hasLeftPanel && !leftCollapsed
-  const leftSize = isAccountsView
-    ? Math.max(clampLeftSize(layout.leftSize || 14, true), LEFT_ACCOUNTS_SIZE)
+  const leftSize = isWideSidebarView
+    ? Math.max(clampLeftSize(layout.leftSize || 14, true), LEFT_WIDE_SIZE)
     : clampLeftSize(layout.leftSize || 14)
-  const leftMinSize = isAccountsView ? LEFT_ACCOUNTS_MIN : LEFT_MIN
-  const leftMaxSize = isAccountsView ? LEFT_ACCOUNTS_MAX : LEFT_MAX
+  const leftMinSize = isWideSidebarView ? LEFT_WIDE_MIN : LEFT_MIN
+  const leftMaxSize = isWideSidebarView ? LEFT_WIDE_MAX : LEFT_MAX
   const hasRight = rightPanels.length > 0
   const hasBottom = bottomPanels.length > 0
 
@@ -490,6 +492,8 @@ export function WorkspaceLayout(): React.JSX.Element {
         onSelectFiles={() => selectLeftSidebar(activeProjectId, 'files')}
         onSelectChanges={() => selectLeftSidebar(activeProjectId, 'changes')}
         onSelectAccounts={() => selectLeftSidebar(activeProjectId, 'accounts')}
+        onSelectTasks={() => selectLeftSidebar(activeProjectId, 'tasks')}
+        onSelectProfile={() => selectLeftSidebar(activeProjectId, 'profile')}
       />
       <div className="min-h-0 min-w-0 flex-1">
         {hasBottom ? (

@@ -4,6 +4,7 @@ import { ChevronDown, MessageCircle } from 'lucide-react'
 import { CLI_LOGO_CLASS, getCliLogo } from '@renderer/lib/cli-logos'
 import { cn } from '@renderer/lib/utils'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
+import { Button } from '@renderer/components/ui/Button'
 
 const MENU_WIDTH = 176
 
@@ -114,13 +115,13 @@ export function ChatMenu(): React.JSX.Element {
 
   return (
     <>
-      <button
+      <Button
         ref={buttonRef}
         type="button"
         onClick={() => (open ? closeMenu() : openMenu())}
         className={cn(
-          'glass-button app-no-drag h-7 px-1.5',
-          open && 'glass-button-primary'
+          'app-no-drag',
+          open && 'is-pressed'
         )}
         title="Open chat assistant"
         aria-label="Open chat assistant"
@@ -129,7 +130,7 @@ export function ChatMenu(): React.JSX.Element {
       >
         <MessageCircle className="h-3.5 w-3.5 text-primary" />
         <ChevronDown className="h-3 w-3 text-text-muted" />
-      </button>
+      </Button>
       {menu ? createPortal(menu, document.body) : null}
     </>
   )

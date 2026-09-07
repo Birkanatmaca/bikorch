@@ -8,6 +8,8 @@ import { ADD_PANEL_MENU_EVENT, COMMAND_PALETTE_EVENT } from '@renderer/lib/app-e
 import { ContextMenu } from '@renderer/components/ui/ContextMenu'
 import { useOrchestratorContextMenu } from '@renderer/components/workspace/use-orchestrator-context-menu'
 import { useRef } from 'react'
+import { isMacOS } from '@renderer/lib/electron-api'
+import { Button } from '@renderer/components/ui/Button'
 
 const MAIN_ZONE: PanelZone = 'center'
 
@@ -67,7 +69,7 @@ export function WorkspaceCenterEmpty(): React.JSX.Element {
   return (
     <div
       ref={canvasRef}
-      className="relative flex h-full flex-col items-center justify-center overflow-auto px-6 py-10"
+      className="workspace-launcher relative flex h-full flex-col items-center justify-center overflow-auto px-6 py-10"
       onContextMenu={(e) => openAt(e)}
     >
       <div className="relative w-full max-w-[560px] animate-fade-in">
@@ -95,7 +97,7 @@ export function WorkspaceCenterEmpty(): React.JSX.Element {
           <p>
             Right-click the canvas to place a CLI
             <span className="cli-launch-dot" />
-            <kbd>Ctrl</kbd>
+            <kbd>{isMacOS() ? '⌘' : 'Ctrl'}</kbd>
             <kbd>`</kbd>
             terminal
             <span className="cli-launch-dot" />
@@ -109,15 +111,15 @@ export function WorkspaceCenterEmpty(): React.JSX.Element {
         </div>
 
         <div className="mt-5 flex justify-center">
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={openCommandPalette}
-            className="inline-flex items-center gap-1.5 text-[11px] text-text-muted transition-colors hover:text-text-primary"
           >
             <Command className="h-3 w-3" />
             Command palette
             <Plus className="h-3 w-3 opacity-50" />
-          </button>
+          </Button>
         </div>
       </div>
       <ContextMenu

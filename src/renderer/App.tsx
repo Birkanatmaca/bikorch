@@ -13,6 +13,7 @@ import { useOpenProject } from '@renderer/hooks/use-open-project'
 import { usePersistenceBootstrap } from '@renderer/hooks/use-persistence-bootstrap'
 import { startUsageSync } from '@renderer/lib/usage-sync'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
+import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import { cn } from '@renderer/lib/utils'
 import { isMacOS, isWindows } from '@renderer/lib/electron-api'
 
@@ -68,6 +69,7 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     if (!isReady) return
+    void useDeveloperIntelligenceStore.getState().loadSettings()
     return startUsageSync()
   }, [isReady])
 

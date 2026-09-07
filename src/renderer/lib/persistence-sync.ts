@@ -5,6 +5,7 @@ import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useAiAccountsStore } from '@renderer/stores/ai-accounts-store'
 import { useTasksStore } from '@renderer/stores/tasks-store'
 import { useUsageStore } from '@renderer/stores/usage-store'
+import { useSubscriptionStore } from '@renderer/stores/subscription-store'
 import { syncDiscoveredSystemAccounts } from '@renderer/lib/system-auth-sync'
 
 const SAVE_DEBOUNCE_MS = 400
@@ -19,6 +20,7 @@ export function buildPersistedSnapshot(): PersistedSnapshot {
   const accounts = useAiAccountsStore.getState().getSnapshot()
   const tasks = useTasksStore.getState().getSnapshot()
   const usage = useUsageStore.getState().getSnapshot()
+  const subscriptions = useSubscriptionStore.getState().getSnapshot()
 
   return {
     projects: workspace.projects,
@@ -28,7 +30,8 @@ export function buildPersistedSnapshot(): PersistedSnapshot {
     accounts: accounts.accounts,
     activeAccountByKind: accounts.activeAccountByKind,
     tasksByProject: tasks.tasksByProject,
-    usage
+    usage,
+    subscriptions
   }
 }
 
@@ -54,6 +57,7 @@ export async function hydrateFromDisk(): Promise<void> {
   await syncDiscoveredSystemAccounts().catch(() => undefined)
   useTasksStore.getState().hydrate({ tasksByProject: snapshot.tasksByProject ?? {} })
   useUsageStore.getState().hydrate(snapshot.usage)
+  useSubscriptionStore.getState().hydrate(snapshot.subscriptions)
   isHydrating = false
 
   // Restore diff in background — don't block app startup
@@ -158,6 +162,11 @@ export function startPersistenceSync(): void {
     ) {
       return
     }
+    scheduleSave()
+  })
+
+  useSubscriptionStore.subscribe((state, prevState) => {
+    if (state.subscriptions === prevState.subscriptions) return
     scheduleSave()
   })
 }

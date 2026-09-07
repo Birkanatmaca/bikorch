@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { GitChange, GitChangeStatus, GitRepoInfo, GitStatusResponse } from '@shared/contracts/git'
+import { recordDeveloperEvent } from '@renderer/lib/developer-events'
 
 export interface GitState {
   branch: string | null
@@ -285,7 +286,21 @@ export const useGitStore = create<GitStore>((set, get) => ({
       throw new Error('No repository selected')
     }
 
+    const changes = bundle.byRoot[repoRoot]?.changes ?? []
+    const staged = changes.filter((change) => change.staged)
+    const committed = (staged.length > 0 ? staged : changes).map((change) => change.path)
+
     await window.api.git.commit({ projectRoot: repoRoot, message })
+    recordDeveloperEvent({
+      type: 'git.commit',
+      projectId,
+      payload: {
+        message,
+        fileCount: committed.length,
+        files: committed.slice(0, 200),
+        languages: {}
+      }
+    })
     await get().refresh(projectId, workspaceRoot)
   },
 

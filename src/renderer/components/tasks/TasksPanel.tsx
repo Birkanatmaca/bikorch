@@ -1,17 +1,22 @@
+import { buttonStyles } from '@renderer/components/ui/Button'
 import { useMemo, useState } from 'react'
 import {
   Check,
   CheckCircle2,
   Circle,
   CircleDot,
+  ArrowUp,
+  Flag,
   ListChecks,
   Pencil,
   Plus,
+  Search,
   Trash2
 } from 'lucide-react'
 import type { ProjectTask, TaskPriority, TaskStatus } from '@shared/contracts/tasks'
 import { EmptyState } from '@renderer/components/ui/EmptyState'
 import { useActiveProject } from '@renderer/hooks/use-active-project'
+import { isMacOS } from '@renderer/lib/electron-api'
 import { cn } from '@renderer/lib/utils'
 import { useTasksStore } from '@renderer/stores/tasks-store'
 
@@ -31,6 +36,7 @@ const statusLabels: Record<TaskStatus, string> = {
 
 const priorityOrder: Record<TaskPriority, number> = { high: 0, medium: 1, low: 2 }
 const statusOrder: Record<TaskStatus, number> = { 'in-progress': 0, todo: 1, done: 2 }
+const EMPTY_TASKS: ProjectTask[] = []
 
 function sortTasks(a: ProjectTask, b: ProjectTask): number {
   if (statusOrder[a.status] !== statusOrder[b.status]) {
@@ -50,7 +56,7 @@ function nextStatus(status: TaskStatus): TaskStatus {
 
 export function TasksPanel(): React.JSX.Element {
   const { projectId, projectName } = useActiveProject()
-  const tasks = useTasksStore((state) => (projectId ? state.tasksByProject[projectId] ?? [] : []))
+  const tasks = useTasksStore((state) => state.tasksByProject[projectId ?? ''] ?? EMPTY_TASKS)
   const addTask = useTasksStore((state) => state.addTask)
   const updateTask = useTasksStore((state) => state.updateTask)
   const setTaskStatus = useTasksStore((state) => state.setTaskStatus)
@@ -110,60 +116,78 @@ export function TasksPanel(): React.JSX.Element {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-app-bg">
-      <div className="shrink-0 border-b border-border bg-elevated px-3 py-2.5">
-        <div className="mb-2 flex items-center justify-between gap-2">
+    <div className="task-workbench flex h-full min-h-0 flex-col bg-app-bg">
+      <div className="task-workbench-header shrink-0">
+        <div className="task-heading">
+          <div className="task-heading-icon"><ListChecks className="h-4 w-4" /></div>
           <div className="min-w-0">
-            <p className="truncate text-xs font-medium text-text-primary">{projectName ?? 'Project tasks'}</p>
-            <p className="mt-0.5 font-mono text-[10px] text-text-muted">
-              {doneCount} of {tasks.length} complete
-            </p>
+            <p className="truncate text-xs font-semibold text-text-primary">{projectName ?? 'Project tasks'}</p>
+            <p className="mt-0.5 text-[10px] text-text-muted">Plan the next move in this workspace</p>
           </div>
-          <span className="font-mono text-xs text-primary">{progress}%</span>
+          <div className="task-progress" aria-label={`${progress}% complete`}>
+            <span className="task-progress-value">{progress}%</span>
+            <span className="task-progress-label">{doneCount}/{tasks.length || 0} done</span>
+          </div>
         </div>
-        <div className="h-1 overflow-hidden rounded-full bg-hover">
-          <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${progress}%` }} />
+        <div className="task-progress-track" aria-hidden>
+          <div className="task-progress-fill" style={{ width: `${progress}%` }} />
         </div>
       </div>
 
-      <form onSubmit={handleAdd} className="flex shrink-0 gap-1.5 border-b border-border p-2">
-        <input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="Add a task..."
-          maxLength={500}
-          className="min-w-0 flex-1 rounded-md border border-border bg-panel-bg px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-muted focus:border-primary/50"
-          aria-label="New task title"
-        />
-        <select
-          value={priority}
-          onChange={(event) => setPriority(event.target.value as TaskPriority)}
-          className="w-[82px] rounded-md border border-border bg-panel-bg px-1.5 py-1.5 text-[10px] text-text-secondary outline-none focus:border-primary/50"
-          aria-label="New task priority"
-        >
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-        </select>
-        <button
-          type="submit"
-          disabled={!draft.trim()}
-          className="rounded-md border border-primary/40 bg-primary/10 px-2 text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-40"
-          title="Add task"
-          aria-label="Add task"
-        >
-          <Plus className="h-4 w-4" />
-        </button>
+      <form onSubmit={handleAdd} className="task-composer shrink-0">
+        <div className="task-composer-body">
+          <span className="task-composer-kicker">Next task</span>
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault()
+                event.currentTarget.form?.requestSubmit()
+              }
+            }}
+            placeholder="What needs to happen next?"
+            maxLength={500}
+            rows={1}
+            className="task-composer-input"
+            aria-label="New task title"
+          />
+        </div>
+        <div className="task-composer-footer">
+          <label className="task-priority-control">
+            <Flag className="h-3.5 w-3.5" aria-hidden />
+            <span className="sr-only">New task priority</span>
+            <select
+              value={priority}
+              onChange={(event) => setPriority(event.target.value as TaskPriority)}
+              aria-label="New task priority"
+            >
+              <option value="low">Low priority</option>
+              <option value="medium">Medium priority</option>
+              <option value="high">High priority</option>
+            </select>
+          </label>
+          <span className="task-composer-hint"><kbd>{isMacOS() ? '⌘' : 'Ctrl'}</kbd><kbd>↵</kbd> to add</span>
+          <button
+            type="submit"
+            disabled={!draft.trim()}
+            className="task-submit-button"
+            title="Add task"
+            aria-label="Add task"
+          >
+            <ArrowUp className="h-4 w-4" />
+          </button>
+        </div>
       </form>
 
-      <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
+      <div className="task-filterbar flex shrink-0 items-center gap-1">
         {(['all', 'active', 'done'] as TaskFilter[]).map((option) => (
           <button
             key={option}
             type="button"
             onClick={() => setFilter(option)}
             className={cn(
-              'rounded px-2 py-1 text-[10px] transition-colors',
+              'task-filter rounded px-2 py-1 text-[10px] transition-colors',
               filter === option
                 ? 'bg-primary/10 text-primary'
                 : 'text-text-muted hover:bg-hover hover:text-text-primary'
@@ -176,7 +200,7 @@ export function TasksPanel(): React.JSX.Element {
           <button
             type="button"
             onClick={() => clearCompleted(projectId)}
-            className="ml-auto rounded px-2 py-1 text-[10px] text-text-muted transition-colors hover:bg-error/10 hover:text-error"
+            className="task-filter ml-auto rounded px-2 py-1 text-[10px] text-text-muted transition-colors hover:bg-error/10 hover:text-error"
           >
             Clear done
           </button>
@@ -184,19 +208,20 @@ export function TasksPanel(): React.JSX.Element {
       </div>
 
       {tasks.length > 0 && (
-        <div className="shrink-0 border-b border-border px-2 py-1.5">
+        <div className="task-search shrink-0">
+          <Search className="h-3.5 w-3.5" aria-hidden />
           <input
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search tasks..."
-            className="w-full rounded-md border border-border bg-panel-bg px-2.5 py-1.5 text-[11px] text-text-primary outline-none placeholder:text-text-muted focus:border-primary/50"
+            className="task-search-input w-full rounded-md border border-border bg-panel-bg px-2.5 py-1.5 text-[11px] text-text-primary outline-none placeholder:text-text-muted focus:border-primary/50"
             aria-label="Search tasks"
           />
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-auto p-2">
+      <div className="task-list min-h-0 flex-1 overflow-auto p-2">
         {visibleTasks.length === 0 ? (
           <EmptyState
             icon={ListChecks}
@@ -206,7 +231,7 @@ export function TasksPanel(): React.JSX.Element {
                 ? 'Add the next piece of work above to keep your project moving.'
                 : 'Try a different filter or search term.'
             }
-            className="min-h-[220px]"
+            className="min-h-[140px]"
           />
         ) : (
           <div className="space-y-1">
@@ -214,7 +239,7 @@ export function TasksPanel(): React.JSX.Element {
               <div
                 key={task.id}
                 className={cn(
-                  'group rounded-md border border-border bg-panel-bg p-2 transition-colors hover:border-primary/30',
+                  'task-item group rounded-md border border-border bg-panel-bg p-2 transition-colors hover:border-primary/30',
                   task.status === 'done' && 'opacity-70'
                 )}
               >
@@ -295,7 +320,7 @@ export function TasksPanel(): React.JSX.Element {
                     <button
                       type="button"
                       onClick={() => beginEdit(task)}
-                      className="rounded p-1 text-text-muted hover:bg-hover hover:text-text-primary"
+                      className={buttonStyles({ variant: 'ghost', size: 'icon-sm' })}
                       title="Edit task"
                       aria-label="Edit task"
                     >
@@ -304,7 +329,7 @@ export function TasksPanel(): React.JSX.Element {
                     <button
                       type="button"
                       onClick={() => removeTask(projectId, task.id)}
-                      className="rounded p-1 text-text-muted hover:bg-error/10 hover:text-error"
+                      className={buttonStyles({ variant: 'danger', size: 'icon-sm' })}
                       title="Delete task"
                       aria-label="Delete task"
                     >

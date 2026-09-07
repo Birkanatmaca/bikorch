@@ -56,8 +56,9 @@ function panelTypeToPtyKind(type: PanelType): PtyKind | null {
 
 function PanelLoading(): React.JSX.Element {
   return (
-    <div className="flex h-full items-center justify-center">
-      <Loader2 className="h-4 w-4 animate-spin text-text-muted" />
+    <div className="panel-loading flex h-full items-center justify-center gap-2" role="status">
+      <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-hidden />
+      <span className="text-xs text-text-secondary">Opening panel…</span>
     </div>
   )
 }

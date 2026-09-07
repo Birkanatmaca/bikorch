@@ -3,7 +3,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { type PanelType } from '@shared/types'
 import type { PtyLaunchMode, PtySessionStatus } from '@shared/contracts/pty'
 import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS, type AiAccount } from '@shared/contracts/accounts'
-import { cn, getPanelTypeIcon } from '@renderer/lib/utils'
+import { cn } from '@renderer/lib/utils'
+import { PanelIcon } from '@renderer/components/ui/PanelIcon'
 import { cliFrameClass, getCliChromePhase } from '@renderer/lib/cli-chrome'
 import { getCliLogo } from '@renderer/lib/cli-logos'
 import { isMacOS, isWindows } from '@renderer/lib/electron-api'
@@ -12,6 +13,8 @@ import { useAiAccountsStore } from '@renderer/stores/ai-accounts-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { Info, X, GripVertical, PanelLeftClose, Pencil, UserRound } from 'lucide-react'
 import { PanelContent } from './PanelContent'
+import { Button } from '@renderer/components/ui/Button'
+import { StatusChip } from '@renderer/components/ui/StatusChip'
 
 interface PanelShellProps {
   id: string
@@ -30,14 +33,14 @@ interface PanelShellProps {
   windowActive?: boolean
 }
 
-const statusColors: Record<PtySessionStatus, string> = {
-  starting: 'text-info',
-  running: 'text-success',
-  waiting: 'text-warning',
-  busy: 'text-primary',
-  stopped: 'text-text-muted',
-  error: 'text-error'
-}
+const statusTones = {
+  starting: 'info',
+  running: 'success',
+  waiting: 'warning',
+  busy: 'primary',
+  stopped: 'neutral',
+  error: 'error'
+} as const satisfies Record<PtySessionStatus, string>
 
 const statusLabels: Record<PtySessionStatus, string> = {
   starting: 'Starting',
@@ -193,9 +196,9 @@ function AccountInfoPopover({
             <p className="account-info-name">{displayName}</p>
             <p className="account-info-kind">{AI_ACCOUNT_LABELS[accountKind]}</p>
           </div>
-          <span className={cn('account-info-badge', ready ? 'is-ready' : 'is-pending')}>
+          <StatusChip tone={ready ? 'success' : 'warning'}>
             {ready ? 'Ready' : 'Not ready'}
-          </span>
+          </StatusChip>
         </div>
 
         {account ? (
@@ -322,18 +325,20 @@ export function PanelShell({
     <>
       <div
         className={cn(
-          'panel-shell relative flex h-full flex-col overflow-hidden bg-panel-bg',
+          'panel-shell workstation-panel relative flex h-full flex-col overflow-hidden bg-panel-bg',
           flush ? 'panel-shell-flush rounded-none border-0' : 'rounded-md border border-border shadow-sm',
           isMac && 'panel-shell-macos',
           isWin && 'panel-shell-windows',
           showChrome && cliFrameClass(phase)
         )}
+        data-active={windowActive}
+        data-panel-kind={type}
       >
         {showChrome && phase === 'busy' && <div className="cli-busy-wash" aria-hidden />}
         {showHeader && (
         <header
           className={cn(
-            'group relative z-[3] flex shrink-0 items-center border-b app-no-drag',
+            'panel-header group relative z-[3] flex shrink-0 items-center border-b app-no-drag',
             showMacWindowControls
               ? 'panel-titlebar-macos h-[38px] gap-2 px-3'
               : 'h-7 gap-1.5 border-border/80 bg-elevated/65 px-2 backdrop-blur-md',
@@ -351,7 +356,7 @@ export function PanelShell({
             <MacTrafficLightControls title={title} onClose={onClose} inactive={!windowActive} />
           )}
           {showDragHandle && !showMacWindowControls && (
-            <GripVertical className="h-3.5 w-3.5 shrink-0 text-text-muted" />
+            <GripVertical className="panel-drag-grip h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
           )}
           {editingTitle ? (
             <input
@@ -371,20 +376,20 @@ export function PanelShell({
           ) : (
             <div
               className={cn(
-                'flex min-w-0 flex-1 items-center gap-1.5',
+                'panel-identity flex min-w-0 flex-1 items-center gap-1.5',
                 showMacWindowControls && 'justify-center'
               )}
             >
-              <span className="flex h-4 w-4 shrink-0 items-center justify-center text-text-muted">
+              <span className="panel-type-icon flex shrink-0 items-center justify-center text-text-muted">
                 {cliLogo ? (
                   <img src={cliLogo} alt="" className="h-3.5 w-3.5 object-contain" />
                 ) : (
-                  getPanelTypeIcon(type)
+                  <PanelIcon type={type} />
                 )}
               </span>
               <span
                 className={cn(
-                  'min-w-0 truncate font-medium text-text-primary',
+                  'panel-title min-w-0 truncate font-medium text-text-primary',
                   showMacWindowControls ? 'text-[13px] tracking-tight' : 'flex-1 text-xs'
                 )}
                 title={isTerminalPanel ? 'Double-click or use the pencil to rename' : title}
@@ -393,28 +398,32 @@ export function PanelShell({
                 {title}
               </span>
               {isTerminalPanel && (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon-sm"
                   onClick={beginRename}
                   onPointerDown={(event) => event.stopPropagation()}
-                  className="shrink-0 rounded p-0.5 text-text-muted opacity-0 transition-opacity hover:bg-hover hover:text-text-primary group-hover:opacity-100"
+                  className="panel-rename shrink-0"
                   aria-label={`Rename ${title}`}
                   title="Rename terminal"
                 >
                   <Pencil className="h-3 w-3" />
-                </button>
+                </Button>
               )}
             </div>
           )}
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="panel-header-actions flex shrink-0 items-center gap-1">
             {accountKind && (
-              <button
+              <Button
                 ref={accountButtonRef}
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => setAccountInfoOpen((open) => !open)}
                 onPointerDown={(event) => event.stopPropagation()}
                 className={cn(
-                  'shrink-0 rounded p-0.5 text-text-muted transition-colors hover:bg-primary/10 hover:text-primary',
+                  'panel-account-control shrink-0',
                   accountInfoOpen && 'bg-primary/10 text-primary'
                 )}
                 aria-label={`Show ${title} account information`}
@@ -422,38 +431,35 @@ export function PanelShell({
                 title={account ? `Active account: ${account.name}` : 'Account information'}
               >
                 <Info className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             )}
             {status && (
-              <span
-                className={cn(
-                  'font-mono text-[10px] uppercase tracking-widest',
-                  statusColors[status]
-                )}
-              >
-                {status === 'running' ? '● RUNNING' : `● ${statusLabels[status].toUpperCase()}`}
-              </span>
+              <StatusChip className="panel-session-status" tone={statusTones[status]}>
+                {statusLabels[status]}
+              </StatusChip>
             )}
             {onHide && (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 onClick={onHide}
-                className="rounded-sm p-0.5 text-text-muted transition-colors hover:bg-hover hover:text-text-primary"
                 aria-label={`Hide ${title}`}
                 title="Hide sidebar"
               >
                 <PanelLeftClose className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             )}
             {!onHide && onClose && !showMacWindowControls && (
-              <button
+              <Button
                 type="button"
+                variant="danger"
+                size="icon-sm"
                 onClick={onClose}
-                className="rounded-sm p-0.5 text-text-muted transition-colors hover:bg-hover hover:text-text-primary"
                 aria-label={`Close ${title}`}
               >
                 <X className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             )}
           </div>
         </header>

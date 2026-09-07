@@ -194,14 +194,17 @@ function OrchestratorWindow({
         focusTerminal(panel.id)
       }}
       onContextMenu={onContextMenu}
+      onFocusCapture={onFocus}
     >
       <div
         className={cn(
-          'relative h-full overflow-hidden border bg-panel-bg',
+          'workstation-window relative h-full overflow-hidden border bg-panel-bg',
           isMac ? 'orchestrator-window-macos' : 'rounded-md shadow-lg shadow-black/25',
           showChrome ? cliFrameClass(phase) : 'border-border',
           !active && isMac && 'orchestrator-window-macos-inactive'
         )}
+        data-active={active}
+        data-interacting={live}
       >
         <PanelShell
           id={panel.id}
@@ -238,6 +241,7 @@ export function OrchestratorZone({
     () => canvasRef.current?.getBoundingClientRect() ?? null
   )
   const [focusedId, setFocusedId] = useState<string | null>(null)
+  const previousPanelIds = useRef(new Set(panels.map((panel) => panel.id)))
   const [previewRects, setPreviewRects] = useState<Record<string, OrchestratorRect>>({})
   const previewRectsRef = useRef<Record<string, OrchestratorRect>>({})
   const dragFrameRef = useRef<number | null>(null)
@@ -250,6 +254,12 @@ export function OrchestratorZone({
   } | null>(null)
 
   const rects = layout.centerPanelRects ?? {}
+
+  useEffect(() => {
+    const addedPanel = panels.filter((panel) => !previousPanelIds.current.has(panel.id)).at(-1)
+    previousPanelIds.current = new Set(panels.map((panel) => panel.id))
+    if (addedPanel) setFocusedId(addedPanel.id)
+  }, [panels])
 
   useEffect(() => {
     const next = { ...rects }
@@ -382,14 +392,18 @@ export function OrchestratorZone({
     }
   }, [canvasSize, toDeltaPercent, updateCenterPanelRect])
 
+  const activePanelId = panels.some((panel) => panel.id === focusedId)
+    ? focusedId
+    : panels.at(-1)?.id
+
   const windows = useMemo(
     () =>
       panels.map((panel, index) => {
         const rect = getRect(panel.id)
-        const z = panel.id === focusedId ? 40 : 10 + index
+        const z = panel.id === activePanelId ? 40 : 10 + index
         return { panel, rect, z }
       }),
-    [focusedId, getRect, panels]
+    [activePanelId, getRect, panels]
   )
 
   const isEditing = Object.keys(previewRects).length > 0
@@ -401,7 +415,7 @@ export function OrchestratorZone({
   return (
     <div
       ref={canvasRef}
-      className="relative h-full min-h-0 bg-app-bg"
+      className="workstation-canvas relative h-full min-h-0 bg-app-bg"
       onContextMenu={(e) => openAt(e)}
     >
       <div
@@ -423,7 +437,7 @@ export function OrchestratorZone({
           onResizeStart={(edge, e) => beginInteraction(panel.id, edge, e)}
           onContextMenu={(e) => openAt(e, panel.id)}
           live={previewRects[panel.id] !== undefined}
-          active={focusedId === null || focusedId === panel.id}
+          active={activePanelId === panel.id}
         />
       ))}
       <ContextMenu

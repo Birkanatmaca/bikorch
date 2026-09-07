@@ -34,6 +34,8 @@ export interface PtyCreateResponse {
   error?: string
   code?: PtyErrorCode
   kind?: PtyKind
+  /** True when an already running session was re-attached instead of spawned. */
+  reattached?: boolean
 }
 
 export interface PtyWriteRequest {

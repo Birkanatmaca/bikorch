@@ -7,6 +7,8 @@ import {
   type PersistedEditorState,
   type PersistedSnapshot,
   type PersistedUsageSnapshot,
+  type SubscriptionRecord,
+  type UsageSnapshotRecord,
   createEmptyUsageSnapshot,
   PERSISTENCE_SCHEMA_VERSION
 } from '@shared/contracts/persistence'
@@ -115,10 +117,102 @@ function initSchema(database: Database): void {
     );
   `)
 
+  // Developer Intelligence — history (events, prompts) and memory are kept in
+  // dedicated tables so they can be filtered, retained and deleted independently.
+  database.run(`
+    CREATE TABLE IF NOT EXISTS di_events (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      occurred_at INTEGER NOT NULL,
+      project_id TEXT,
+      session_id TEXT,
+      provider TEXT,
+      account_id TEXT,
+      payload_json TEXT NOT NULL
+    );
+  `)
+  database.run('CREATE INDEX IF NOT EXISTS di_events_occurred_at ON di_events (occurred_at);')
+  database.run('CREATE INDEX IF NOT EXISTS di_events_type ON di_events (type);')
+  database.run(`
+    CREATE TABLE IF NOT EXISTS di_prompts (
+      id TEXT PRIMARY KEY,
+      created_at INTEGER NOT NULL,
+      project_id TEXT,
+      session_id TEXT,
+      provider TEXT,
+      account_id TEXT,
+      prompt TEXT NOT NULL,
+      prompt_hash TEXT,
+      source TEXT NOT NULL,
+      language_hints_json TEXT,
+      category TEXT,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      cached_tokens INTEGER,
+      cost_usd REAL,
+      cost_source TEXT,
+      redacted_count INTEGER NOT NULL DEFAULT 0
+    );
+  `)
+  database.run('CREATE INDEX IF NOT EXISTS di_prompts_created_at ON di_prompts (created_at);')
+  database.run(`
+    CREATE TABLE IF NOT EXISTS di_memories (
+      id TEXT PRIMARY KEY,
+      scope TEXT NOT NULL,
+      project_id TEXT,
+      category TEXT NOT NULL,
+      content TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      evidence_count INTEGER NOT NULL,
+      first_seen_at INTEGER NOT NULL,
+      last_seen_at INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      memory_key TEXT,
+      user_edited INTEGER NOT NULL DEFAULT 0
+    );
+  `)
+  database.run('CREATE INDEX IF NOT EXISTS di_memories_key ON di_memories (memory_key);')
+
   database.run('INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)', [
     'schema_version',
     String(PERSISTENCE_SCHEMA_VERSION)
   ])
+}
+
+let diskPersistTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Debounced disk write for high-frequency writers (activity events). The snapshot
+ * save path still persists immediately; this only coalesces bursts of small writes.
+ */
+export function schedulePersistToDisk(delayMs = 800): void {
+  if (diskPersistTimer) clearTimeout(diskPersistTimer)
+  diskPersistTimer = setTimeout(() => {
+    diskPersistTimer = null
+    try {
+      persistToDisk()
+    } catch (error) {
+      console.error('Failed to persist database to disk:', error)
+    }
+  }, delayMs)
+}
+
+export function getPersistenceDatabase(): Database | null {
+  return db
+}
+
+export function readMetaValue(key: string): string | null {
+  if (!db) return null
+  const result = db.exec('SELECT value FROM meta WHERE key = ?', [key])
+  if (result.length === 0 || result[0]?.values.length === 0) return null
+  return result[0].values[0][0] as string
+}
+
+export function writeMetaValue(key: string, value: string): void {
+  if (!db) return
+  db.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [key, value])
+  schedulePersistToDisk()
 }
 
 export async function initPersistenceDatabase(): Promise<void> {
@@ -144,6 +238,10 @@ export async function initPersistenceDatabase(): Promise<void> {
 }
 
 export function closePersistenceDatabase(): void {
+  if (diskPersistTimer) {
+    clearTimeout(diskPersistTimer)
+    diskPersistTimer = null
+  }
   if (db) {
     persistToDisk()
     db.close()
@@ -218,6 +316,10 @@ function parseLayout(raw: unknown): WorkspaceLayout {
         ? 'changes'
         : layout.leftSidebarView === 'accounts'
           ? 'accounts'
+          : layout.leftSidebarView === 'tasks'
+            ? 'tasks'
+            : layout.leftSidebarView === 'profile'
+              ? 'profile'
           : 'files',
     orchestratorDirection:
       layout.orchestratorDirection === 'horizontal' ||
@@ -341,7 +443,60 @@ function parseUsage(raw: unknown): PersistedUsageSnapshot {
     }
   }
 
-  return { providers, checkedAtByAccountId }
+  const history: UsageSnapshotRecord[] = Array.isArray(snapshot.history)
+    ? snapshot.history.flatMap((item) => {
+        if (!item || typeof item !== 'object') return []
+        const record = item as Partial<UsageSnapshotRecord>
+        const status = parseUsageStatus(record.status)
+        if (
+          typeof record.checkedAt !== 'number' ||
+          !Number.isFinite(record.checkedAt) ||
+          typeof record.accountId !== 'string' ||
+          record.accountId.length === 0 ||
+          record.accountId.length > 200 ||
+          typeof record.kind !== 'string' ||
+          !AI_ACCOUNT_KINDS.includes(record.kind as UsageSnapshotRecord['kind']) ||
+          !status
+        ) {
+          return []
+        }
+
+        const numberOrUndefined = (value: unknown): number | undefined =>
+          typeof value === 'number' && Number.isFinite(value) ? value : undefined
+        const nullableNumber = (value: unknown): number | null | undefined =>
+          value === null ? null : numberOrUndefined(value)
+
+        return [{
+          checkedAt: record.checkedAt,
+          accountId: record.accountId,
+          kind: record.kind as UsageSnapshotRecord['kind'],
+          status,
+          ...(numberOrUndefined(record.primaryUsedPercent) !== undefined
+            ? { primaryUsedPercent: numberOrUndefined(record.primaryUsedPercent) }
+            : {}),
+          ...(numberOrUndefined(record.secondaryUsedPercent) !== undefined
+            ? { secondaryUsedPercent: numberOrUndefined(record.secondaryUsedPercent) }
+            : {}),
+          ...(nullableNumber(record.primaryResetsAt) !== undefined
+            ? { primaryResetsAt: nullableNumber(record.primaryResetsAt) }
+            : {}),
+          ...(nullableNumber(record.secondaryResetsAt) !== undefined
+            ? { secondaryResetsAt: nullableNumber(record.secondaryResetsAt) }
+            : {}),
+          ...(typeof record.planType === 'string' || record.planType === null
+            ? { planType: record.planType }
+            : {}),
+          ...(typeof record.creditsBalance === 'string' || record.creditsBalance === null
+            ? { creditsBalance: record.creditsBalance }
+            : {}),
+          ...(typeof record.creditsAvailable === 'boolean'
+            ? { creditsAvailable: record.creditsAvailable }
+            : {})
+        }]
+      })
+    : []
+
+  return { providers, checkedAtByAccountId, history }
 }
 
 function parseAccounts(raw: unknown): AiAccount[] {
@@ -375,6 +530,53 @@ function parseAccounts(raw: unknown): AiAccount[] {
           typeof account.lastAuthenticatedAt === 'number' ? account.lastAuthenticatedAt : null
       }
     ]
+  })
+}
+
+function parseSubscriptions(raw: unknown): SubscriptionRecord[] {
+  if (!Array.isArray(raw)) return []
+
+  return raw.flatMap((item): SubscriptionRecord[] => {
+    if (!item || typeof item !== 'object') return []
+    const subscription = item as Partial<SubscriptionRecord>
+    if (
+      typeof subscription.id !== 'string' ||
+      subscription.id.length === 0 ||
+      subscription.id.length > 200 ||
+      typeof subscription.provider !== 'string' ||
+      subscription.provider.trim().length === 0 ||
+      subscription.provider.length > 200 ||
+      typeof subscription.amount !== 'number' ||
+      !Number.isFinite(subscription.amount) ||
+      subscription.amount < 0 ||
+      typeof subscription.currency !== 'string' ||
+      subscription.currency.trim().length === 0 ||
+      subscription.currency.length > 8 ||
+      (subscription.billingPeriod !== 'monthly' &&
+        subscription.billingPeriod !== 'yearly' &&
+        subscription.billingPeriod !== 'custom') ||
+      (subscription.source !== 'manual' && subscription.source !== 'provider')
+    ) {
+      return []
+    }
+
+    return [{
+      id: subscription.id,
+      ...(typeof subscription.accountId === 'string' && subscription.accountId.length <= 200
+        ? { accountId: subscription.accountId }
+        : {}),
+      provider: subscription.provider.trim(),
+      ...(typeof subscription.planName === 'string' && subscription.planName.trim().length <= 200
+        ? { planName: subscription.planName.trim() }
+        : {}),
+      amount: subscription.amount,
+      currency: subscription.currency.trim().toUpperCase(),
+      billingPeriod: subscription.billingPeriod,
+      ...(typeof subscription.renewalDate === 'number' && Number.isFinite(subscription.renewalDate)
+        ? { renewalDate: subscription.renewalDate }
+        : {}),
+      source: subscription.source
+    }]
   })
 }
 
@@ -440,7 +642,8 @@ export function createDefaultSnapshot(): PersistedSnapshot {
     accounts: [],
     activeAccountByKind: createDefaultActiveAccountByKind(),
     tasksByProject: {},
-    usage: createEmptyUsageSnapshot()
+    usage: createEmptyUsageSnapshot(),
+    subscriptions: []
   }
 }
 
@@ -575,6 +778,16 @@ export function loadSnapshot(): PersistedSnapshot {
     }
   }
 
+  const subscriptionsResult = database.exec("SELECT value FROM meta WHERE key = 'subscriptions'")
+  let subscriptions: SubscriptionRecord[] = []
+  if (subscriptionsResult.length > 0 && subscriptionsResult[0]?.values.length > 0) {
+    try {
+      subscriptions = parseSubscriptions(JSON.parse(subscriptionsResult[0].values[0][0] as string))
+    } catch {
+      subscriptions = []
+    }
+  }
+
   return {
     projects,
     activeProjectId,
@@ -583,7 +796,8 @@ export function loadSnapshot(): PersistedSnapshot {
     accounts,
     activeAccountByKind,
     tasksByProject,
-    usage
+    usage,
+    subscriptions
   }
 }
 
@@ -604,6 +818,10 @@ export function saveSnapshot(snapshot: PersistedSnapshot): void {
     database.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [
       'ai_usage',
       JSON.stringify(snapshot.usage ?? createEmptyUsageSnapshot())
+    ])
+    database.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [
+      'subscriptions',
+      JSON.stringify(snapshot.subscriptions ?? [])
     ])
     database.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [
       'active_project_id',

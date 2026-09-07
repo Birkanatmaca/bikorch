@@ -1,3 +1,4 @@
+import { buttonStyles } from '@renderer/components/ui/Button'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bug,
@@ -139,7 +140,7 @@ export function LogsPanel(): React.JSX.Element {
           type="button"
           onClick={() => setFollowing((value) => !value)}
           className={cn(
-            'rounded-md border border-border p-1.5 text-text-muted transition-colors hover:bg-hover hover:text-text-primary',
+            buttonStyles({ size: 'icon' }),
             following && 'border-primary/40 bg-primary/10 text-primary'
           )}
           title={following ? 'Pause automatic scrolling' : 'Follow new log entries'}
@@ -150,7 +151,7 @@ export function LogsPanel(): React.JSX.Element {
         <button
           type="button"
           onClick={() => void loadLogs()}
-          className="rounded-md border border-border p-1.5 text-text-muted transition-colors hover:bg-hover hover:text-text-primary"
+          className={buttonStyles({ size: 'icon' })}
           title="Refresh logs"
           aria-label="Refresh logs"
         >
@@ -160,7 +161,7 @@ export function LogsPanel(): React.JSX.Element {
           type="button"
           onClick={() => void handleClear()}
           disabled={entries.length === 0}
-          className="rounded-md border border-border p-1.5 text-text-muted transition-colors hover:bg-error/10 hover:text-error disabled:cursor-not-allowed disabled:opacity-40"
+          className={buttonStyles({ variant: 'danger', size: 'icon' })}
           title="Clear logs"
           aria-label="Clear logs"
         >

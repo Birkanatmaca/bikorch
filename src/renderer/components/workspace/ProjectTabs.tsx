@@ -5,6 +5,7 @@ import { useOpenProject } from '@renderer/hooks/use-open-project'
 import { cn, formatProjectName } from '@renderer/lib/utils'
 import { FolderOpen, GripVertical, Plus, X } from 'lucide-react'
 import type { Project } from '@shared/types'
+import { Button } from '@renderer/components/ui/Button'
 
 const DRAG_THRESHOLD_PX = 4
 const EDGE_SCROLL_PX = 40
@@ -36,18 +37,10 @@ function TabFace({
 }): React.JSX.Element {
   return (
     <>
-      {isActive && (
-        <>
-          <span className="project-tab-rank" aria-hidden />
-          <span className="project-tab-stripes" aria-hidden />
-          <span className="project-tab-ambient" aria-hidden />
-          <span className="project-tab-sheen" aria-hidden />
-          <span className="project-tab-rail" aria-hidden />
-        </>
-      )}
+      {isActive && <span className="project-tab-indicator" aria-hidden />}
       <GripVertical
         className={cn(
-          'relative z-[1] h-3 w-3 shrink-0 text-text-muted/70',
+          'project-tab-grip relative z-[1] h-3 w-3 shrink-0 text-text-muted/70',
           compact ? 'opacity-80' : 'opacity-0 transition-opacity duration-200 group-hover:opacity-60'
         )}
         aria-hidden
@@ -292,15 +285,26 @@ export function ProjectTabs(): React.JSX.Element {
             onDragStart={(event) => event.preventDefault()}
             role="tab"
             aria-selected={isActive}
+            title={project.folderPath || project.name}
             tabIndex={isActive ? 0 : -1}
             onKeyDown={(event) => {
+              if (event.target !== event.currentTarget) return
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault()
                 setActiveProject(project.id)
               }
+              if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+                event.preventDefault()
+                const index = projects.findIndex((item) => item.id === project.id)
+                const next = event.key === 'Home' ? 0 : event.key === 'End' ? projects.length - 1
+                  : (index + (event.key === 'ArrowRight' ? 1 : -1) + projects.length) % projects.length
+                setActiveProject(projects[next].id)
+                const tabs = listRef.current?.querySelectorAll<HTMLElement>('[role="tab"]')
+                tabs?.[next]?.focus()
+              }
             }}
             className={cn(
-              'project-tab group relative flex max-w-[200px] items-center gap-1 rounded-lg border px-2 py-0.5 app-no-drag',
+              'project-tab workstation-tab group relative flex max-w-[220px] items-center gap-1 rounded-lg border px-2 py-0.5 app-no-drag',
               isActive
                 ? 'project-tab-active border-primary/55 bg-primary/14 pl-1.5 text-text-primary backdrop-blur-md'
                 : 'border-transparent pl-1 text-text-secondary hover:border-primary/25 hover:bg-primary/5 hover:text-text-primary',
@@ -312,40 +316,49 @@ export function ProjectTabs(): React.JSX.Element {
             }}
           >
             <TabFace project={project} isActive={isActive} />
-            <button
+            <Button
               type="button"
+              size="icon-sm"
+              variant="ghost"
               data-tab-action="folder"
               onClick={() => void handleSelectFolder(project.id)}
               className={cn(
-                'relative z-[1] shrink-0 rounded p-0.5 opacity-0 transition-opacity hover:bg-hover group-hover:opacity-100',
+                'project-tab-action relative z-[1] shrink-0',
                 isActive && 'opacity-60'
               )}
               title="Select project folder"
+              aria-label={`Select folder for ${project.name}`}
             >
               <FolderOpen className="h-3 w-3" />
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              size="icon-sm"
+              variant="danger"
               data-tab-action="close"
               onClick={() => removeProject(project.id)}
-              className="relative z-[1] shrink-0 rounded p-0.5 opacity-0 transition-opacity hover:bg-hover hover:text-error group-hover:opacity-100"
+              className="project-tab-action relative z-[1] shrink-0"
               title="Close project"
+              aria-label={`Close project ${project.name}`}
             >
               <X className="h-3 w-3" />
-            </button>
+            </Button>
           </div>
         )
       })}
 
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="icon"
         onClick={() => void openFolderPicker({ forceNew: true })}
-        className="glass-button app-no-drag h-7 w-7 shrink-0 border-dashed p-0"
+        className="project-tab-new app-no-drag shrink-0"
         style={{ transform: session ? `translateX(${shift}px)` : undefined }}
         title="New project"
+        aria-label="New project"
       >
         <Plus className="h-3.5 w-3.5" />
-      </button>
+      </Button>
 
       {session &&
         dragged &&

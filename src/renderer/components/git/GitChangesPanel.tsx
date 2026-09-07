@@ -1,3 +1,4 @@
+import { buttonStyles } from '@renderer/components/ui/Button'
 import { useEffect, useId, useState } from 'react'
 import type { GitChange, GitRepoInfo } from '@shared/contracts/git'
 import { useActiveProject } from '@renderer/hooks/use-active-project'
@@ -427,7 +428,7 @@ function ChangeRow({
         disabled={busy}
         title={actionLabel}
         aria-label={`${actionLabel} ${change.path}`}
-        className="shrink-0 rounded-md p-1 text-text-muted transition-colors hover:bg-primary/15 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
+        className={buttonStyles({ variant: 'ghost', size: 'icon-sm' })}
       >
         {mutating ? (
           <Loader2 className="h-3 w-3 animate-spin" />
@@ -443,7 +444,7 @@ function ChangeRow({
         disabled={busy}
         title={change.status === 'U' ? 'Delete untracked file' : 'Discard changes'}
         aria-label={`Discard ${change.path}`}
-        className="shrink-0 rounded-md p-1 text-text-muted transition-colors hover:bg-error/15 hover:text-error disabled:cursor-not-allowed disabled:opacity-40 group-hover:opacity-100"
+        className={buttonStyles({ variant: 'danger', size: 'icon-sm' })}
       >
         <Undo2 className={cn('h-3 w-3', discarding && 'animate-pulse')} />
       </button>
@@ -558,7 +559,7 @@ function RepoSummary({
             type="button"
             onClick={onCommit}
             disabled={stagedCount === 0 || !commitMessage.trim() || committing || busy}
-            className="shrink-0 rounded-md bg-primary px-2.5 py-1.5 text-[10px] font-medium text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
+            className={buttonStyles({ variant: 'primary' })}
             title="Commit staged changes"
           >
             {committing ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Commit'}
@@ -569,7 +570,7 @@ function RepoSummary({
             type="button"
             onClick={() => onBulkStage('stage')}
             disabled={loading || busy || bulkAction !== null || unstagedCount === 0}
-            className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] text-text-secondary transition-colors hover:bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+            className={cn(buttonStyles(), 'min-w-0 flex-1')}
             title="Stage all changes"
           >
             {bulkAction === 'stage' ? (
@@ -583,7 +584,7 @@ function RepoSummary({
             type="button"
             onClick={() => onBulkStage('unstage')}
             disabled={loading || busy || bulkAction !== null || stagedCount === 0}
-            className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] text-text-secondary transition-colors hover:bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+            className={cn(buttonStyles(), 'min-w-0 flex-1')}
             title="Unstage all changes"
           >
             {bulkAction === 'unstage' ? (

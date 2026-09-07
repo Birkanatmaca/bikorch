@@ -1,6 +1,23 @@
 import { create } from 'zustand'
 import { v4 as uuidv4 } from 'uuid'
 import type { ProjectTask, TaskPriority, TaskStatus, TasksSnapshot } from '@shared/contracts/tasks'
+import { recordDeveloperEvent } from '@renderer/lib/developer-events'
+
+function noteTaskTransition(projectId: string, task: ProjectTask, previousStatus: TaskStatus): void {
+  if (task.status === previousStatus) return
+  const type =
+    task.status === 'done'
+      ? 'task.completed'
+      : task.status === 'in-progress'
+        ? 'task.started'
+        : null
+  if (!type) return
+  recordDeveloperEvent({
+    type,
+    projectId,
+    payload: { taskId: task.id, title: task.title, priority: task.priority }
+  })
+}
 
 interface TasksStore extends TasksSnapshot {
   hydrate: (snapshot: Partial<TasksSnapshot>) => void
@@ -53,6 +70,7 @@ export const useTasksStore = create<TasksStore>((set, get) => ({
   },
 
   updateTask: (projectId, taskId, updates) => {
+    let transition: { task: ProjectTask; previousStatus: TaskStatus } | null = null
     set((state) => ({
       tasksByProject: {
         ...state.tasksByProject,
@@ -60,15 +78,21 @@ export const useTasksStore = create<TasksStore>((set, get) => ({
           if (task.id !== taskId) return task
           const title = updates.title === undefined ? task.title : normalizedTitle(updates.title)
           if (updates.title !== undefined && !title) return task
-          return {
+          const next: ProjectTask = {
             ...task,
             ...updates,
             ...(updates.title !== undefined ? { title } : {}),
             updatedAt: Date.now()
           }
+          transition = { task: next, previousStatus: task.status }
+          return next
         })
       }
     }))
+    if (transition) {
+      const { task, previousStatus } = transition as { task: ProjectTask; previousStatus: TaskStatus }
+      noteTaskTransition(projectId, task, previousStatus)
+    }
   },
 
   setTaskStatus: (projectId, taskId, status) => {

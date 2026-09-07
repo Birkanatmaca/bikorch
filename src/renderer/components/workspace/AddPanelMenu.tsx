@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus } from 'lucide-react'
+import { Plus, ChevronDown } from 'lucide-react'
 import { type PanelType, PANEL_TYPE_LABELS } from '@shared/types'
 import { ADD_PANEL_MENU_EVENT } from '@renderer/lib/app-events'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { cn } from '@renderer/lib/utils'
+import { PanelIcon } from '@renderer/components/ui/PanelIcon'
+import { Button } from '@renderer/components/ui/Button'
 
 const PANEL_MENU_LABELS: Partial<Record<PanelType, string>> = {
   terminal: 'Terminal',
@@ -29,8 +31,7 @@ const ADDABLE_PANEL_TYPES: PanelType[] = [
   'file-explorer',
   'git-changes',
   'diff',
-  'logs',
-  'tasks'
+  'logs'
 ]
 
 export { ADD_PANEL_MENU_EVENT } from '@renderer/lib/app-events'
@@ -111,6 +112,8 @@ export function AddPanelMenu(): React.JSX.Element {
   const menu = open && menuStyle ? (
     <div
       ref={menuRef}
+      role="menu"
+      aria-label="Add panel"
       className="header-dropdown-menu fixed z-[10001] min-w-[200px] overflow-hidden rounded-xl py-1 shadow-2xl animate-scale-in"
       style={{ top: menuStyle.top, left: menuStyle.left }}
     >
@@ -121,12 +124,14 @@ export function AddPanelMenu(): React.JSX.Element {
         <button
           key={type}
           type="button"
+          role="menuitem"
           onClick={() => {
             addPanel(type, 'center')
             closeMenu()
           }}
-          className="flex w-full items-center px-3 py-2 text-left text-xs text-text-secondary transition-colors hover:bg-hover hover:text-text-primary"
+          className="menu-action flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-text-secondary"
         >
+          <PanelIcon type={type} className="text-text-muted" />
           {PANEL_MENU_LABELS[type] ?? PANEL_TYPE_LABELS[type]}
         </button>
       ))}
@@ -135,13 +140,14 @@ export function AddPanelMenu(): React.JSX.Element {
 
   return (
     <>
-      <button
+      <Button
         ref={buttonRef}
         type="button"
+        variant="primary"
         onClick={() => (open ? closeMenu() : openMenu())}
         className={cn(
-          'glass-button app-no-drag h-7 px-2.5 text-[11px]',
-          open && 'glass-button-primary shadow-sm'
+          'app-no-drag',
+          open && 'is-pressed'
         )}
         title="Add panel"
         aria-expanded={open}
@@ -149,7 +155,8 @@ export function AddPanelMenu(): React.JSX.Element {
       >
         <Plus className="h-3.5 w-3.5" />
         Add Panel
-      </button>
+        <ChevronDown className="h-3 w-3 opacity-70" />
+      </Button>
       {menu ? createPortal(menu, document.body) : null}
     </>
   )

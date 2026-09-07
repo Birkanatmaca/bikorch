@@ -46,7 +46,7 @@ export interface WorkspaceLayout {
   bottomSize: number
   mainVerticalSize: number
   leftCollapsed?: boolean
-  leftSidebarView?: 'files' | 'changes' | 'accounts'
+  leftSidebarView?: 'files' | 'changes' | 'accounts' | 'tasks' | 'profile'
   orchestratorDirection?: OrchestratorDirection
   centerPanelSizes?: Record<string, number>
   /** Free-form terminal windows in the center canvas, percentages 0–100 */
@@ -106,7 +106,11 @@ export function createDefaultPanels(): PanelDefinition[] {
 const LEGACY_PANEL_IDS = new Set(['git-changes-default', 'terminal-default'])
 /** Strip legacy default panels and ensure the Files sidebar exists. */
 export function sanitizeWorkspacePanels(panels: PanelDefinition[]): PanelDefinition[] {
-  const filtered = panels.filter((panel) => !LEGACY_PANEL_IDS.has(panel.id))
+  // Tasks are owned by the left sidebar. Remove stale workspace definitions
+  // from older layouts without touching the persisted task records.
+  const filtered = panels.filter(
+    (panel) => !LEGACY_PANEL_IDS.has(panel.id) && panel.type !== 'tasks'
+  )
   const hasFileExplorer = filtered.some((p) => p.type === 'file-explorer' && p.zone === 'left')
   if (!hasFileExplorer) return createDefaultPanels()
   return filtered.map((panel) => {

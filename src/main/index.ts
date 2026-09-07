@@ -8,6 +8,7 @@ import {
   initPersistenceDatabase
 } from './persistence/database'
 import { APP_DISPLAY_NAME, applyAppBranding, resolveAppIconPath } from './app-branding'
+import { initDeveloperIntelligence } from './developer-intelligence/service'
 
 const isDev = !app.isPackaged
 
@@ -72,6 +73,7 @@ app.whenReady().then(async () => {
   applyAppBranding()
   try {
     await initPersistenceDatabase()
+    initDeveloperIntelligence()
   } catch (error) {
     console.error('Persistence init failed, continuing without database:', error)
   }

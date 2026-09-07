@@ -19,6 +19,7 @@ import {
 import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import { useAiAccountsStore } from './ai-accounts-store'
+import { endAgentSession, recordDeveloperEvent } from '@renderer/lib/developer-events'
 
 const PTY_PANEL_TYPES = new Set<PanelType>([
   'terminal',
@@ -31,7 +32,17 @@ const PTY_PANEL_TYPES = new Set<PanelType>([
 
 function terminatePanelSession(panelId: string, type: PanelType): void {
   if (!PTY_PANEL_TYPES.has(type) || typeof window === 'undefined' || !window.api?.pty) return
+  endAgentSession(panelId, null)
   void window.api.pty.kill({ sessionId: panelId })
+}
+
+function noteProjectOpened(project: Project): void {
+  if (!project.folderPath) return
+  recordDeveloperEvent({
+    type: 'project.opened',
+    projectId: project.id,
+    payload: { name: project.name, folderPath: project.folderPath }
+  })
 }
 
 interface WorkspaceSnapshot {
@@ -73,7 +84,7 @@ interface WorkspaceStore extends WorkspaceSnapshot {
   toggleSidebar: (projectId: string) => void
   selectLeftSidebar: (
     projectId: string,
-    view: 'files' | 'changes' | 'accounts'
+    view: 'files' | 'changes' | 'accounts' | 'tasks' | 'profile'
   ) => void
   clearPanelLaunchMode: (panelId: string) => void
 }
@@ -181,6 +192,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         [project.id]: createWorkspaceState(project.id)
       }
     }))
+    noteProjectOpened(project)
     return project.id
   },
 
@@ -203,9 +215,14 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   updateProject: (projectId, updates) => {
+    const previous = get().projects.find((p) => p.id === projectId)
     set((state) => ({
       projects: state.projects.map((p) => (p.id === projectId ? { ...p, ...updates } : p))
     }))
+    const next = get().projects.find((p) => p.id === projectId)
+    if (next && updates.folderPath && updates.folderPath !== previous?.folderPath) {
+      noteProjectOpened(next)
+    }
   },
 
   reorderProjects: (fromIndex, toIndex) => {
@@ -266,6 +283,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
     const workspace = workspaces[activeProjectId]
     if (!workspace) return ''
+
+    if (type === 'tasks') {
+      get().selectLeftSidebar(activeProjectId, 'tasks')
+      return ''
+    }
 
     const targetZone = zone ?? getDefaultZone(type)
     const hadRight = workspace.panels.some((p) => p.zone === 'right')
@@ -619,10 +641,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     }
 
     const panels = sanitizeWorkspacePanels(workspace.panels)
-    const accountsLeftSize = 24
+    const wideSidebarSize = 24
     const nextLeftSize =
-      view === 'accounts'
-        ? Math.max(workspace.layout.leftSize ?? 14, accountsLeftSize)
+      view === 'accounts' || view === 'profile'
+        ? Math.max(workspace.layout.leftSize ?? 14, wideSidebarSize)
         : workspace.layout.leftSize
     set({
       workspaces: {
@@ -634,7 +656,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
             ...workspace.layout,
             leftCollapsed: false,
             leftSidebarView: view,
-            ...(view === 'accounts' && nextLeftSize !== workspace.layout.leftSize
+            ...((view === 'accounts' || view === 'profile') && nextLeftSize !== workspace.layout.leftSize
               ? { leftSize: nextLeftSize }
               : {})
           }

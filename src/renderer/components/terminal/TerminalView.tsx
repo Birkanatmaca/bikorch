@@ -12,6 +12,7 @@ import {
   TERMINAL_LAYOUT_LOCK_EVENT
 } from '@renderer/lib/app-events'
 import { getTerminalOptions } from '@renderer/lib/terminal-theme'
+import { Button } from '@renderer/components/ui/Button'
 import {
   inferCliActivity,
   isCliKind,
@@ -20,6 +21,13 @@ import {
   looksCliSignedIn,
   mapProcessStatus
 } from '@renderer/lib/cli-activity'
+import { PromptComposer } from '@renderer/lib/prompt-capture'
+import {
+  beginAgentSession,
+  endAgentSession,
+  notePromptInSession,
+  recordPromptSent
+} from '@renderer/lib/developer-events'
 
 interface TerminalViewProps {
   sessionId: string
@@ -137,6 +145,9 @@ export function TerminalView({
     setStatus(sessionId, 'starting')
 
     const cli = isCliKind(kind)
+    // Developer Intelligence: rebuild the composed prompt from keystrokes (CLI agents only).
+    const composer = cli ? new PromptComposer() : null
+    const agentKind = kind as Exclude<PtyKind, 'terminal'>
     let outputTail = ''
     let idleTimer: number | null = null
     let authInspectTimer: number | null = null
@@ -288,6 +299,7 @@ export function TerminalView({
             window.clearTimeout(idleTimer)
             idleTimer = null
           }
+          if (cli) endAgentSession(sessionId, event.exitCode)
           setStatus(sessionId, 'stopped')
           terminal.writeln(`\r\n\x1b[90m[Process exited with code ${event.exitCode}]\x1b[0m`)
           if (shouldCaptureAccount) {
@@ -301,6 +313,19 @@ export function TerminalView({
     terminal.onData((data) => {
       void window.api.pty.write({ sessionId, data })
       if (!cli) return
+      if (composer) {
+        for (const prompt of composer.feed(data)) {
+          notePromptInSession(sessionId)
+          void recordPromptSent({
+            prompt,
+            source: 'terminal',
+            sessionId,
+            provider: agentKind,
+            ...(projectIdAtMount ? { projectId: projectIdAtMount } : {}),
+            ...(accountId ? { accountId } : {})
+          })
+        }
+      }
       if (isInterrupt(data)) {
         applyCliStatus('waiting')
         return
@@ -338,6 +363,18 @@ export function TerminalView({
       })
       if (nextLaunchMode === 'login') {
         clearPanelLaunchMode(sessionId)
+      }
+      if (cli) {
+        if (result.status === 'error' || (result.reattached && result.status === 'stopped')) {
+          endAgentSession(sessionId, null)
+        } else if (!result.reattached) {
+          beginAgentSession(sessionId, {
+            kind: agentKind,
+            launchMode: nextLaunchMode,
+            ...(projectIdAtMount ? { projectId: projectIdAtMount } : {}),
+            ...(accountId ? { accountId } : {})
+          })
+        }
       }
       setStatus(sessionId, mapProcessStatus(kind, result.status), result.error)
       if (result.status === 'error' && result.error) {
@@ -431,6 +468,7 @@ export function TerminalView({
         : null
 
       if (!panelStillExists || currentFolderPath !== folderPathAtMount) {
+        if (cli) endAgentSession(sessionId, null)
         void window.api.pty.kill({ sessionId })
       }
       if (!panelStillExists) removeSession(sessionId)
@@ -464,11 +502,7 @@ export function TerminalView({
 
   return (
     <div
-      className={
-        isCliKind(kind)
-          ? 'relative h-full min-h-0 w-full bg-app-bg px-1.5 py-1 app-no-drag'
-          : 'relative h-full min-h-0 w-full bg-app-bg px-2 py-1.5 app-no-drag'
-      }
+      className="terminal-surface relative h-full min-h-0 w-full app-no-drag"
       data-terminal-session={sessionId}
       onPointerDown={() => terminalRef.current?.focus()}
     >
@@ -485,22 +519,21 @@ export function TerminalView({
               <p className="mt-2 text-[11px] text-warning">{installMessage}</p>
             )}
             <div className="mt-4 flex justify-end gap-2">
-              <button
+              <Button
                 type="button"
                 disabled={installing}
                 onClick={() => setInstallPrompt(null)}
-                className="rounded-md border border-border px-3 py-1.5 text-xs text-text-secondary hover:bg-hover"
               >
                 Hayır
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                variant="primary"
                 disabled={installing}
                 onClick={() => void handleInstall()}
-                className="rounded-md bg-primary px-3 py-1.5 text-xs text-white hover:bg-primary-hover disabled:opacity-60"
               >
                 {installing ? 'Yükleniyor...' : 'Evet, yükle'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

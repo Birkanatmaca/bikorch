@@ -32,7 +32,7 @@ const BASE_TERMINAL_OPTIONS: ITerminalOptions = {
   cursorStyle: 'bar',
   cursorWidth: 1,
   disableStdin: false,
-  fontFamily: "'Cascadia Mono', 'Cascadia Code', 'JetBrains Mono', Consolas, ui-monospace, monospace",
+  fontFamily: "'Cascadia Mono', 'Cascadia Code', 'JetBrains Mono', 'SFMono-Regular', Menlo, Monaco, Consolas, monospace",
   fontWeight: '400',
   fontWeightBold: '700',
   letterSpacing: 0,

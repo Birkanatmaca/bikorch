@@ -59,7 +59,7 @@ class PtyManager {
         this.emit(webContents, { type: 'data', sessionId, data: existing.outputBuffer })
       }
       recordLog('debug', `${getKindLabel(kind)} session reattached (${sessionId})`, 'pty')
-      return { sessionId, status: existing.status }
+      return { sessionId, status: existing.status, reattached: true }
     }
 
     if (existing) {
