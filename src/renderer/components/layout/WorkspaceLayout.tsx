@@ -2,8 +2,7 @@ import {
   Panel,
   PanelGroup,
   PanelResizeHandle,
-  type ImperativePanelGroupHandle,
-  type ImperativePanelHandle
+  type ImperativePanelGroupHandle
 } from 'react-resizable-panels'
 import { useRef, useCallback, useState, useEffect } from 'react'
 import { type PanelDefinition, type PanelZone, type WorkspaceLayout } from '@shared/types'
@@ -220,10 +219,12 @@ export function WorkspaceLayout(): React.JSX.Element {
   const [dragOverZone, setDragOverZone] = useState<PanelZone | null>(null)
   const [draggingPanelId, setDraggingPanelId] = useState<string | null>(null)
   const [layoutResizing, setLayoutResizing] = useState(false)
+  const [overlayDragWidth, setOverlayDragWidth] = useState<number | null>(null)
   const draggingPanelIdRef = useRef<string | null>(null)
+  const overlayDragWidthRef = useRef<number | null>(null)
+  const workspaceMainRef = useRef<HTMLDivElement>(null)
   const verticalGroupRef = useRef<ImperativePanelGroupHandle>(null)
   const horizontalGroupRef = useRef<ImperativePanelGroupHandle>(null)
-  const leftPanelRef = useRef<ImperativePanelHandle>(null)
 
   const handleDragStart = useCallback(
     (panelId: string) => (e: React.DragEvent) => {
@@ -273,53 +274,66 @@ export function WorkspaceLayout(): React.JSX.Element {
 
   const handleHorizontalLayout = useCallback(
     (sizes: number[]) => {
-      if (!activeProjectId || sizes.length < 1) return
+      if (!activeProjectId || sizes.length < 2) return
       const current = useWorkspaceStore.getState().workspaces[activeProjectId]?.layout
       if (!current) return
 
-      const workspaceState = useWorkspaceStore.getState().workspaces[activeProjectId]
-      const leftCollapsed = workspaceState?.layout.leftCollapsed ?? false
-      const hasLeftPanel =
-        workspaceState?.panels.some((p) => p.zone === 'left') ?? false
-      const hasLeftVisible = hasLeftPanel && !leftCollapsed
       const hasRight =
-        (workspaceState?.panels.filter((p) => p.zone === 'right').length ?? 0) > 0
-      const wideSidebarView = ['accounts', 'profile'].includes(
-        workspaceState?.layout.leftSidebarView ?? 'files'
-      )
+        (useWorkspaceStore.getState().workspaces[activeProjectId]?.panels.filter(
+          (p) => p.zone === 'right'
+        ).length ?? 0) > 0
+      if (!hasRight) return
 
-      // Do not persist sizes while Files is collapsed — keep the last open width.
-      if (leftCollapsed) return
+      const partial = {
+        centerSize: sizes[0],
+        rightSize: sizes[1]
+      }
+      if (!hasLayoutChange(current, partial)) return
+      updateLayout(activeProjectId, partial)
+    },
+    [activeProjectId, updateLayout]
+  )
 
-      if (hasLeftVisible && hasRight && sizes.length >= 3) {
-        const partial = {
-          leftSize: clampLeftSize(sizes[0], wideSidebarView),
-          centerSize: sizes[1],
-          rightSize: sizes[2]
-        }
-        if (!hasLayoutChange(current, partial)) return
-        updateLayout(activeProjectId, partial)
-        return
+  const beginOverlayResize = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!activeProjectId) return
+      event.preventDefault()
+      event.stopPropagation()
+      const parent = workspaceMainRef.current
+      const handle = event.currentTarget
+      if (!parent) return
+      handle.setPointerCapture(event.pointerId)
+
+      const onMove = (moveEvent: PointerEvent): void => {
+        const rect = parent.getBoundingClientRect()
+        if (rect.width <= 0) return
+        const wide = ['accounts', 'profile'].includes(
+          useWorkspaceStore.getState().workspaces[activeProjectId]?.layout.leftSidebarView ??
+            'files'
+        )
+        const next = clampLeftSize(((moveEvent.clientX - rect.left) / rect.width) * 100, wide)
+        overlayDragWidthRef.current = next
+        setOverlayDragWidth(next)
       }
 
-      if (hasLeftVisible && sizes.length >= 2) {
-        const partial = {
-          leftSize: clampLeftSize(sizes[0], wideSidebarView),
-          centerSize: sizes[1]
-        }
-        if (!hasLayoutChange(current, partial)) return
-        updateLayout(activeProjectId, partial)
-        return
+      const onUp = (): void => {
+        handle.removeEventListener('pointermove', onMove)
+        handle.removeEventListener('pointerup', onUp)
+        handle.removeEventListener('pointercancel', onUp)
+        const next = overlayDragWidthRef.current
+        overlayDragWidthRef.current = null
+        setOverlayDragWidth(null)
+        if (next == null) return
+        const wide = ['accounts', 'profile'].includes(
+          useWorkspaceStore.getState().workspaces[activeProjectId]?.layout.leftSidebarView ??
+            'files'
+        )
+        updateLayout(activeProjectId, { leftSize: clampLeftSize(next, wide) })
       }
 
-      if (!hasLeftVisible && hasRight && sizes.length >= 2) {
-        const partial = {
-          centerSize: sizes[0],
-          rightSize: sizes[1]
-        }
-        if (!hasLayoutChange(current, partial)) return
-        updateLayout(activeProjectId, partial)
-      }
+      handle.addEventListener('pointermove', onMove)
+      handle.addEventListener('pointerup', onUp)
+      handle.addEventListener('pointercancel', onUp)
     },
     [activeProjectId, updateLayout]
   )
@@ -328,31 +342,6 @@ export function WorkspaceLayout(): React.JSX.Element {
   const hasLeftPanel = workspace?.panels.some((p) => p.zone === 'left') ?? false
   const leftSidebarView = workspace?.layout.leftSidebarView ?? 'files'
   const isWideSidebarView = leftSidebarView === 'accounts' || leftSidebarView === 'profile'
-
-  useEffect(() => {
-    const panel = leftPanelRef.current
-    if (!panel || !hasLeftPanel) return
-    if (leftCollapsed) {
-      panel.collapse()
-      return
-    }
-
-    panel.expand()
-    const layoutState =
-      useWorkspaceStore.getState().workspaces[activeProjectId ?? '']?.layout
-    const savedSize = clampLeftSize(layoutState?.leftSize ?? 14, isWideSidebarView)
-    const targetSize = isWideSidebarView ? Math.max(savedSize, LEFT_WIDE_SIZE) : savedSize
-    requestAnimationFrame(() => {
-      leftPanelRef.current?.resize(targetSize)
-    })
-    if (
-      isWideSidebarView &&
-      activeProjectId &&
-      targetSize !== layoutState?.leftSize
-    ) {
-      updateLayout(activeProjectId, { leftSize: targetSize })
-    }
-  }, [activeProjectId, hasLeftPanel, leftCollapsed, isWideSidebarView, updateLayout])
 
   if (!workspace || !activeProjectId) {
     return (
@@ -369,11 +358,9 @@ export function WorkspaceLayout(): React.JSX.Element {
   const rightPanels = byZone('right')
   const bottomPanels = byZone('bottom')
   const showLeftSidebar = hasLeftPanel && !leftCollapsed
-  const leftSize = isWideSidebarView
+  const leftSize = overlayDragWidth ?? (isWideSidebarView
     ? Math.max(clampLeftSize(layout.leftSize || 14, true), LEFT_WIDE_SIZE)
-    : clampLeftSize(layout.leftSize || 14)
-  const leftMinSize = isWideSidebarView ? LEFT_WIDE_MIN : LEFT_MIN
-  const leftMaxSize = isWideSidebarView ? LEFT_WIDE_MAX : LEFT_MAX
+    : clampLeftSize(layout.leftSize || 14))
   const hasRight = rightPanels.length > 0
   const hasBottom = bottomPanels.length > 0
 
@@ -390,45 +377,10 @@ export function WorkspaceLayout(): React.JSX.Element {
       onLayout={handleHorizontalLayout}
       style={{ direction: 'ltr' }}
     >
-      {hasLeftPanel && (
-        <>
-          <Panel
-            id="files-sidebar"
-            order={1}
-            ref={leftPanelRef}
-            collapsible
-            collapsedSize={0}
-            defaultSize={leftSize}
-            minSize={leftMinSize}
-            maxSize={leftMaxSize}
-          >
-            <ZoneDropArea
-              zone="left"
-              panels={leftPanels}
-              onDrop={handleDrop}
-              isDragOver={dragOverZone === 'left'}
-              isDragging={draggingPanelId !== null}
-              onDragOver={setDragOverZone}
-              onDragLeave={() => setDragOverZone(null)}
-            >
-              <LeftSidebar
-                view={leftSidebarView}
-                onHide={() => toggleSidebar(activeProjectId)}
-              />
-            </ZoneDropArea>
-          </Panel>
-          <PanelResizeHandle
-            disabled={!showLeftSidebar}
-            onDragging={setLayoutResizing}
-            className={cn('app-no-drag', !showLeftSidebar && 'resize-handle-hidden')}
-          />
-        </>
-      )}
-
       <Panel
         id="workspace-center"
-        order={2}
-        defaultSize={showLeftSidebar ? 100 - leftSize : 100}
+        order={1}
+        defaultSize={hasRight ? Math.max(CENTER_MIN, 100 - (layout.rightSize || 36)) : 100}
         minSize={CENTER_MIN}
       >
         <ZoneDropArea
@@ -455,7 +407,7 @@ export function WorkspaceLayout(): React.JSX.Element {
           <PanelResizeHandle className="app-no-drag" onDragging={setLayoutResizing} />
           <Panel
             id="diff-sidebar"
-            order={3}
+            order={2}
             defaultSize={layout.rightSize || 36}
             minSize={RIGHT_MIN}
             maxSize={RIGHT_MAX}
@@ -496,7 +448,35 @@ export function WorkspaceLayout(): React.JSX.Element {
         onSelectProfile={() => selectLeftSidebar(activeProjectId, 'profile')}
         onSelectMusic={() => selectLeftSidebar(activeProjectId, 'music')}
       />
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div ref={workspaceMainRef} className="workspace-main relative flex min-h-0 min-w-0 flex-1 flex-col">
+        {showLeftSidebar && (
+          <div
+            className="workspace-sidebar-overlay"
+            style={{ width: `${leftSize}%` }}
+          >
+            <ZoneDropArea
+              zone="left"
+              panels={leftPanels}
+              onDrop={handleDrop}
+              isDragOver={dragOverZone === 'left'}
+              isDragging={draggingPanelId !== null}
+              onDragOver={setDragOverZone}
+              onDragLeave={() => setDragOverZone(null)}
+            >
+              <LeftSidebar
+                view={leftSidebarView}
+                onHide={() => toggleSidebar(activeProjectId)}
+              />
+            </ZoneDropArea>
+            <div
+              className="workspace-sidebar-overlay-handle app-no-drag"
+              onPointerDown={beginOverlayResize}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize sidebar"
+            />
+          </div>
+        )}
         <div className="min-h-0 min-w-0 flex-1">
         {hasBottom ? (
         <PanelGroup

@@ -1,5 +1,6 @@
 import { AudioLines, Loader2, Music2, Pause, Play, SkipBack, SkipForward } from 'lucide-react'
-import { formatTrackDuration, useMusicStore } from '@renderer/stores/music-store'
+import { MusicSeekBar } from '@renderer/components/music/MusicSeekBar'
+import { useMusicStore } from '@renderer/stores/music-store'
 import { trackCoverUrl } from '@renderer/lib/track-artwork'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 
@@ -7,17 +8,13 @@ export function SidebarNowPlaying(): React.JSX.Element {
   const tracks = useMusicStore((state) => state.tracks)
   const currentTrackId = useMusicStore((state) => state.currentTrackId)
   const status = useMusicStore((state) => state.status)
-  const positionMs = useMusicStore((state) => state.positionMs)
-  const durationMs = useMusicStore((state) => state.durationMs)
   const togglePlay = useMusicStore((state) => state.togglePlay)
   const next = useMusicStore((state) => state.next)
   const previous = useMusicStore((state) => state.previous)
-  const seek = useMusicStore((state) => state.seek)
   const error = useMusicStore((state) => state.error)
   const openPlayerPanel = useWorkspaceStore((state) => state.openPlayerPanel)
   const current = tracks.find((track) => track.id === currentTrackId) ?? null
   const cover = trackCoverUrl(current)
-  const total = durationMs || current?.durationMs || 0
 
   return (
     <div className="music-sidebar-player">
@@ -66,18 +63,7 @@ export function SidebarNowPlaying(): React.JSX.Element {
             <SkipForward className="h-3.5 w-3.5" />
           </button>
         </div>
-        <div className="music-sidebar-seek">
-          <span>{formatTrackDuration(positionMs)}</span>
-          <input
-            type="range"
-            min={0}
-            max={Math.max(total, 1)}
-            value={Math.min(positionMs, total)}
-            onChange={(event) => seek(Number(event.target.value))}
-            aria-label="Seek"
-          />
-          <span>{formatTrackDuration(total)}</span>
-        </div>
+        <MusicSeekBar />
       </div>
     </div>
   )

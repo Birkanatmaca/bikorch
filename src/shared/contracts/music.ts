@@ -1,4 +1,4 @@
-export type MusicSource = 'local' | 'spotify' | 'youtube'
+export type MusicSource = 'local' | 'youtube'
 export type MusicStorageMode = 'reference' | 'managed'
 export type RepeatMode = 'off' | 'one' | 'all'
 export type PlaybackStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error'
@@ -51,85 +51,18 @@ export interface AddLinkResult {
   error?: string
 }
 
-export type SpotifyPlaybackMode = 'connect' | 'sdk' | 'external'
-
-export type SpotifyErrorCode =
-  | 'NOT_CONNECTED'
-  | 'TOKEN_EXPIRED'
-  | 'INSUFFICIENT_SCOPE'
-  | 'APP_ACCESS_RESTRICTED'
-  | 'PREMIUM_REQUIRED'
-  | 'NO_ACTIVE_DEVICE'
-  | 'DEVICE_NOT_READY'
-  | 'PLAYBACK_RESTRICTED'
-  | 'DRM_UNAVAILABLE'
-  | 'RATE_LIMITED'
-  | 'NETWORK_ERROR'
-  | 'UNKNOWN'
-
-export interface SpotifyError {
-  code: SpotifyErrorCode
-  message: string
-  httpStatus?: number
-  retryAfterMs?: number
-}
-
-export interface SpotifyDevice {
-  id: string
-  name: string
-  type: string
-  isActive: boolean
-  isRestricted?: boolean
-  supportsVolume?: boolean
-}
-
-export interface SpotifyPlaybackState {
-  trackId: string | null
-  title?: string
-  artist?: string
-  deviceId: string | null
-  deviceName?: string
-  isPlaying: boolean
-  positionMs: number
-  durationMs: number
-  volume: number | null
-}
-
-export interface SpotifyPlaybackResult {
-  ok: boolean
-  mode: SpotifyPlaybackMode
-  deviceId?: string
-  state?: SpotifyPlaybackState
-  error?: SpotifyError
-}
-
-export interface SpotifyConnectionStatus {
-  connected: boolean
-  email?: string
-  displayName?: string
-  product?: 'premium' | 'free' | 'unknown'
-  hasClientId: boolean
-  redirectUri: string
-  clientId?: string
-  mode: SpotifyPlaybackMode
-  selectedDeviceId: string | null
-  premiumRequiredNote: string
-}
-
-export type SpotifyTimeRange = 'short_term' | 'medium_term' | 'long_term'
-
-export interface SpotifyCatalogTrack {
-  sourceId: string
+export interface YouTubeSearchHit {
+  videoId: string
   title: string
-  artist: string
-  durationMs: number
+  channel?: string
+  durationSec?: number
+  thumbnailUrl?: string
   sourceUrl: string
-  artworkUrl?: string
-  alreadyInLibrary?: boolean
 }
 
-export interface SpotifyAccessTokenResponse {
-  token: string | null
+export interface YouTubeSearchResult {
+  ok: boolean
+  items?: YouTubeSearchHit[]
   error?: string
 }
 
@@ -140,8 +73,6 @@ export interface MusicSettings {
   /** Default import mode for new files. */
   libraryMode: MusicStorageMode
   persistQueue: boolean
-  /** Explicitly selected Spotify Connect device. Never auto-picked. */
-  spotifyDeviceId: string | null
 }
 
 export interface MusicLibrarySummary {
@@ -215,12 +146,11 @@ export interface UpdateTrackDurationRequest {
 
 export function createDefaultMusicSettings(): MusicSettings {
   return {
-    keepListeningHistory: false,
+    keepListeningHistory: true,
     associateWithProjects: false,
     useInDeveloperInsights: false,
     libraryMode: 'reference',
-    persistQueue: true,
-    spotifyDeviceId: null
+    persistQueue: true
   }
 }
 
@@ -306,22 +236,5 @@ export const MUSIC_IPC = {
   LIBRARY_READ_PLAYBACK: 'music:library:read-playback',
   ADD_LINK: 'music:add-link',
   OPEN_EXTERNAL: 'music:open-external',
-  SPOTIFY_STATUS: 'music:spotify:status',
-  SPOTIFY_SET_CLIENT_ID: 'music:spotify:set-client-id',
-  SPOTIFY_CONNECT: 'music:spotify:connect',
-  SPOTIFY_DISCONNECT: 'music:spotify:disconnect',
-  SPOTIFY_ACCESS_TOKEN: 'music:spotify:access-token',
-  SPOTIFY_TOP_TRACKS: 'music:spotify:top-tracks',
-  SPOTIFY_IMPORT_TOP: 'music:spotify:import-top',
-  SPOTIFY_IMPORT_ONE: 'music:spotify:import-one',
-  SPOTIFY_DEVICES: 'music:spotify:devices',
-  SPOTIFY_SELECT_DEVICE: 'music:spotify:select-device',
-  SPOTIFY_PLAY: 'music:spotify:play',
-  SPOTIFY_PAUSE: 'music:spotify:pause',
-  SPOTIFY_RESUME: 'music:spotify:resume',
-  SPOTIFY_NEXT: 'music:spotify:next',
-  SPOTIFY_PREVIOUS: 'music:spotify:previous',
-  SPOTIFY_SEEK: 'music:spotify:seek',
-  SPOTIFY_VOLUME: 'music:spotify:volume',
-  SPOTIFY_PLAYBACK_STATE: 'music:spotify:playback-state'
+  YOUTUBE_SEARCH: 'music:youtube:search'
 } as const

@@ -110,7 +110,13 @@ export async function ensurePlayableTrackFile(
 ): Promise<{ ok: true; converted: boolean; filePath: string } | { ok: false; error: string }> {
   const store = getMusicStore()
   const track = store?.getTrack(trackId)
-  if (!store || !track?.filePath) return { ok: false, error: 'Track file is missing' }
+  if (!store || !track) return { ok: false, error: 'Track file is missing' }
+  if (!track.filePath) {
+    if (track.source === 'youtube' && track.sourceId) {
+      return { ok: true, converted: false, filePath: '' }
+    }
+    return { ok: false, error: 'Track file is missing' }
+  }
   if (!existsSync(track.filePath)) return { ok: false, error: 'Track file is missing' }
 
   const kind = await sniffAudioFile(track.filePath)

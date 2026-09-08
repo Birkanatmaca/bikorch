@@ -40,6 +40,28 @@ export interface OrchestratorRect {
   h: number
 }
 
+/** Free-form floating windows vs equal-cell tiled workspace. */
+export type WorkspaceCanvasMode = 'free' | 'tiled'
+
+/** Vertical = left | right. Horizontal = top / bottom. */
+export type GridSplitDirection = 'vertical' | 'horizontal'
+
+export type TiledSplitSide = 'left' | 'right' | 'up' | 'down'
+
+export interface WorkspaceGridLeaf {
+  type: 'leaf'
+  panelId: string
+}
+
+export interface WorkspaceGridSplit {
+  type: 'split'
+  direction: GridSplitDirection
+  sizes: [number, number]
+  children: [WorkspaceGridNode, WorkspaceGridNode]
+}
+
+export type WorkspaceGridNode = WorkspaceGridLeaf | WorkspaceGridSplit
+
 export interface WorkspaceLayout {
   leftSize: number
   centerSize: number
@@ -52,6 +74,9 @@ export interface WorkspaceLayout {
   centerPanelSizes?: Record<string, number>
   /** Free-form terminal windows in the center canvas, percentages 0–100 */
   centerPanelRects?: Record<string, OrchestratorRect>
+  /** Independent tiled workspace. Free-form rects are kept when this is on. */
+  canvasMode?: WorkspaceCanvasMode
+  centerGrid?: WorkspaceGridNode | null
 }
 
 export interface ProjectWorkspaceState {
@@ -93,7 +118,20 @@ export const DEFAULT_LAYOUT: WorkspaceLayout = {
   bottomSize: 0,
   mainVerticalSize: 100,
   leftCollapsed: false,
-  leftSidebarView: 'files'
+  leftSidebarView: 'files',
+  canvasMode: 'free',
+  centerGrid: null
+}
+
+export const WORKSPACE_SCALE_DEFAULT = 100
+export const WORKSPACE_SCALE_MIN = 50
+export const WORKSPACE_SCALE_MAX = 200
+export const WORKSPACE_SCALE_STEP = 10
+
+export function clampWorkspaceScale(value: number): number {
+  if (!Number.isFinite(value)) return WORKSPACE_SCALE_DEFAULT
+  const snapped = Math.round(value / WORKSPACE_SCALE_STEP) * WORKSPACE_SCALE_STEP
+  return Math.min(WORKSPACE_SCALE_MAX, Math.max(WORKSPACE_SCALE_MIN, snapped))
 }
 
 const DEFAULT_BOTTOM_PANEL_SIZE = 28
@@ -155,6 +193,8 @@ export function rebalanceCenterPanelSizes(panelIds: string[]): Record<string, nu
 
 const ORCH_MIN_W = 22
 const ORCH_MIN_H = 24
+const PLAYER_MIN_W = 22
+const PLAYER_MIN_H = 22
 
 /** First terminal sits inset on the notebook grid (12×10 cells). */
 export const DEFAULT_ORCHESTRATOR_RECT: OrchestratorRect = {
@@ -164,16 +204,32 @@ export const DEFAULT_ORCHESTRATOR_RECT: OrchestratorRect = {
   h: 70
 }
 
+export const DEFAULT_PLAYER_RECT: OrchestratorRect = {
+  x: 66,
+  y: 58,
+  w: 32,
+  h: 34
+}
+
 export function isFullBleedOrchestratorRect(rect: OrchestratorRect): boolean {
   return rect.x <= 2 && rect.y <= 2 && rect.w >= 94 && rect.h >= 90
 }
 
-export function clampOrchestratorRect(rect: OrchestratorRect): OrchestratorRect {
-  const w = Math.min(100, Math.max(ORCH_MIN_W, rect.w))
-  const h = Math.min(100, Math.max(ORCH_MIN_H, rect.h))
+export function clampOrchestratorRect(
+  rect: OrchestratorRect,
+  limits?: { minW?: number; minH?: number }
+): OrchestratorRect {
+  const minW = limits?.minW ?? ORCH_MIN_W
+  const minH = limits?.minH ?? ORCH_MIN_H
+  const w = Math.min(100, Math.max(minW, rect.w))
+  const h = Math.min(100, Math.max(minH, rect.h))
   const x = Math.min(100 - w, Math.max(0, rect.x))
   const y = Math.min(100 - h, Math.max(0, rect.y))
   return { x, y, w, h }
+}
+
+export function placePlayerRect(): OrchestratorRect {
+  return clampOrchestratorRect({ ...DEFAULT_PLAYER_RECT }, { minW: PLAYER_MIN_W, minH: PLAYER_MIN_H })
 }
 
 export function allocateOrchestratorRect(

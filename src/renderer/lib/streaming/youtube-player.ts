@@ -85,7 +85,16 @@ export async function ensureYouTubePlayer(container: HTMLElement): Promise<void>
       player = new (window as any).YT.Player(mount, {
         height: '100%',
         width: '100%',
-        playerVars: { autoplay: 0, controls: 1, modestbranding: 1, rel: 0 },
+        playerVars: {
+          autoplay: 0,
+          controls: 0,
+          disablekb: 1,
+          fs: 0,
+          iv_load_policy: 3,
+          modestbranding: 1,
+          playsinline: 1,
+          rel: 0
+        },
         events: {
           onReady: () => {
             if (pendingVideoId) {

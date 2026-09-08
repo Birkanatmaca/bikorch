@@ -42,26 +42,30 @@ async function readAccounts(accounts: AiAccount[]): Promise<void> {
         accounts: [{ kind: account.kind, accountId: account.id }]
       })
       useUsageStore.getState().applyResponse(response, [account.id])
-      const provider =
-        response.providers.find((item) => item.accountId === account.id) ?? response.providers[0]
-      if (provider) {
-        recordDeveloperEvent({
-          type: 'usage.snapshot',
-          provider: account.kind,
-          accountId: account.id,
-          payload: {
-            kind: account.kind as CliUsageKind,
-            primaryUsedPercent: provider.primary?.usedPercent ?? null,
-            ...(provider.secondary?.usedPercent !== undefined
-              ? { secondaryUsedPercent: provider.secondary.usedPercent }
-              : {}),
-            ...(provider.planType ? { planType: provider.planType } : {})
-          }
-        })
-      }
-      if (provider && (provider.accountEmail || provider.planType)) {
+      const provider = response.providers.find((item) => item.accountId === account.id)
+      if (!provider) continue
+      recordDeveloperEvent({
+        type: 'usage.snapshot',
+        provider: account.kind,
+        accountId: account.id,
+        payload: {
+          kind: account.kind as CliUsageKind,
+          primaryUsedPercent: provider.primary?.usedPercent ?? null,
+          ...(provider.secondary?.usedPercent !== undefined
+            ? { secondaryUsedPercent: provider.secondary.usedPercent }
+            : {}),
+          ...(provider.planType ? { planType: provider.planType } : {})
+        }
+      })
+      const incomingEmail = provider.accountEmail?.trim()
+      const existingEmail = account.email.trim()
+      const emailMatches =
+        !incomingEmail ||
+        !existingEmail ||
+        incomingEmail.toLowerCase() === existingEmail.toLowerCase()
+      if (emailMatches && (incomingEmail || provider.planType)) {
         useAiAccountsStore.getState().updateAccount(account.id, {
-          ...(provider.accountEmail ? { email: provider.accountEmail } : {}),
+          ...(incomingEmail && !existingEmail ? { email: incomingEmail } : {}),
           ...(provider.planType ? { plan: provider.planType } : {})
         })
       }

@@ -11,13 +11,8 @@ describe('parseMusicUrl', () => {
     })
   })
 
-  it('parses spotify track URLs', () => {
-    const parsed = parseMusicUrl('https://open.spotify.com/track/11dFghVXANMlKmJXsNCbNl')
-    expect(parsed).toEqual({
-      source: 'spotify',
-      sourceId: '11dFghVXANMlKmJXsNCbNl',
-      sourceUrl: 'https://open.spotify.com/track/11dFghVXANMlKmJXsNCbNl'
-    })
+  it('rejects unsupported streaming hosts', () => {
+    expect(parseMusicUrl('https://open.spotify.com/track/11dFghVXANMlKmJXsNCbNl')).toBeNull()
   })
 })
 

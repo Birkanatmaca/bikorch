@@ -5,8 +5,7 @@ import {
   parseImportPaths,
   parsePlaybackSnapshot,
   parseSettingsUpdate,
-  parseSpotifyDeviceId,
-  parseSpotifyPlayRequest
+  parseYouTubeSearchQuery
 } from '../validation'
 
 describe('music validation', () => {
@@ -55,14 +54,9 @@ describe('music validation', () => {
     })
   })
 
-  it('parses Spotify device and play requests', () => {
-    expect(parseSpotifyDeviceId('desk-1')).toBe('desk-1')
-    expect(parseSpotifyDeviceId({ deviceId: 'phone_2' })).toBe('phone_2')
-    expect(parseSpotifyDeviceId('bad id')).toBeNull()
-    expect(parseSpotifyPlayRequest({ sourceId: '11dFghVXANMlKmJXsNCbNl', deviceId: 'desk-1' })).toEqual({
-      sourceId: '11dFghVXANMlKmJXsNCbNl',
-      deviceId: 'desk-1'
-    })
-    expect(parseSettingsUpdate({ spotifyDeviceId: 'desk-1' })).toEqual({ spotifyDeviceId: 'desk-1' })
+  it('parses YouTube search queries', () => {
+    expect(parseYouTubeSearchQuery('  night drive ')).toBe('night drive')
+    expect(parseYouTubeSearchQuery({ query: 'lofi beats' })).toBe('lofi beats')
+    expect(parseYouTubeSearchQuery('a')).toBeNull()
   })
 })

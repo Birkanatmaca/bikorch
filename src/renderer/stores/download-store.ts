@@ -39,7 +39,7 @@ interface DownloadState {
   setImportToLibrary: (value: boolean) => void
   setPlaylistId: (id: string | null) => void
   start: () => Promise<string | null>
-  downloadFromUrl: () => Promise<string | null>
+  downloadFromUrl: (url?: string) => Promise<string | null>
   cancel: (jobId: string) => Promise<void>
   retry: (jobId: string) => Promise<void>
   deleteJob: (jobId: string) => Promise<string | null>
@@ -239,9 +239,10 @@ export const useDownloadStore = create<DownloadState>((set, get) => ({
     }
   },
 
-  downloadFromUrl: async () => {
-    const url = get().url.trim()
-    if (!url) return 'Paste a link first'
+  downloadFromUrl: async (url) => {
+    const next = (url ?? get().url).trim()
+    if (!next) return 'Paste a link first'
+    set({ url: next, analysis: null })
     return get().start()
   },
 

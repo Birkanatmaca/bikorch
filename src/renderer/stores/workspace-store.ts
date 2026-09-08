@@ -14,8 +14,25 @@ import {
   normalizeLayoutForPanels,
   layoutAfterAddCenterPanel,
   clampOrchestratorRect,
-  type OrchestratorRect
+  placePlayerRect,
+  clampWorkspaceScale,
+  WORKSPACE_SCALE_DEFAULT,
+  WORKSPACE_SCALE_STEP,
+  type OrchestratorRect,
+  type TiledSplitSide,
+  type WorkspaceCanvasMode,
+  type WorkspaceGridNode
 } from '@shared/types'
+import {
+  insertPanelInGrid,
+  isTiledWorkspace,
+  removePanelFromGrid,
+  splitGridPanel,
+  swapGridPanels,
+  tiledCenterPanelIds,
+  updateGridSizes,
+  buildEqualGrid
+} from '@shared/workspace-grid'
 import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import { useAiAccountsStore } from './ai-accounts-store'
@@ -29,6 +46,15 @@ const PTY_PANEL_TYPES = new Set<PanelType>([
   'antigravity',
   'codex'
 ])
+
+function pruneCenterGrid(
+  node: WorkspaceGridNode | null | undefined,
+  removedIds: Set<string>
+): WorkspaceGridNode | null {
+  let next = node ?? null
+  for (const id of removedIds) next = removePanelFromGrid(next, id)
+  return next
+}
 
 function terminatePanelSession(panelId: string, type: PanelType): void {
   if (!PTY_PANEL_TYPES.has(type) || typeof window === 'undefined' || !window.api?.pty) return
@@ -49,6 +75,26 @@ interface WorkspaceSnapshot {
   projects: Project[]
   activeProjectId: string | null
   workspaces: Record<string, ProjectWorkspaceState>
+}
+
+const WORKSPACE_SCALE_STORAGE_KEY = 'bikorch.workspaceScale'
+
+function readStoredWorkspaceScale(): number {
+  if (typeof window === 'undefined') return WORKSPACE_SCALE_DEFAULT
+  try {
+    return clampWorkspaceScale(Number(window.localStorage.getItem(WORKSPACE_SCALE_STORAGE_KEY)))
+  } catch {
+    return WORKSPACE_SCALE_DEFAULT
+  }
+}
+
+function persistWorkspaceScale(scale: number): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(WORKSPACE_SCALE_STORAGE_KEY, String(scale))
+  } catch {
+    // Ignore quota / private-mode failures.
+  }
 }
 
 interface WorkspaceStore extends WorkspaceSnapshot {
@@ -82,12 +128,19 @@ interface WorkspaceStore extends WorkspaceSnapshot {
   movePanel: (panelId: string, zone: PanelZone) => void
   updateLayout: (projectId: string, layout: Partial<WorkspaceLayout>) => void
   updateCenterPanelRect: (panelId: string, rect: OrchestratorRect) => void
+  setCanvasMode: (mode: WorkspaceCanvasMode) => void
+  swapTiledPanels: (firstId: string, secondId: string) => void
+  splitTiledPanel: (panelId: string, side: TiledSplitSide) => string
+  updateTiledSplitSizes: (path: number[], sizes: [number, number]) => void
   toggleSidebar: (projectId: string) => void
   selectLeftSidebar: (
     projectId: string,
     view: 'files' | 'changes' | 'accounts' | 'tasks' | 'profile' | 'music'
   ) => void
   clearPanelLaunchMode: (panelId: string) => void
+  workspaceScale: number
+  setWorkspaceScale: (scale: number) => void
+  nudgeWorkspaceScale: (deltaSteps: number) => void
 }
 
 function createProject(name: string, folderPath: string | null = null): Project {
@@ -149,6 +202,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   activeProjectId: null,
   workspaces: {},
   isHydrated: false,
+  workspaceScale: readStoredWorkspaceScale(),
 
   hydrate: (snapshot) => {
     const workspaces = Object.fromEntries(
@@ -344,12 +398,23 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     }
 
     if (targetZone === 'center') {
-      if (rect) {
+      if (type === 'player' && !rect) {
         nextLayout = {
           ...nextLayout,
           centerPanelRects: {
             ...(nextLayout.centerPanelRects ?? {}),
-            [newPanel.id]: clampOrchestratorRect(rect)
+            [newPanel.id]: placePlayerRect()
+          }
+        }
+      } else if (rect) {
+        nextLayout = {
+          ...nextLayout,
+          centerPanelRects: {
+            ...(nextLayout.centerPanelRects ?? {}),
+            [newPanel.id]:
+              type === 'player'
+                ? clampOrchestratorRect(rect, { minW: 16, minH: 14 })
+                : clampOrchestratorRect(rect)
           }
         }
       } else {
@@ -363,6 +428,12 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
             nextLayout.centerPanelRects ?? {},
             newPanel.id
           )
+        }
+      }
+      if (isTiledWorkspace(nextLayout) && type !== 'player') {
+        nextLayout = {
+          ...nextLayout,
+          centerGrid: insertPanelInGrid(nextLayout.centerGrid ?? null, newPanel.id)
         }
       }
     }
@@ -425,7 +496,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           panels: nextPanels,
           layout: {
             ...workspace.layout,
-            centerPanelRects: restRects
+            centerPanelRects: restRects,
+            centerGrid: pruneCenterGrid(workspace.layout.centerGrid, new Set([panelId]))
           }
         }
       }
@@ -466,7 +538,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       nextWorkspaces[projectId] = {
         ...workspace,
         panels: workspace.panels.filter((panel) => !removedIds.has(panel.id)),
-        layout: { ...workspace.layout, centerPanelRects }
+        layout: {
+          ...workspace.layout,
+          centerPanelRects,
+          centerGrid: pruneCenterGrid(workspace.layout.centerGrid, removedIds)
+        }
       }
     }
 
@@ -505,7 +581,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       nextWorkspaces[projectId] = {
         ...workspace,
         panels: workspace.panels.filter((panel) => !removedIds.has(panel.id)),
-        layout: { ...workspace.layout, centerPanelRects }
+        layout: {
+          ...workspace.layout,
+          centerPanelRects,
+          centerGrid: pruneCenterGrid(workspace.layout.centerGrid, removedIds)
+        }
       }
     }
 
@@ -523,10 +603,17 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     let centerPanelRects = workspace.layout.centerPanelRects ?? {}
 
     if (zone === 'center' && current?.zone !== 'center') {
-      const existingIds = workspace.panels
-        .filter((p) => p.zone === 'center')
-        .map((p) => p.id)
-      centerPanelRects = layoutAfterAddCenterPanel(existingIds, centerPanelRects, panelId)
+      if (current?.type === 'player') {
+        centerPanelRects = {
+          ...centerPanelRects,
+          [panelId]: placePlayerRect()
+        }
+      } else {
+        const existingIds = workspace.panels
+          .filter((p) => p.zone === 'center')
+          .map((p) => p.id)
+        centerPanelRects = layoutAfterAddCenterPanel(existingIds, centerPanelRects, panelId)
+      }
     }
 
     if (zone !== 'center' && centerPanelRects[panelId]) {
@@ -539,6 +626,18 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     let nextLayout = {
       ...workspace.layout,
       centerPanelRects
+    }
+    if (zone === 'center' && current?.zone !== 'center' && current?.type !== 'player' && isTiledWorkspace(nextLayout)) {
+      nextLayout = {
+        ...nextLayout,
+        centerGrid: insertPanelInGrid(nextLayout.centerGrid ?? null, panelId)
+      }
+    }
+    if (zone !== 'center') {
+      nextLayout = {
+        ...nextLayout,
+        centerGrid: pruneCenterGrid(nextLayout.centerGrid, new Set([panelId]))
+      }
     }
     if (zone === 'right' && !hadRight && (nextLayout.rightSize ?? 0) < 20) {
       nextLayout = { ...nextLayout, rightSize: 36 }
@@ -564,8 +663,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     const unchanged = (
       Object.keys(layoutPartial) as Array<keyof WorkspaceLayout>
     ).every((key) => {
-      if (key === 'centerPanelSizes' || key === 'centerPanelRects') {
-        return JSON.stringify(workspace.layout[key] ?? {}) === JSON.stringify(nextLayout[key] ?? {})
+      if (key === 'centerPanelSizes' || key === 'centerPanelRects' || key === 'centerGrid') {
+        return JSON.stringify(workspace.layout[key] ?? null) === JSON.stringify(nextLayout[key] ?? null)
       }
       return workspace.layout[key] === nextLayout[key]
     })
@@ -600,6 +699,104 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
               ...(workspace.layout.centerPanelRects ?? {}),
               [panelId]: rect
             }
+          }
+        }
+      }
+    })
+  },
+
+  setCanvasMode: (mode) => {
+    const { activeProjectId, workspaces } = get()
+    if (!activeProjectId) return
+    const workspace = workspaces[activeProjectId]
+    if (!workspace) return
+    if ((workspace.layout.canvasMode ?? 'free') === mode) return
+
+    const ids = tiledCenterPanelIds(workspace.panels)
+    const centerGrid =
+      mode === 'tiled' ? buildEqualGrid(ids) : (workspace.layout.centerGrid ?? null)
+
+    set({
+      workspaces: {
+        ...workspaces,
+        [activeProjectId]: {
+          ...workspace,
+          layout: {
+            ...workspace.layout,
+            canvasMode: mode,
+            centerGrid
+          }
+        }
+      }
+    })
+  },
+
+  swapTiledPanels: (firstId, secondId) => {
+    const { activeProjectId, workspaces } = get()
+    if (!activeProjectId || firstId === secondId) return
+    const workspace = workspaces[activeProjectId]
+    const grid = workspace?.layout.centerGrid
+    if (!workspace || !grid) return
+
+    set({
+      workspaces: {
+        ...workspaces,
+        [activeProjectId]: {
+          ...workspace,
+          layout: {
+            ...workspace.layout,
+            centerGrid: swapGridPanels(grid, firstId, secondId)
+          }
+        }
+      }
+    })
+  },
+
+  splitTiledPanel: (panelId, side) => {
+    const { activeProjectId } = get()
+    if (!activeProjectId) return ''
+    const newId = get().addPanel('terminal', 'center')
+    if (!newId) return ''
+
+    const workspace = get().workspaces[activeProjectId]
+    if (!workspace) return newId
+    const stripped = removePanelFromGrid(workspace.layout.centerGrid ?? null, newId)
+    const nextGrid = stripped
+      ? splitGridPanel(stripped, panelId, side, newId)
+      : insertPanelInGrid(null, newId)
+
+    set({
+      workspaces: {
+        ...get().workspaces,
+        [activeProjectId]: {
+          ...workspace,
+          layout: {
+            ...workspace.layout,
+            centerGrid: nextGrid
+          }
+        }
+      }
+    })
+    return newId
+  },
+
+  updateTiledSplitSizes: (path, sizes) => {
+    const { activeProjectId, workspaces } = get()
+    if (!activeProjectId) return
+    const workspace = workspaces[activeProjectId]
+    const grid = workspace?.layout.centerGrid
+    if (!workspace || !grid) return
+    const next = updateGridSizes(grid, path, sizes)
+    if (JSON.stringify(next) === JSON.stringify(grid)) return
+
+    set({
+      workspaces: {
+        ...workspaces,
+        [activeProjectId]: {
+          ...workspace,
+          layout: {
+            ...workspace.layout,
+            centerGrid: next
           }
         }
       }
@@ -701,5 +898,21 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         }
       }
     })
+  },
+
+  setWorkspaceScale: (scale) => {
+    const next = clampWorkspaceScale(scale)
+    if (next === get().workspaceScale) return
+    persistWorkspaceScale(next)
+    set({ workspaceScale: next })
+    if (typeof window !== 'undefined') {
+      window.requestAnimationFrame(() => {
+        window.dispatchEvent(new Event('resize'))
+      })
+    }
+  },
+
+  nudgeWorkspaceScale: (deltaSteps) => {
+    get().setWorkspaceScale(get().workspaceScale + deltaSteps * WORKSPACE_SCALE_STEP)
   }
 }))

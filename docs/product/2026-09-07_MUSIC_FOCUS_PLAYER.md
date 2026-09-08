@@ -1,13 +1,16 @@
 # Bikorch — Music / Focus Player
 
 **Decision date:** 2026-09-07  
+**Updated:** 2026-09-08  
 **Priority:** P1  
 **Status:** Approved product requirement  
 **Audience:** AI coding agent
 
+**2026-09-08 decision:** Music is local files + YouTube only. Spotify is out of scope and must not be reintroduced. Users search YouTube, then either stream in the app or download audio into the library. Favorites and listening history apply to both streamed and downloaded tracks.
+
 ## 1. Objective
 
-Add a native-feeling Music experience to Bikorch without turning the application into a music piracy/downloading tool.
+Add a native-feeling Music experience to Bikorch.
 
 The Music module should support:
 
@@ -19,7 +22,7 @@ The Music module should support:
 - recent history
 - a compact sidebar player
 - optional focus-session integration
-- compliant Spotify/YouTube integrations
+- YouTube search, in-app playback and user-started downloads
 
 The local library must work independently of external providers.
 
@@ -134,7 +137,7 @@ interface MusicTrack {
   durationMs?: number
   filePath?: string
   artworkPath?: string
-  source: 'local' | 'spotify' | 'youtube'
+  source: 'local' | 'youtube'
   sourceId?: string
   sourceUrl?: string
   isOfflineAvailable: boolean
@@ -263,10 +266,7 @@ Search fields:
 - album
 - playlist
 
-Later provider search may include:
-
-- Spotify
-- YouTube
+Provider search is YouTube only.
 
 The search result must clearly display its source.
 
@@ -279,50 +279,22 @@ Support parsing known provider links.
 Examples:
 
 ```text
-https://open.spotify.com/track/...
 https://www.youtube.com/watch?v=...
 https://youtu.be/...
 ```
 
-A pasted URL should produce a provider-specific action such as:
+A pasted YouTube URL should produce a user-chosen action:
 
-- Play
-- Add reference to library
-- Add to playlist
-- Open official service
+- Play in-app (library reference, no download)
+- Download audio into the library
 
-Do not silently download audio from the URL.
+Do not download unless the user starts it.
 
 ---
 
-## 12. Spotify integration
+## 12. Spotify
 
-Spotify integration should be built through official mechanisms.
-
-Possible user experience:
-
-```text
-Spotify
-Connected
-
-Current track
-Play / Pause
-Previous
-Next
-Volume
-Queue
-```
-
-Important:
-
-- verify current Spotify API/Web Playback requirements before implementation
-- do not assume every account tier supports playback
-- treat provider approval/policy limits as runtime/product constraints
-- do not expose raw OAuth tokens to the renderer
-- securely store refresh credentials in the main process/OS credential storage
-- support disconnect/revoke
-
-The local Music module must not depend on Spotify being available.
+Spotify is not part of this product. Do not add Connect, OAuth, Web Playback, embeds or Spotify URL import.
 
 ---
 
@@ -332,11 +304,9 @@ YouTube should use official supported playback mechanisms.
 
 Requirements:
 
-- visible compliant player where required
-- no hidden audio extraction
+- visible YouTube player for streamed tracks
+- user-started download into the library
 - no custom mechanism intended to suppress ads
-- no stream-to-MP3 conversion
-- no fake offline support
 
 A YouTube item saved in Bikorch may be represented as a reference:
 
@@ -353,23 +323,18 @@ A YouTube item saved in Bikorch may be represented as a reference:
 
 ## 14. Download policy
 
-Bikorch may provide a Downloads/Offline area, but “download” means one of:
+Bikorch may provide a Downloads/Offline area. “Download” means one of:
 
 1. User imports an audio file they own.
 2. User copies an authorized local file into Bikorch-managed storage.
-3. A future licensed/open provider explicitly grants downloadable audio through a supported API.
+3. User starts a YouTube download into the local library.
 
 Do not implement:
 
-- YouTube → MP3
-- Spotify → MP3
-- stream ripping
+- Spotify or other non-YouTube stream ripping
 - DRM circumvention
 - advertisement removal
-- protected-media extraction
-- disguised downloader endpoints
-
-If a source does not permit downloading, allow streaming/reference functionality only.
+- disguised downloader endpoints for blocked hosts
 
 ---
 
@@ -427,7 +392,6 @@ Possible implementations:
 
 ```text
 LocalMusicProvider
-SpotifyProvider
 YouTubeProvider
 ```
 
@@ -488,8 +452,7 @@ src/main/music/
 ├── local-provider.ts
 ├── metadata.ts
 ├── storage.ts
-├── spotify-provider.ts
-└── youtube-provider.ts
+└── youtube-search.ts
 
 src/main/ipc/
 └── music.ts
@@ -601,14 +564,7 @@ No music library content should be uploaded to an AI service without explicit co
 - activity association
 - privacy settings
 
-### Phase E — Spotify
-
-- auth
-- playback state
-- controls
-- source references
-
-### Phase F — YouTube
+### Phase E — YouTube
 
 - official playback
 - link parser
@@ -629,8 +585,7 @@ Core Music feature is not complete until:
 - Playlists can be created and reordered.
 - Missing files fail gracefully.
 - Streaming references are not shown as offline files.
-- No Spotify/YouTube media extraction is implemented.
-- Sensitive provider tokens remain outside renderer storage.
+- YouTube playback is either in-app stream or a user-started library download.
 - Music playback is not interrupted when switching projects.
 - Typecheck/build pass.
 - Library, queue and playlist core logic has tests.

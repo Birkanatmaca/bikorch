@@ -6,7 +6,6 @@ import { useAiAccountsStore } from '@renderer/stores/ai-accounts-store'
 import { useTasksStore } from '@renderer/stores/tasks-store'
 import { useUsageStore } from '@renderer/stores/usage-store'
 import { useSubscriptionStore } from '@renderer/stores/subscription-store'
-import { syncDiscoveredSystemAccounts } from '@renderer/lib/system-auth-sync'
 
 const SAVE_DEBOUNCE_MS = 400
 
@@ -54,7 +53,6 @@ export async function hydrateFromDisk(): Promise<void> {
     activeAccountByKind: snapshot.activeAccountByKind
   })
   if (profiles) useAiAccountsStore.getState().syncAuthProfiles(profiles)
-  await syncDiscoveredSystemAccounts().catch(() => undefined)
   useTasksStore.getState().hydrate({ tasksByProject: snapshot.tasksByProject ?? {} })
   useUsageStore.getState().hydrate(snapshot.usage)
   useSubscriptionStore.getState().hydrate(snapshot.subscriptions)

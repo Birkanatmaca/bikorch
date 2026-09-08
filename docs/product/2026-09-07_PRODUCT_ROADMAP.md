@@ -12,7 +12,7 @@ Bikorch is a cross-platform desktop workspace for developers who use multiple AI
 Two additional product modules are now approved and must be retained in the roadmap:
 
 1. **Developer Intelligence / Profile / Memory** — usage analytics, AI accounts and spending, developer behavior insights, prompt history and a user-controlled memory engine.
-2. **Music / Focus Player** — a local offline music library, personal playlists, a sidebar mini player and compliant Spotify/YouTube integrations.
+2. **Music / Focus Player** — a local music library, personal playlists, a sidebar mini player, YouTube search (stream in-app or download into the library), favorites and listening history.
 
 Both are definite product requirements, not claims that their functionality is already implemented. The developer module has priority; Music is a complementary productivity feature. Do not rewrite the existing workspace or abandon its core purpose to implement either module.
 
@@ -64,7 +64,7 @@ Read the actual implementations before choosing extensions. Preserve existing pr
 | 4 | P1 | Context sharing and user-controlled agent handoff |
 | 5 | P1 | Local Music library and sidebar player |
 | 6 | P1 | Music playlists, imports, offline playback and focus integration |
-| 7 | P2 | Spotify playback control and compliant YouTube playback |
+| 7 | P2 | YouTube search, in-app playback and library downloads |
 | 8 | P2 | Advanced insights and richer workflows |
 
 Priorities are product priorities, not delivery dates.
@@ -91,7 +91,7 @@ Language percentages must describe what they measure. Prompt mentions alone are 
 
 ## 6. Music / Focus Player — approved scope
 
-See [`2026-09-07_MUSIC_FOCUS_PLAYER.md`](./2026-09-07_MUSIC_FOCUS_PLAYER.md) and [`2026-09-08_SPOTIFY_PLAYBACK_INTEGRATION.md`](./2026-09-08_SPOTIFY_PLAYBACK_INTEGRATION.md).
+See [`2026-09-07_MUSIC_FOCUS_PLAYER.md`](./2026-09-07_MUSIC_FOCUS_PLAYER.md).
 
 Required areas:
 
@@ -104,11 +104,11 @@ Required areas:
 - Playlists
 - Recently Played
 - Queue
-- Spotify integration
+- YouTube search, in-app playback and downloads
 - YouTube playback integration
 - Optional Focus Mode integration
 
-Download boundary: do not implement stream ripping, DRM circumvention, advertisement removal or protected streaming-media extraction.
+YouTube audio download into the local library is in scope when the user starts it. Do not add Spotify. Do not circumvent DRM or strip ads on other services.
 
 ## 7. Shared product design
 

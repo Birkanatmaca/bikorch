@@ -17,16 +17,9 @@ import { getDownloadJobRepository } from './downloader/job-store'
 import { permanentlyDeleteManagedMusicFile } from './purge'
 import { addStreamingLink } from './references'
 import { downloadDirectAudio } from './download'
+import { uniqueRecentlyPlayed } from './recent'
 import { parseDirectAudioUrl, parseMusicUrl } from './url-parser'
-import {
-  connectSpotify,
-  disconnectSpotify,
-  getSpotifyAccessToken,
-  getSpotifyClientId,
-  getSpotifyStatus,
-  openExternalUrl,
-  setSpotifyClientId
-} from './spotify-auth'
+import { openExternalUrl } from './open-external'
 import { musicRootDir } from './paths'
 import {
   getMusicStore,
@@ -118,10 +111,7 @@ export function toggleFavorite(trackId: string): boolean {
 export function listRecentlyPlayed(limit = 30): MusicTrack[] {
   const store = getMusicStore()
   if (!store) return []
-  return [...store.listTracks()]
-    .filter((track) => typeof track.lastPlayedAt === 'number')
-    .sort((a, b) => (b.lastPlayedAt ?? 0) - (a.lastPlayedAt ?? 0))
-    .slice(0, limit)
+  return uniqueRecentlyPlayed(store.listTracks(), limit)
 }
 
 export function listPlaylists(): MusicPlaylist[] {
@@ -251,9 +241,6 @@ export function checkTrackAvailable(trackId: string): { ok: boolean; reason?: st
       ? { ok: true }
       : { ok: false, reason: 'Invalid YouTube reference' }
   }
-  if (track.source === 'spotify') {
-    return track.sourceId ? { ok: true } : { ok: false, reason: 'Invalid Spotify reference' }
-  }
   if (!track.filePath) return { ok: false, reason: 'Streaming reference — not playable offline' }
   if (!existsSync(track.filePath)) return { ok: false, reason: 'File missing or moved' }
   return { ok: true }
@@ -261,52 +248,17 @@ export function checkTrackAvailable(trackId: string): { ok: boolean; reason?: st
 
 export async function addLink(url: string): Promise<AddLinkResult> {
   if (parseDirectAudioUrl(url)) return downloadDirectAudio(url)
-  if (parseMusicUrl(url)) return addStreamingLink(url)
+  const parsed = parseMusicUrl(url)
+  if (parsed) return addStreamingLink(url)
   return {
     ok: false,
-    error:
-      'Unsupported link. Paste a YouTube/Spotify track URL, or a direct link to an audio file (.mp3, .wav, …).'
+    error: 'Unsupported link. Paste a YouTube URL, or a direct link to an audio file (.mp3, .wav, …).'
   }
 }
 
-export function spotifyStatusForRenderer(): import('@shared/contracts/music').SpotifyConnectionStatus {
-  const status = getSpotifyStatus()
-  const clientId = getSpotifyClientId()
-  return {
-    ...status,
-    mode: 'connect',
-    selectedDeviceId: readMusicSettings().spotifyDeviceId,
-    ...(clientId ? { clientId } : {})
-  }
-}
+export { openExternalUrl }
 
-export {
-  connectSpotify,
-  disconnectSpotify,
-  getSpotifyAccessToken,
-  openExternalUrl,
-  setSpotifyClientId
-}
-
-export {
-  importSpotifyTopTracks,
-  importSpotifyTrackById,
-  listSpotifyTopTracks
-} from './spotify-api'
-
-export {
-  getSelectedSpotifyDeviceId,
-  getSpotifyPlaybackState,
-  listSpotifyDevices,
-  nextSpotifyConnect,
-  pauseSpotifyConnect,
-  playSpotifyConnect,
-  previousSpotifyConnect,
-  resumeSpotifyConnect,
-  seekSpotifyConnect,
-  selectSpotifyDevice,
-  setSpotifyConnectVolume
-} from './spotify-playback'
+export { searchYouTubeVideos } from './youtube-search'
 
 export function recordPlay(request: { trackId: string; projectId?: string }): { historyId: string | null } {
   const store = getMusicStore()

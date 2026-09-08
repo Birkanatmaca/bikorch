@@ -3,14 +3,13 @@ import { createPortal } from 'react-dom'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useOpenProject } from '@renderer/hooks/use-open-project'
 import { cn, formatProjectName } from '@renderer/lib/utils'
-import { FolderOpen, GripVertical, Plus, X } from 'lucide-react'
+import { FolderOpen, Plus, X } from 'lucide-react'
 import type { Project } from '@shared/types'
-import { Button } from '@renderer/components/ui/Button'
 
 const DRAG_THRESHOLD_PX = 4
 const EDGE_SCROLL_PX = 40
-const TAB_GAP_PX = 4
-const SETTLE_MS = 280
+const TAB_GAP_PX = 2
+const SETTLE_MS = 180
 
 interface DragSession {
   id: string
@@ -28,24 +27,15 @@ interface DragSession {
 
 function TabFace({
   project,
-  isActive,
-  compact
+  isActive
 }: {
   project: Project
   isActive: boolean
-  compact?: boolean
 }): React.JSX.Element {
   return (
     <>
-      {isActive && <span className="project-tab-indicator" aria-hidden />}
-      <GripVertical
-        className={cn(
-          'project-tab-grip relative z-[1] h-3 w-3 shrink-0 text-text-muted/70',
-          compact ? 'opacity-80' : 'opacity-0 transition-opacity duration-200 group-hover:opacity-60'
-        )}
-        aria-hidden
-      />
-      <span className="relative z-[1] min-w-0 flex-1 truncate text-xs font-medium">{project.name}</span>
+      <span className={cn('project-tab-dot', isActive && 'is-on')} aria-hidden />
+      <span className="project-tab-name">{project.name}</span>
     </>
   )
 }
@@ -251,7 +241,7 @@ export function ProjectTabs(): React.JSX.Element {
     <div
       ref={listRef}
       className={cn(
-        'project-tabs relative flex h-full min-w-0 w-full items-center gap-1 overflow-x-auto app-no-drag',
+        'project-tabs relative flex h-full min-w-0 w-full items-center overflow-x-auto app-no-drag',
         session && 'project-tabs-reordering'
       )}
       role="tablist"
@@ -304,10 +294,8 @@ export function ProjectTabs(): React.JSX.Element {
               }
             }}
             className={cn(
-              'project-tab workstation-tab group relative flex max-w-[220px] items-center gap-1 rounded-lg border px-2 py-0.5 app-no-drag',
-              isActive
-                ? 'project-tab-active border-primary/55 bg-primary/14 pl-1.5 text-text-primary backdrop-blur-md'
-                : 'border-transparent pl-1 text-text-secondary hover:border-primary/25 hover:bg-primary/5 hover:text-text-primary',
+              'project-tab group relative flex max-w-[196px] items-center gap-1.5 app-no-drag',
+              isActive ? 'is-active' : 'is-idle',
               isDragged && 'project-tab-origin'
             )}
             style={{
@@ -316,59 +304,48 @@ export function ProjectTabs(): React.JSX.Element {
             }}
           >
             <TabFace project={project} isActive={isActive} />
-            <Button
+            <button
               type="button"
-              size="icon-sm"
-              variant="ghost"
               data-tab-action="folder"
               onClick={() => void handleSelectFolder(project.id)}
-              className={cn(
-                'project-tab-action relative z-[1] shrink-0',
-                isActive && 'opacity-60'
-              )}
+              className="project-tab-action"
               title="Select project folder"
               aria-label={`Select folder for ${project.name}`}
             >
               <FolderOpen className="h-3 w-3" />
-            </Button>
-            <Button
+            </button>
+            <button
               type="button"
-              size="icon-sm"
-              variant="danger"
               data-tab-action="close"
               onClick={() => removeProject(project.id)}
-              className="project-tab-action relative z-[1] shrink-0"
+              className="project-tab-close"
               title="Close project"
               aria-label={`Close project ${project.name}`}
             >
               <X className="h-3 w-3" />
-            </Button>
+            </button>
           </div>
         )
       })}
 
-      <Button
+      <button
         type="button"
-        variant="ghost"
-        size="icon"
         onClick={() => void openFolderPicker({ forceNew: true })}
-        className="project-tab-new app-no-drag shrink-0"
+        className="project-tab-new app-no-drag"
         style={{ transform: session ? `translateX(${shift}px)` : undefined }}
         title="New project"
         aria-label="New project"
       >
         <Plus className="h-3.5 w-3.5" />
-      </Button>
+      </button>
 
       {session &&
         dragged &&
         createPortal(
           <div
             className={cn(
-              'project-tab-float pointer-events-none flex items-center gap-1 rounded-lg border px-2 py-0.5',
-              dragged.id === activeProjectId
-                ? 'project-tab-active border-primary/55 bg-primary/14 pl-1.5 text-text-primary'
-                : 'border-primary/35 bg-elevated/95 pl-1 text-text-primary',
+              'project-tab-float pointer-events-none flex items-center gap-1.5',
+              dragged.id === activeProjectId ? 'is-active' : 'is-idle',
               session.settling && 'project-tab-float-settle'
             )}
             style={{
@@ -377,7 +354,7 @@ export function ProjectTabs(): React.JSX.Element {
               transform: `translate3d(${session.floatX}px, ${session.floatY}px, 0) scale(${session.settling ? 1 : 1.06})`,
             }}
           >
-            <TabFace project={dragged} isActive={dragged.id === activeProjectId} compact />
+            <TabFace project={dragged} isActive={dragged.id === activeProjectId} />
           </div>,
           document.body
         )}

@@ -62,7 +62,7 @@ function createWindow(): void {
     'did-fail-load',
     (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       console.error(
-        '[spotify] frame failed:',
+        '[music] frame failed:',
         errorCode,
         errorDescription,
         validatedURL,

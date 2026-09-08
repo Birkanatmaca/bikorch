@@ -159,7 +159,8 @@ export function TerminalView({
     let lastAuthCaptureError: string | null = null
     let receivedSinceBusy = false
     const captureAfterLogin = launchMode === 'login'
-    const shouldCaptureAccount = Boolean(accountId) && (captureAfterLogin || kind === 'cursor')
+    const shouldCaptureAccount =
+      Boolean(accountId) && (captureAfterLogin || kind === 'antigravity')
 
     const inspectAuthenticatedProfile = async (): Promise<void> => {
       if (
@@ -232,7 +233,7 @@ export function TerminalView({
       }, kind === 'antigravity' || kind === 'cursor' ? 1600 : 900)
     }
 
-    if (kind === 'cursor' && shouldCaptureAccount) {
+    if (kind === 'cursor' && captureAfterLogin && shouldCaptureAccount) {
       authPollTimer = window.setInterval(() => {
         void inspectAuthenticatedProfile()
       }, 2000)

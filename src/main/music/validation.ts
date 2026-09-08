@@ -151,9 +151,6 @@ export function parseSettingsUpdate(payload: unknown): Partial<MusicSettings> | 
     updates.libraryMode = payload['libraryMode']
   }
   if (typeof payload['persistQueue'] === 'boolean') updates.persistQueue = payload['persistQueue']
-  if (payload['spotifyDeviceId'] === null) updates.spotifyDeviceId = null
-  const deviceId = parseSpotifyDeviceId(payload['spotifyDeviceId'])
-  if (deviceId) updates.spotifyDeviceId = deviceId
   return updates
 }
 
@@ -164,74 +161,12 @@ export function parseAddLink(payload: unknown): string | null {
   return trimmed
 }
 
-export function parseSpotifyClientId(payload: unknown): string | null {
-  if (typeof payload !== 'string') return null
-  const trimmed = payload.trim()
-  if (!trimmed || trimmed.length > 200) return null
-  return trimmed
-}
-
-export function parseSpotifyTopRequest(
-  payload: unknown
-): { timeRange: 'short_term' | 'medium_term' | 'long_term'; limit: number } {
-  const record = isRecord(payload) ? payload : {}
-  const timeRange =
-    record['timeRange'] === 'short_term' || record['timeRange'] === 'medium_term'
-      ? record['timeRange']
-      : 'long_term'
-  const rawLimit = typeof record['limit'] === 'number' ? record['limit'] : 5
-  return { timeRange, limit: Math.min(50, Math.max(1, Math.round(rawLimit))) }
-}
-
-export function parseSpotifyResolveRequest(
-  payload: unknown
-): { title: string; artist?: string; sourceId?: string } | null {
-  if (!isRecord(payload) || typeof payload['title'] !== 'string') return null
-  const title = payload['title'].trim()
-  if (!title || title.length > 300) return null
-  const artist = typeof payload['artist'] === 'string' ? payload['artist'].trim().slice(0, 200) : undefined
-  const sourceId = typeof payload['sourceId'] === 'string' ? payload['sourceId'].trim() : undefined
-  return {
-    title,
-    ...(artist ? { artist } : {}),
-    ...(sourceId ? { sourceId } : {})
-  }
-}
-
-export function parseSpotifySourceId(payload: unknown): string | null {
-  const value = isRecord(payload) ? payload['sourceId'] : payload
+export function parseYouTubeSearchQuery(payload: unknown): string | null {
+  const value = isRecord(payload) ? payload['query'] : payload
   if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  if (!/^[A-Za-z0-9]{16,32}$/.test(trimmed)) return null
-  return trimmed
-}
-
-export function parseSpotifyDeviceId(payload: unknown): string | null {
-  const value = isRecord(payload) ? payload['deviceId'] ?? payload['spotifyDeviceId'] : payload
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  if (!/^[A-Za-z0-9_-]{6,128}$/.test(trimmed)) return null
-  return trimmed
-}
-
-export function parseSpotifyPlayRequest(payload: unknown): { sourceId: string; deviceId?: string } | null {
-  if (!isRecord(payload)) return null
-  const sourceId = parseSpotifySourceId(payload)
-  if (!sourceId) return null
-  const deviceId = parseSpotifyDeviceId(payload)
-  return deviceId ? { sourceId, deviceId } : { sourceId }
-}
-
-export function parseSpotifySeekRequest(payload: unknown): number | null {
-  const value = isRecord(payload) ? payload['positionMs'] : payload
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null
-  return Math.max(0, Math.round(value))
-}
-
-export function parseSpotifyVolumeRequest(payload: unknown): number | null {
-  const value = isRecord(payload) ? payload['volume'] : payload
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null
-  return Math.min(1, Math.max(0, value))
+  const query = value.replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim()
+  if (query.length < 2 || query.length > 120) return null
+  return query
 }
 
 export function parsePlaybackSnapshot(payload: unknown): MusicPlaybackSnapshot | null {

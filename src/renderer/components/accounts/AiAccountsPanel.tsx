@@ -2,18 +2,10 @@ import { buttonStyles } from '@renderer/components/ui/Button'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertCircle,
-  Activity,
-  Check,
-  CheckCircle2,
-  Clock3,
   Pencil,
-  Play,
   Plus,
-  ReceiptText,
   RefreshCw,
   Trash2,
-  UserPlus,
-  UsersRound,
   X
 } from 'lucide-react'
 import {
@@ -22,11 +14,8 @@ import {
   type AiAccount
 } from '@shared/contracts/accounts'
 import type { CliUsageInfo, CliUsageKind } from '@shared/contracts/usage'
-import type {
-  SubscriptionRecord,
-  UsageSnapshotRecord
-} from '@shared/contracts/persistence'
-import { CLI_LOGO_CLASS, getCliLogo } from '@renderer/lib/cli-logos'
+import type { SubscriptionRecord } from '@shared/contracts/persistence'
+import { getCliLogo } from '@renderer/lib/cli-logos'
 import {
   type AiAccountDraft,
   useAiAccountsStore
@@ -35,20 +24,57 @@ import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useUsageStore } from '@renderer/stores/usage-store'
 import { useSubscriptionStore } from '@renderer/stores/subscription-store'
 import { cn } from '@renderer/lib/utils'
-import {
-  importSystemAccountForKind,
-  syncDiscoveredSystemAccounts
-} from '@renderer/lib/system-auth-sync'
+import { importSystemAccountForKind } from '@renderer/lib/system-auth-sync'
 import { checkAllAccountUsage } from '@renderer/lib/usage-sync'
 
 let installedCliCache: Partial<Record<CliUsageKind, boolean>> = {}
 
-const EMPTY_DRAFT: AiAccountDraft = {
-  kind: 'claude',
-  name: '',
-  email: '',
-  plan: '',
-  note: ''
+function CliKindPicker({
+  accounts,
+  installedByKind,
+  addingKind,
+  onPick
+}: {
+  accounts: AiAccount[]
+  installedByKind: Partial<Record<CliUsageKind, boolean>>
+  addingKind: CliUsageKind | null
+  onPick: (kind: CliUsageKind) => void
+}): React.JSX.Element {
+  return (
+    <div className="cli-kind-picker">
+      {AI_ACCOUNT_KINDS.map((kind) => {
+        const count = accounts.filter((account) => account.kind === kind).length
+        const installed = installedByKind[kind]
+        const adding = addingKind === kind
+        const logo = getCliLogo(kind)
+        return (
+          <button
+            key={kind}
+            type="button"
+            disabled={installed === false || addingKind !== null}
+            onClick={() => onPick(kind)}
+            className={cn('cli-kind-tile', count > 0 && 'is-present')}
+          >
+            {logo ? (
+              <img src={logo} alt="" className="cli-kind-tile-logo" />
+            ) : (
+              <span className="cli-kind-tile-logo" />
+            )}
+            <span className="cli-kind-tile-name">{AI_ACCOUNT_LABELS[kind]}</span>
+            <span className="cli-kind-tile-meta">
+              {installed === false
+                ? 'Missing'
+                : adding
+                  ? 'Adding'
+                  : count > 0
+                    ? String(count)
+                    : 'Add'}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 function usageColor(remaining: number): string {
@@ -57,40 +83,30 @@ function usageColor(remaining: number): string {
   return '#3ccb7f'
 }
 
-function CircularUsage({
-  label,
+function UsageMeter({
   remaining,
-  detail
+  label
 }: {
-  label: string
   remaining: number | null
-  detail?: string
+  label?: string
 }): React.JSX.Element {
-  const safeRemaining = remaining === null ? 0 : Math.max(0, Math.min(100, remaining))
-  const color = remaining === null ? '#707986' : usageColor(safeRemaining)
-  const background =
-    remaining === null
-      ? 'conic-gradient(#272c35 0deg, #272c35 360deg)'
-      : `conic-gradient(${color} ${safeRemaining * 3.6}deg, #272c35 ${safeRemaining * 3.6}deg 360deg)`
+  const value = remaining === null ? null : Math.max(0, Math.min(100, remaining))
+  const color = value === null ? '#3a414c' : usageColor(value)
 
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-app-bg/60 p-1.5">
-      <div
-        className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full"
-        style={{ background }}
-        aria-label={remaining === null ? `${label}: unavailable` : `${label}: ${Math.round(safeRemaining)}% left`}
-      >
-        <div className="flex h-9 w-9 flex-col items-center justify-center rounded-full bg-panel-bg">
-          <span className="font-mono text-[11px] font-medium text-text-primary">
-            {remaining === null ? '—' : `${Math.round(safeRemaining)}%`}
-          </span>
-          {remaining !== null && <span className="text-[8px] text-text-muted">left</span>}
-        </div>
+    <div className="account-meter" title={label}>
+      <div className="account-meter-track">
+        <div
+          className="account-meter-fill"
+          style={{
+            width: `${value ?? 0}%`,
+            background: color
+          }}
+        />
       </div>
-      <div className="min-w-0">
-        <p className="truncate text-[10px] font-medium text-text-secondary">{label}</p>
-        {detail && <p className="mt-0.5 truncate font-mono text-[9px] text-text-muted">{detail}</p>}
-      </div>
+      <span className="account-meter-value" style={{ color: value === null ? undefined : color }}>
+        {value === null ? '—' : Math.round(value)}
+      </span>
     </div>
   )
 }
@@ -103,25 +119,9 @@ function formatUsageDetail(provider: CliUsageInfo | undefined): string | undefin
   const remainingMs = window.resetsAt * 1000 - Date.now()
   if (remainingMs <= 0) return 'Resetting soon'
   const minutes = Math.ceil(remainingMs / 60000)
-  if (minutes < 60) return `Resets in ${minutes}m`
+  if (minutes < 60) return `${minutes}m`
   const hours = Math.floor(minutes / 60)
-  return `Resets in ${hours}h`
-}
-
-function formatDateTime(timestamp: number | null | undefined): string {
-  if (!timestamp) return 'Unavailable'
-  return new Date(timestamp).toLocaleString([], {
-    dateStyle: 'short',
-    timeStyle: 'short'
-  })
-}
-
-function averagePrimaryUsage(records: UsageSnapshotRecord[]): number | null {
-  const values = records
-    .map((record) => record.primaryUsedPercent)
-    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
-  if (values.length === 0) return null
-  return values.reduce((sum, value) => sum + value, 0) / values.length
+  return `${hours}h`
 }
 
 function formatSubscriptionMoney(subscription: SubscriptionRecord): string {
@@ -136,31 +136,21 @@ function formatSubscriptionMoney(subscription: SubscriptionRecord): string {
   }
 }
 
-function formatSubscriptionRenewal(timestamp: number | undefined): string {
-  if (!timestamp) return 'Renewal unavailable'
-  return `Renews ${new Date(timestamp).toLocaleDateString([], { dateStyle: 'medium' })}`
-}
-
 function AccountForm({
   account,
   onClose
 }: {
-  account: AiAccount | null
+  account: AiAccount
   onClose: () => void
 }): React.JSX.Element {
-  const addAccount = useAiAccountsStore((state) => state.addAccount)
   const updateAccount = useAiAccountsStore((state) => state.updateAccount)
-  const [draft, setDraft] = useState<AiAccountDraft>(() =>
-    account
-      ? {
-          kind: account.kind,
-          name: account.name,
-          email: account.email,
-          plan: account.plan,
-          note: account.note
-        }
-      : EMPTY_DRAFT
-  )
+  const [draft, setDraft] = useState<AiAccountDraft>(() => ({
+    kind: account.kind,
+    name: account.name,
+    email: account.email,
+    plan: account.plan,
+    note: account.note
+  }))
 
   const update = <K extends keyof AiAccountDraft>(key: K, value: AiAccountDraft[K]): void => {
     setDraft((current) => ({ ...current, [key]: value }))
@@ -169,11 +159,7 @@ function AccountForm({
   const submit = (event: React.FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
     if (!draft.name.trim()) return
-    if (account) {
-      updateAccount(account.id, draft)
-    } else {
-      addAccount(draft)
-    }
+    updateAccount(account.id, draft)
     onClose()
   }
 
@@ -185,15 +171,11 @@ function AccountForm({
       >
         <div className="flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-md border border-primary/30 bg-primary/10 text-primary">
-            {account ? <Pencil className="h-3.5 w-3.5" /> : <UserPlus className="h-3.5 w-3.5" />}
+            <Pencil className="h-3.5 w-3.5" />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="text-xs font-medium text-text-primary">
-              {account ? 'Edit AI account' : 'Add AI account'}
-            </h3>
-            <p className="mt-0.5 text-[10px] text-text-muted">
-              Sign-in sessions stay in protected, app-managed profiles
-            </p>
+            <h3 className="text-xs font-medium text-text-primary">Edit account</h3>
+            <p className="mt-0.5 text-[10px] text-text-muted">{AI_ACCOUNT_LABELS[account.kind]}</p>
           </div>
           <button
             type="button"
@@ -206,21 +188,6 @@ function AccountForm({
         </div>
 
         <div className="mt-3 space-y-2">
-          <label className="block">
-            <span className="mb-1 block text-[10px] font-medium text-text-secondary">CLI</span>
-            <select
-              value={draft.kind}
-              disabled={Boolean(account)}
-              onChange={(event) => update('kind', event.target.value as CliUsageKind)}
-              className="h-8 w-full rounded-md border border-border bg-panel-bg px-2 text-xs text-text-primary outline-none transition-colors focus:border-primary/60 disabled:opacity-60"
-            >
-              {AI_ACCOUNT_KINDS.map((kind) => (
-                <option key={kind} value={kind}>
-                  {AI_ACCOUNT_LABELS[kind]}
-                </option>
-              ))}
-            </select>
-          </label>
           <label className="block">
             <span className="mb-1 block text-[10px] font-medium text-text-secondary">Account name</span>
             <input
@@ -275,7 +242,7 @@ function AccountForm({
             type="submit"
             className={buttonStyles({ variant: 'primary' })}
           >
-            {account ? 'Save changes' : 'Add account'}
+            Save changes
           </button>
         </div>
       </form>
@@ -286,9 +253,7 @@ function AccountForm({
 function AccountCard({
   account,
   provider,
-  usageHistory,
   subscriptions,
-  checkedAt,
   isActive,
   isRemoving,
   onOpen,
@@ -297,184 +262,95 @@ function AccountCard({
 }: {
   account: AiAccount
   provider: CliUsageInfo | undefined
-  usageHistory: UsageSnapshotRecord[]
   subscriptions: SubscriptionRecord[]
-  checkedAt: number | undefined
   isActive: boolean
   isRemoving: boolean
   onOpen: () => void
   onEdit: () => void
   onRemove: () => void
 }): React.JSX.Element {
-  const logo = getCliLogo(account.kind)
-  const isConnected = account.profileReady
-  const primaryRemaining = provider?.primary ? 100 - provider.primary.usedPercent : null
-  const secondaryRemaining = provider?.secondary ? 100 - provider.secondary.usedPercent : null
-  const liveUsage = provider?.status === 'available'
-  const primaryLabel = provider?.primary?.label ?? 'Primary limit'
-  const secondaryLabel = provider?.secondary?.label ?? 'Secondary limit'
-  const breakdownGauges = (provider?.breakdown ?? [])
-    .filter((item) => typeof item.usedPercent === 'number')
-    .slice(0, 2)
-  const hasLiveWindows = Boolean(
-    provider?.primary || provider?.secondary || (liveUsage && breakdownGauges.length > 0)
-  )
-  const displayEmail = account.email || provider?.accountEmail
-  const displayPlan = account.plan || provider?.planType || undefined
-  const recentHistory = usageHistory.filter(
-    (record) => record.checkedAt >= Date.now() - 7 * 24 * 60 * 60 * 1000
-  )
-  const averageUsed = averagePrimaryUsage(recentHistory)
+  const usageBelongsToAccount =
+    !account.email ||
+    !provider?.accountEmail ||
+    account.email.trim().toLowerCase() === provider.accountEmail.trim().toLowerCase()
+  const liveUsage = provider?.status === 'available' && usageBelongsToAccount
+  const meters: { remaining: number; label: string }[] = []
+  if (liveUsage && provider?.primary) {
+    meters.push({
+      remaining: 100 - provider.primary.usedPercent,
+      label: [provider.primary.label, formatUsageDetail(provider)].filter(Boolean).join(' · ')
+    })
+  } else if (liveUsage) {
+    for (const item of (provider?.breakdown ?? []).filter((entry) => typeof entry.usedPercent === 'number').slice(0, 2)) {
+      meters.push({
+        remaining: 100 - (item.usedPercent ?? 0),
+        label: item.label ?? 'Limit'
+      })
+    }
+  }
+  if (liveUsage && provider?.secondary) {
+    meters.push({
+      remaining: 100 - provider.secondary.usedPercent,
+      label: provider.secondary.label ?? 'Limit'
+    })
+  }
+  const displayLine = [account.email || undefined, account.plan || provider?.planType || undefined]
+    .filter(Boolean)
+    .join(' · ')
   const subscription = subscriptions[0]
+  const actionLabel = !account.profileReady ? 'Login' : isActive ? 'Open' : 'Use'
 
   return (
     <article
       className={cn(
-        'account-card rounded-lg border bg-panel-bg p-3 transition-colors',
-        isActive ? 'border-primary/45 shadow-[0_0_16px_rgb(124_108_242_/_0.08)]' : 'border-border',
-        isRemoving && 'pointer-events-none opacity-60'
+        'account-card',
+        isActive && 'is-active',
+        isRemoving && 'is-removing'
       )}
     >
-      <div className="account-card-heading flex items-start gap-2">
-        {logo ? <img src={logo} alt="" className={CLI_LOGO_CLASS} /> : <div className={CLI_LOGO_CLASS} />}
+      <div className="account-card-top">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <p className="truncate text-xs font-medium text-text-primary">{account.name}</p>
-            {isActive && (
-              <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-success/10 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wide text-success">
-                <Check className="h-2.5 w-2.5" /> Active
-              </span>
-            )}
-            {isConnected && !isActive && (
-              <span className="shrink-0 rounded-full bg-success/10 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wide text-success">
-                Connected
-              </span>
-            )}
+          <div className="account-card-title">
+            <span className={cn('account-status-dot', account.profileReady ? 'is-ready' : 'is-wait', isActive && 'is-live')} />
+            <p>{account.name}</p>
           </div>
-          <p className="truncate text-[10px] text-text-muted">{AI_ACCOUNT_LABELS[account.kind]}</p>
-          {displayEmail && (
-            <p className="truncate font-mono text-[9px] text-text-secondary">{displayEmail}</p>
-          )}
+          {displayLine ? <p className="account-card-meta">{displayLine}</p> : null}
         </div>
-        <div className="account-card-actions flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            onClick={onOpen}
-            disabled={isRemoving}
-            className={buttonStyles()}
-            title={account.profileReady ? 'Open this account profile' : 'Sign in to this account profile'}
-          >
-            <Play className="h-2.5 w-2.5" />
-            {!account.profileReady ? 'Sign in' : isActive ? 'Open CLI' : 'Use & open'}
-          </button>
-          <button
-            type="button"
-            onClick={onEdit}
-            disabled={isRemoving}
-            className={buttonStyles({ variant: 'ghost', size: 'icon-sm' })}
-            aria-label={`Edit ${account.name}`}
-            title="Edit account"
-          >
+        <button
+          type="button"
+          onClick={onOpen}
+          disabled={isRemoving}
+          className="account-card-go"
+          title={actionLabel}
+        >
+          {actionLabel}
+        </button>
+      </div>
+
+      <div className="account-card-usage">
+        {meters.length > 0 ? (
+          meters.map((meter, index) => (
+            <UsageMeter key={`${meter.label}-${index}`} remaining={meter.remaining} label={meter.label} />
+          ))
+        ) : (
+          <UsageMeter remaining={null} label={account.profileReady ? 'No usage yet' : 'Sign in'} />
+        )}
+      </div>
+
+      <div className="account-card-foot">
+        {subscription ? (
+          <span className="account-card-price">{formatSubscriptionMoney(subscription)}</span>
+        ) : (
+          <span />
+        )}
+        <div className="account-card-tools">
+          <button type="button" onClick={onEdit} disabled={isRemoving} aria-label={`Edit ${account.name}`}>
             <Pencil className="h-3 w-3" />
           </button>
-          <button
-            type="button"
-            onClick={onRemove}
-            disabled={isRemoving}
-            className={buttonStyles({ variant: 'danger', size: 'icon-sm' })}
-            aria-label={`Remove ${account.name}`}
-            title="Remove account"
-          >
+          <button type="button" onClick={onRemove} disabled={isRemoving} aria-label={`Remove ${account.name}`}>
             <Trash2 className={cn('h-3 w-3', isRemoving && 'animate-pulse')} />
           </button>
         </div>
-      </div>
-
-      {displayPlan || account.note ? (
-        <div className="mt-1.5 flex items-center gap-1.5 font-mono text-[9px] text-text-muted">
-          {displayPlan && <span className="rounded bg-elevated px-1.5 py-0.5">{displayPlan}</span>}
-          {account.note && <span className="truncate">{account.note}</span>}
-        </div>
-      ) : null}
-
-      {subscription && (
-        <div className="account-subscription-summary">
-          <div className="account-subscription-main">
-            <ReceiptText className="h-3 w-3 shrink-0 text-primary" aria-hidden />
-            <div className="min-w-0">
-              <span>Subscription</span>
-              <strong className="truncate">{subscription.planName || subscription.provider}</strong>
-            </div>
-          </div>
-          <div className="account-subscription-price">
-            <strong>{formatSubscriptionMoney(subscription)}</strong>
-            <span>{subscription.billingPeriod}</span>
-          </div>
-          <p>{formatSubscriptionRenewal(subscription.renewalDate)}</p>
-        </div>
-      )}
-
-      {liveUsage && hasLiveWindows ? (
-        <div className="account-usage-grid mt-2 grid grid-cols-1 gap-2">
-          {provider?.primary ? (
-            <CircularUsage
-              label={primaryLabel}
-              remaining={primaryRemaining}
-              detail={formatUsageDetail(provider)}
-            />
-          ) : breakdownGauges[0] ? (
-            <CircularUsage
-              label={breakdownGauges[0].label}
-              remaining={100 - (breakdownGauges[0].usedPercent ?? 0)}
-            />
-          ) : null}
-          {provider?.secondary ? (
-            <CircularUsage label={secondaryLabel} remaining={secondaryRemaining} />
-          ) : !provider?.primary && breakdownGauges[1] ? (
-            <CircularUsage
-              label={breakdownGauges[1].label}
-              remaining={100 - (breakdownGauges[1].usedPercent ?? 0)}
-            />
-          ) : null}
-        </div>
-      ) : (
-        <div className="mt-2 flex items-center gap-1.5 rounded-md border border-border bg-app-bg/60 px-2 py-1.5 text-[9px] text-text-muted">
-          {provider?.status === 'error' ? (
-            <AlertCircle className="h-3 w-3 shrink-0 text-warning" />
-          ) : (
-            <Clock3 className="h-3 w-3 shrink-0" />
-          )}
-          <span>
-            {!account.profileReady
-              ? 'Sign in is required for this account profile'
-              : provider?.detail ?? 'Usage has not been checked yet'}
-          </span>
-        </div>
-      )}
-
-      <div className="account-stat-grid mt-2">
-        <div>
-          <span>Last check</span>
-          <strong>{formatDateTime(checkedAt)}</strong>
-        </div>
-        <div>
-          <span>7d checks</span>
-          <strong>{recentHistory.length || 'Unavailable'}</strong>
-        </div>
-        <div>
-          <span>Avg used</span>
-          <strong>{averageUsed === null ? 'Unavailable' : `${Math.round(averageUsed)}%`}</strong>
-        </div>
-        {provider?.credits && (
-          <div>
-            <span>Credits</span>
-            <strong>
-              {provider.credits.unlimited
-                ? 'Unlimited'
-                : provider.credits.balance ?? 'Unavailable'}
-            </strong>
-          </div>
-        )}
       </div>
     </article>
   )
@@ -488,15 +364,15 @@ export function AiAccountsPanel(): React.JSX.Element {
   const removeAccount = useAiAccountsStore((state) => state.removeAccount)
   const syncAuthProfiles = useAiAccountsStore((state) => state.syncAuthProfiles)
   const usageProviders = useUsageStore((state) => state.providers)
-  const checkedAtByAccountId = useUsageStore((state) => state.checkedAtByAccountId)
-  const usageHistory = useUsageStore((state) => state.history)
   const removeUsageAccount = useUsageStore((state) => state.removeAccount)
   const subscriptions = useSubscriptionStore((state) => state.subscriptions)
   const addPanel = useWorkspaceStore((state) => state.addPanel)
   const removePanelsForAccount = useWorkspaceStore((state) => state.removePanelsForAccount)
   const closeOtherAccountCliPanels = useWorkspaceStore((state) => state.closeOtherAccountCliPanels)
   const [error, setError] = useState<string | null>(null)
-  const [formAccount, setFormAccount] = useState<AiAccount | null | undefined>(undefined)
+  const [formAccount, setFormAccount] = useState<AiAccount | undefined>(undefined)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [addingKind, setAddingKind] = useState<CliUsageKind | null>(null)
   const [removingAccountIds, setRemovingAccountIds] = useState<Set<string>>(() => new Set())
   const [refreshingUsage, setRefreshingUsage] = useState(false)
   const [installedByKind, setInstalledByKind] = useState<
@@ -525,7 +401,6 @@ export function AiAccountsPanel(): React.JSX.Element {
         const profiles = await window.api.authProfiles.list()
         if (cancelled) return
         syncAuthProfiles(profiles)
-        await syncDiscoveredSystemAccounts()
         if (!cancelled) await refreshInstalledClis()
       } catch (listError) {
         if (!cancelled) {
@@ -546,24 +421,6 @@ export function AiAccountsPanel(): React.JSX.Element {
     return map
   }, [usageProviders])
 
-  const lastCheckedAt = useMemo(() => {
-    const times = accounts
-      .map((account) => checkedAtByAccountId[account.id])
-      .filter((value): value is number => typeof value === 'number')
-    if (times.length === 0) return null
-    return Math.max(...times)
-  }, [accounts, checkedAtByAccountId])
-
-  const historyByAccount = useMemo(() => {
-    const map = new Map<string, UsageSnapshotRecord[]>()
-    for (const record of usageHistory) {
-      const current = map.get(record.accountId) ?? []
-      current.push(record)
-      map.set(record.accountId, current)
-    }
-    return map
-  }, [usageHistory])
-
   const subscriptionsByAccount = useMemo(() => {
     const map = new Map<string, SubscriptionRecord[]>()
     for (const subscription of subscriptions) {
@@ -574,15 +431,6 @@ export function AiAccountsPanel(): React.JSX.Element {
     }
     return map
   }, [subscriptions])
-
-  const recentHistory = useMemo(
-    () => usageHistory.filter((record) => record.checkedAt >= Date.now() - 7 * 24 * 60 * 60 * 1000),
-    [usageHistory]
-  )
-  const availableUsageCount = accounts.filter(
-    (account) => providerByAccount.get(account.id)?.status === 'available'
-  ).length
-  const connectedCount = accounts.filter((account) => account.profileReady).length
 
   const refreshUsage = async (): Promise<void> => {
     if (refreshingUsage) return
@@ -604,11 +452,10 @@ export function AiAccountsPanel(): React.JSX.Element {
       AI_ACCOUNT_KINDS.map((kind) => ({
         kind,
         accounts: accounts.filter((account) => account.kind === kind)
-      })),
+      })).filter((group) => group.accounts.length > 0),
     [accounts]
   )
 
-  const openAddForm = (): void => setFormAccount(null)
   const closeForm = (): void => setFormAccount(undefined)
 
   const openLoginCli = async (kind: CliUsageKind, account?: AiAccount): Promise<void> => {
@@ -638,36 +485,6 @@ export function AiAccountsPanel(): React.JSX.Element {
       accountId,
       `${AI_ACCOUNT_LABELS[kind]} · Sign in`
     )
-  }
-
-  const openGlobalCli = async (kind: CliUsageKind): Promise<void> => {
-    if (installedByKind[kind] === false) {
-      setError(`${AI_ACCOUNT_LABELS[kind]} is not installed on this computer`)
-      return
-    }
-    setError(null)
-
-    try {
-      const importedAccount = await importSystemAccountForKind(kind)
-      if (importedAccount) {
-        await openAccountCli(importedAccount)
-        return
-      }
-    } catch (importError) {
-      setError(
-        importError instanceof Error
-          ? importError.message
-          : `Could not import ${AI_ACCOUNT_LABELS[kind]} account`
-      )
-      return
-    }
-
-    if (kind === 'antigravity' || kind === 'cursor') {
-      await openLoginCli(kind)
-      return
-    }
-
-    addPanel(kind, 'center', undefined, 'normal', undefined, AI_ACCOUNT_LABELS[kind])
   }
 
   const handleRemove = async (account: AiAccount): Promise<void> => {
@@ -726,7 +543,7 @@ export function AiAccountsPanel(): React.JSX.Element {
         await openLoginCli(account.kind, account)
         return
       }
-      if (account.kind === 'antigravity') {
+      if (account.kind === 'antigravity' || account.kind === 'cursor') {
         closeOtherAccountCliPanels(account.kind, account.id)
       }
       setActiveAccount(account.kind, account.id)
@@ -745,75 +562,73 @@ export function AiAccountsPanel(): React.JSX.Element {
     }
   }
 
-  const connectCli = (kind: CliUsageKind): void => {
-    const kindAccounts = accounts.filter((account) => account.kind === kind)
-    if (kindAccounts.length === 0) {
-      void openGlobalCli(kind)
-      return
+  const addCliKind = async (kind: CliUsageKind): Promise<void> => {
+    if (addingKind) return
+    setPickerOpen(false)
+    setError(null)
+    setAddingKind(kind)
+
+    try {
+      let installed = installedByKind[kind]
+      if (installed === undefined) {
+        try {
+          const result = await window.api.cli.detect(kind)
+          installed = result.installed
+          setInstalledByKind((current) => ({ ...current, [kind]: installed }))
+        } catch {
+          installed = true
+        }
+      }
+      if (installed === false) {
+        setError(`${AI_ACCOUNT_LABELS[kind]} is not installed on this computer`)
+        return
+      }
+
+      const alreadyAdded = accounts.some((account) => account.kind === kind)
+      if (!alreadyAdded) {
+        const importedAccount = await importSystemAccountForKind(kind)
+        if (importedAccount) return
+      }
+
+      await openLoginCli(kind)
+    } catch (addError) {
+      setError(
+        addError instanceof Error
+          ? addError.message
+          : `Could not add ${AI_ACCOUNT_LABELS[kind]}`
+      )
+    } finally {
+      setAddingKind(null)
     }
-    void openLoginCli(kind)
   }
 
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-app-bg">
-      <div className="shrink-0 border-b border-border bg-elevated px-3 py-2.5">
-        <div className="flex items-start gap-2">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-primary/25 bg-primary/10 text-primary">
-            <UsersRound className="h-3.5 w-3.5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-xs font-medium text-text-primary">AI Accounts</h2>
-            <p className="mt-1 text-[10px] leading-relaxed text-text-muted">
-              Sign in, switch, inspect usage and sign out from one place
-            </p>
-          </div>
-          <div className="account-header-actions flex shrink-0 items-center gap-1">
+      <div className="account-panel-header shrink-0 border-b border-border px-3 py-2">
+        <div className="flex items-center gap-2">
+          <h2 className="min-w-0 flex-1 truncate text-xs font-medium text-text-primary">Accounts</h2>
+          <div className="flex shrink-0 items-center gap-0.5">
+            {accounts.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void refreshUsage()}
+                disabled={refreshingUsage}
+                className={buttonStyles({ variant: 'ghost', size: 'icon-sm' })}
+                title="Refresh"
+                aria-label="Refresh usage"
+              >
+                <RefreshCw className={cn('h-3.5 w-3.5', refreshingUsage && 'animate-spin')} />
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => void refreshUsage()}
-              disabled={refreshingUsage}
-              className={buttonStyles({ variant: 'ghost', size: 'icon' })}
-              title="Refresh account usage"
-              aria-label="Refresh account usage"
-            >
-              <RefreshCw className={cn('h-3.5 w-3.5', refreshingUsage && 'animate-spin')} />
-            </button>
-            <button
-              type="button"
-              onClick={openAddForm}
-              className={buttonStyles({ variant: 'primary', size: 'icon' })}
-              title="Add AI account"
-              aria-label="Add AI account"
+              onClick={() => setPickerOpen(true)}
+              className={buttonStyles({ variant: 'primary', size: 'icon-sm' })}
+              title="Add CLI"
+              aria-label="Add CLI"
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
-          </div>
-        </div>
-        <div className="mt-2 flex items-center justify-between gap-2 font-mono text-[9px] text-text-muted">
-          <span>{accounts.length} account{accounts.length === 1 ? '' : 's'}</span>
-          <span>
-            {lastCheckedAt
-              ? `Updated ${new Date(lastCheckedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-              : 'Usage updates in the background'}
-          </span>
-        </div>
-        <div className="account-intelligence-grid mt-2">
-          <div className="account-intelligence-card">
-            <Activity className="h-3 w-3" aria-hidden />
-            <span>Connected</span>
-            <strong>{connectedCount}/{accounts.length}</strong>
-          </div>
-          <div className="account-intelligence-card">
-            <span>Usage live</span>
-            <strong>{availableUsageCount}/{accounts.length}</strong>
-          </div>
-          <div className="account-intelligence-card">
-            <span>Checks · 7d</span>
-            <strong>{recentHistory.length || 'Unavailable'}</strong>
-          </div>
-          <div className="account-intelligence-card account-intelligence-unavailable">
-            <span>AI spend</span>
-            <strong>Unavailable</strong>
           </div>
         </div>
       </div>
@@ -826,69 +641,46 @@ export function AiAccountsPanel(): React.JSX.Element {
           </div>
         )}
 
-        <div className="space-y-3">
-          {accountsByKind.map(({ kind, accounts: providerAccounts }) => {
-            const logo = getCliLogo(kind)
-            return (
-              <section key={kind} className="account-provider">
-                <div className="account-provider-heading mb-2 flex items-center gap-2 px-0.5">
-                  {logo ? <img src={logo} alt="" className={CLI_LOGO_CLASS} /> : <div className={CLI_LOGO_CLASS} />}
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate text-[11px] font-medium text-text-secondary">
-                      {AI_ACCOUNT_LABELS[kind]}
-                    </h3>
-                    <p className="text-[9px] text-text-muted">
-                      {providerAccounts.length > 0
-                        ? `${providerAccounts.length} saved account${providerAccounts.length === 1 ? '' : 's'}`
-                        : installedByKind[kind] === false
-                          ? 'CLI is not installed'
-                          : installedByKind[kind] === undefined
-                            ? 'Checking installation…'
-                            : 'No managed account'}
-                    </p>
-                  </div>
-                  {providerAccounts.length > 0 && (
-                    <span className="rounded-full border border-border bg-elevated px-1.5 py-0.5 font-mono text-[8px] text-text-muted">
-                      {providerAccounts.length}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => connectCli(kind)}
-                    disabled={installedByKind[kind] === false}
-                    className={buttonStyles({ variant: 'secondary' })}
-                    title={
-                      installedByKind[kind] === false
-                        ? `${AI_ACCOUNT_LABELS[kind]} is not installed`
-                        : providerAccounts.length === 0
-                          ? `Open ${AI_ACCOUNT_LABELS[kind]} with your system session`
-                          : `Add account to ${AI_ACCOUNT_LABELS[kind]}`
-                    }
-                  >
-                    {providerAccounts.length === 0 ? (
-                      <>
-                        <Play className="h-2.5 w-2.5" />
-                        Open CLI
-                      </>
+        {accountsByKind.length === 0 ? (
+          <div className="account-panel-empty">
+            <CliKindPicker
+              accounts={accounts}
+              installedByKind={installedByKind}
+              addingKind={addingKind}
+              onPick={(kind) => void addCliKind(kind)}
+            />
+          </div>
+        ) : (
+          <div className="account-provider-list">
+            {accountsByKind.map(({ kind, accounts: providerAccounts }) => {
+              const logo = getCliLogo(kind)
+              return (
+                <section key={kind} className="account-provider">
+                  <div className="account-provider-heading">
+                    {logo ? (
+                      <img src={logo} alt="" className="account-provider-logo" />
                     ) : (
-                      <>
-                        <UserPlus className="h-2.5 w-2.5" />
-                        Add account
-                      </>
+                      <span className="account-provider-logo" />
                     )}
-                  </button>
-                </div>
-
-                {providerAccounts.length > 0 ? (
-                  <div className="space-y-1.5">
+                    <h3>{AI_ACCOUNT_LABELS[kind]}</h3>
+                    <button
+                      type="button"
+                      onClick={() => void addCliKind(kind)}
+                      disabled={installedByKind[kind] === false || addingKind !== null}
+                      className="account-provider-add"
+                      title="Add account"
+                      aria-label={`Add ${AI_ACCOUNT_LABELS[kind]} account`}
+                    >
+                      <Plus className="h-3 w-3" />
+                    </button>
+                  </div>
+                  <div className="account-provider-cards">
                     {providerAccounts.map((account) => (
                       <AccountCard
                         key={account.id}
                         account={account}
                         provider={providerByAccount.get(account.id)}
-                        usageHistory={historyByAccount.get(account.id) ?? []}
                         subscriptions={subscriptionsByAccount.get(account.id) ?? []}
-                        checkedAt={checkedAtByAccountId[account.id]}
                         isActive={activeAccountByKind[account.kind] === account.id}
                         isRemoving={removingAccountIds.has(account.id)}
                         onOpen={() => void openAccountCli(account)}
@@ -897,34 +689,40 @@ export function AiAccountsPanel(): React.JSX.Element {
                       />
                     ))}
                   </div>
-                ) : (
-                  <div className="rounded-md border border-dashed border-border bg-panel-bg/40 p-2">
-                    <div className="flex items-center gap-1.5 text-[10px] leading-relaxed text-text-muted">
-                      <UsersRound className="h-3 w-3 shrink-0" />
-                      <span className="min-w-0 flex-1">
-                        {installedByKind[kind] === false
-                          ? 'CLI is not installed'
-                          : kind === 'antigravity' || kind === 'cursor'
-                            ? 'Open CLI to sign in with a fresh session.'
-                            : 'Open your system session or add a separate account.'}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </section>
-            )
-          })}
-          <div className="flex items-start gap-1.5 px-1 pt-1 text-[9px] leading-relaxed text-text-muted">
-            <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-success" />
-            <span>
-              You can save more than one Cursor CLI account and open each CLI to inspect it.
-              Antigravity still uses one live session at a time.
-            </span>
+                </section>
+              )
+            })}
           </div>
-        </div>
+        )}
       </div>
 
-      {formAccount !== undefined && <AccountForm account={formAccount} onClose={closeForm} />}
+      {pickerOpen && (
+        <div className="absolute inset-0 z-20 flex items-start justify-center overflow-auto bg-app-bg/88 p-3 backdrop-blur-sm">
+          <div className="cli-kind-picker-sheet">
+            <div className="mb-3 flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-xs font-medium text-text-primary">Add CLI</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPickerOpen(false)}
+                className={buttonStyles({ variant: 'ghost', size: 'icon-sm' })}
+                aria-label="Close CLI picker"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <CliKindPicker
+              accounts={accounts}
+              installedByKind={installedByKind}
+              addingKind={addingKind}
+              onPick={(kind) => void addCliKind(kind)}
+            />
+          </div>
+        </div>
+      )}
+
+      {formAccount && <AccountForm account={formAccount} onClose={closeForm} />}
     </div>
   )
 }

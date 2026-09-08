@@ -3,13 +3,17 @@ import {
   allocateOrchestratorRect,
   clampOrchestratorRect,
   DEFAULT_ORCHESTRATOR_RECT,
+  DEFAULT_PLAYER_RECT,
   isFullBleedOrchestratorRect,
+  placePlayerRect,
   type OrchestratorRect,
   type PanelDefinition,
   type PanelType,
   type WorkspaceLayout
 } from '@shared/types'
+import { isTiledWorkspace, syncGridWithPanelIds, tiledCenterPanelIds } from '@shared/workspace-grid'
 import { PanelShell } from '@renderer/components/panels/PanelShell'
+import { WorkspacePlayerPanel } from '@renderer/components/music/WorkspacePlayerPanel'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { cn } from '@renderer/lib/utils'
@@ -18,6 +22,7 @@ import { cliFrameClass, getCliChromePhase } from '@renderer/lib/cli-chrome'
 import { isMacOS } from '@renderer/lib/electron-api'
 import { ContextMenu } from '@renderer/components/ui/ContextMenu'
 import { useOrchestratorContextMenu } from '@renderer/components/workspace/use-orchestrator-context-menu'
+import { TiledWorkspace } from '@renderer/components/workspace/TiledWorkspace'
 
 const LIVE_PANEL_TYPES: PanelType[] = [
   'terminal',
@@ -83,23 +88,25 @@ function applyResize(
   start: OrchestratorRect,
   edge: ResizeEdge,
   dx: number,
-  dy: number
+  dy: number,
+  minW = MIN_W,
+  minH = MIN_H
 ): OrchestratorRect {
   let { x, y, w, h } = start
 
   if (edge.includes('e')) {
-    w = Math.max(MIN_W, start.w + dx)
+    w = Math.max(minW, start.w + dx)
   }
   if (edge.includes('w')) {
-    const nextW = Math.max(MIN_W, start.w - dx)
+    const nextW = Math.max(minW, start.w - dx)
     x = start.x + start.w - nextW
     w = nextW
   }
   if (edge.includes('s')) {
-    h = Math.max(MIN_H, start.h + dy)
+    h = Math.max(minH, start.h + dy)
   }
   if (edge.includes('n')) {
-    const nextH = Math.max(MIN_H, start.h - dy)
+    const nextH = Math.max(minH, start.h - dy)
     y = start.y + start.h - nextH
     h = nextH
   }
@@ -169,9 +176,10 @@ function OrchestratorWindow({
   live: boolean
   active: boolean
 }): React.JSX.Element {
+  const isPlayer = panel.type === 'player'
   const status = useTerminalStore((s) => s.sessions[panel.id])
   const phase = getCliChromePhase(panel.type, status)
-  const showChrome = LIVE_PANEL_TYPES.includes(panel.type) && phase !== 'off'
+  const showChrome = !isPlayer && LIVE_PANEL_TYPES.includes(panel.type) && phase !== 'off'
   const isMac = isMacOS()
 
   return (
@@ -189,6 +197,7 @@ function OrchestratorWindow({
       }}
       onPointerDown={(e) => {
         onFocus()
+        if (isPlayer) return
         const target = e.target as HTMLElement
         if (target.closest('button, header, [data-resize-handle]')) return
         focusTerminal(panel.id)
@@ -196,33 +205,45 @@ function OrchestratorWindow({
       onContextMenu={onContextMenu}
       onFocusCapture={onFocus}
     >
-      <div
-        className={cn(
-          'workstation-window relative h-full overflow-hidden border bg-panel-bg',
-          isMac ? 'orchestrator-window-macos' : 'rounded-md shadow-lg shadow-black/25',
-          showChrome ? cliFrameClass(phase) : 'border-border',
-          !active && isMac && 'orchestrator-window-macos-inactive'
-        )}
-        data-active={active}
-        data-interacting={live}
-      >
-        <PanelShell
-          id={panel.id}
-          type={panel.type}
-          title={panel.title}
-          onClose={onClose}
-          launchMode={panel.launchMode}
-          accountId={panel.accountId}
-          draggable={false}
-          flush
-          windowActive={active}
-          onHeaderPointerDown={(e) => {
-            if ((e.target as HTMLElement).closest('button, .mac-traffic-lights')) return
-            onMoveStart(e)
-          }}
-        />
-        {showChrome && phase === 'busy' && <div className="cli-busy-wash" aria-hidden />}
-      </div>
+      {isPlayer ? (
+        <div className="music-player-float relative h-full">
+          <WorkspacePlayerPanel
+            onMoveStart={(event) => {
+              if ((event.target as HTMLElement).closest('button, input, .music-player-seek')) return
+              onMoveStart(event)
+            }}
+            onClose={onClose}
+          />
+        </div>
+      ) : (
+        <div
+          className={cn(
+            'workstation-window relative h-full overflow-hidden border bg-panel-bg',
+            isMac ? 'orchestrator-window-macos' : 'rounded-md shadow-lg shadow-black/25',
+            showChrome ? cliFrameClass(phase) : 'border-border',
+            !active && isMac && 'orchestrator-window-macos-inactive'
+          )}
+          data-active={active}
+          data-interacting={live}
+        >
+          <PanelShell
+            id={panel.id}
+            type={panel.type}
+            title={panel.title}
+            onClose={onClose}
+            launchMode={panel.launchMode}
+            accountId={panel.accountId}
+            draggable={false}
+            flush
+            windowActive={active}
+            onHeaderPointerDown={(e) => {
+              if ((e.target as HTMLElement).closest('button, .mac-traffic-lights')) return
+              onMoveStart(e)
+            }}
+          />
+          {showChrome && phase === 'busy' && <div className="cli-busy-wash" aria-hidden />}
+        </div>
+      )}
       <ResizeHandles onStart={onResizeStart} />
     </div>
   )
@@ -238,7 +259,8 @@ export function OrchestratorZone({
   const updateLayout = useWorkspaceStore((s) => s.updateLayout)
   const canvasRef = useRef<HTMLDivElement>(null)
   const { menu, groups, openAt, close } = useOrchestratorContextMenu(
-    () => canvasRef.current?.getBoundingClientRect() ?? null
+    () => canvasRef.current?.getBoundingClientRect() ?? null,
+    isTiledWorkspace(layout)
   )
   const [focusedId, setFocusedId] = useState<string | null>(null)
   const previousPanelIds = useRef(new Set(panels.map((panel) => panel.id)))
@@ -251,9 +273,21 @@ export function OrchestratorZone({
     start: OrchestratorRect
     pointerX: number
     pointerY: number
+    isPlayer: boolean
   } | null>(null)
 
   const rects = layout.centerPanelRects ?? {}
+  const tiled = isTiledWorkspace(layout)
+  const tilePanels = panels.filter((panel) => panel.type !== 'player')
+  const playerPanels = panels.filter((panel) => panel.type === 'player')
+
+  useEffect(() => {
+    if (!tiled) return
+    const ids = tiledCenterPanelIds(panels)
+    const next = syncGridWithPanelIds(layout.centerGrid ?? null, ids)
+    if (JSON.stringify(next) === JSON.stringify(layout.centerGrid ?? null)) return
+    updateLayout(projectId, { centerGrid: next })
+  }, [layout.centerGrid, panels, projectId, tiled, updateLayout])
 
   useEffect(() => {
     const addedPanel = panels.filter((panel) => !previousPanelIds.current.has(panel.id)).at(-1)
@@ -280,7 +314,16 @@ export function OrchestratorZone({
       const only = panels[0]
       const current = next[only.id]
       if (current && isFullBleedOrchestratorRect(current)) {
-        next[only.id] = { ...DEFAULT_ORCHESTRATOR_RECT }
+        next[only.id] = only.type === 'player' ? { ...DEFAULT_PLAYER_RECT } : { ...DEFAULT_ORCHESTRATOR_RECT }
+        changed = true
+      }
+    }
+
+    for (const panel of panels) {
+      if (panel.type !== 'player') continue
+      const current = next[panel.id]
+      if (current && current.w >= 50 && current.h >= 50) {
+        next[panel.id] = placePlayerRect()
         changed = true
       }
     }
@@ -292,8 +335,14 @@ export function OrchestratorZone({
         .map((panel) => next[panel.id])
 
       for (const panel of missing) {
+        if (panel.type === 'player') {
+          next[panel.id] = placePlayerRect()
+          placed.push(next[panel.id])
+          changed = true
+          continue
+        }
         const { next: allocated, shrinkFirst } = allocateOrchestratorRect(placed)
-        if (shrinkFirst && panels[0]) {
+        if (shrinkFirst && panels[0] && panels[0].type !== 'player') {
           next[panels[0].id] = shrinkFirst
         }
         next[panel.id] = allocated
@@ -308,9 +357,13 @@ export function OrchestratorZone({
   }, [panels, projectId, rects, updateLayout])
 
   const getRect = useCallback(
-    (panelId: string): OrchestratorRect =>
-      previewRects[panelId] ?? rects[panelId] ?? defaultRect(),
-    [previewRects, rects]
+    (panelId: string): OrchestratorRect => {
+      const live = previewRects[panelId] ?? rects[panelId]
+      if (live) return live
+      const panel = panels.find((item) => item.id === panelId)
+      return panel?.type === 'player' ? { ...DEFAULT_PLAYER_RECT } : defaultRect()
+    },
+    [panels, previewRects, rects]
   )
 
   const canvasSize = useCallback((): { w: number; h: number } => {
@@ -335,18 +388,20 @@ export function OrchestratorZone({
       e.stopPropagation()
       setFocusedId(panelId)
       const start = getRect(panelId)
+      const isPlayer = panels.some((panel) => panel.id === panelId && panel.type === 'player')
       dragRef.current = {
         panelId,
         mode,
         start,
         pointerX: e.clientX,
-        pointerY: e.clientY
+        pointerY: e.clientY,
+        isPlayer
       }
       previewRectsRef.current = { [panelId]: start }
       setPreviewRects({ [panelId]: start })
       lockTerminalLayout(panelId)
     },
-    [getRect]
+    [getRect, panels]
   )
 
   useEffect(() => {
@@ -354,14 +409,21 @@ export function OrchestratorZone({
       const drag = dragRef.current
       if (!drag) return
       const { dx, dy } = toDeltaPercent(e.clientX, e.clientY)
+      const limits = drag.isPlayer ? { minW: 22, minH: 22 } : undefined
       const next =
         drag.mode === 'move'
-          ? clampOrchestratorRect({
-              ...drag.start,
-              x: drag.start.x + dx,
-              y: drag.start.y + dy
-            })
-          : clampOrchestratorRect(applyResize(drag.start, drag.mode, dx, dy))
+          ? clampOrchestratorRect(
+              {
+                ...drag.start,
+                x: drag.start.x + dx,
+                y: drag.start.y + dy
+              },
+              limits
+            )
+          : clampOrchestratorRect(
+              applyResize(drag.start, drag.mode, dx, dy, limits?.minW, limits?.minH),
+              limits
+            )
 
       previewRectsRef.current = { [drag.panelId]: next }
       if (dragFrameRef.current !== null) return
@@ -388,7 +450,7 @@ export function OrchestratorZone({
       previewRectsRef.current = {}
       setPreviewRects({})
       unlockTerminalLayout(drag.panelId)
-      focusTerminal(drag.panelId)
+      if (!drag.isPlayer) focusTerminal(drag.panelId)
     }
 
     window.addEventListener('pointermove', handlePointerMove)
@@ -409,12 +471,13 @@ export function OrchestratorZone({
 
   const windows = useMemo(
     () =>
-      panels.map((panel, index) => {
+      (tiled ? playerPanels : panels).map((panel, index) => {
         const rect = getRect(panel.id)
-        const z = panel.id === activePanelId ? 40 : 10 + index
+        const focused = panel.id === activePanelId
+        const z = panel.type === 'player' ? (focused ? 46 : 32) : focused ? 40 : 10 + index
         return { panel, rect, z }
       }),
-    [activePanelId, getRect, panels]
+    [activePanelId, getRect, panels, playerPanels, tiled]
   )
 
   const isEditing = Object.keys(previewRects).length > 0
@@ -426,16 +489,28 @@ export function OrchestratorZone({
   return (
     <div
       ref={canvasRef}
-      className="workstation-canvas relative h-full min-h-0 bg-app-bg"
+      className={cn('workstation-canvas relative h-full min-h-0 bg-app-bg', tiled && 'is-tiled')}
       onContextMenu={(e) => openAt(e)}
     >
-      <div
-        className={cn(
-          'orchestrator-grid pointer-events-none absolute inset-0',
-          isEditing && 'orchestrator-grid-active'
-        )}
-        aria-hidden
-      />
+      {!tiled && (
+        <div
+          className={cn(
+            'orchestrator-grid pointer-events-none absolute inset-0',
+            isEditing && 'orchestrator-grid-active'
+          )}
+          aria-hidden
+        />
+      )}
+      {tiled && (
+        <TiledWorkspace
+          panels={tilePanels}
+          grid={layout.centerGrid ?? null}
+          focusedId={activePanelId ?? null}
+          onFocus={setFocusedId}
+          onClose={onClose}
+          onContextMenu={(event, panelId) => openAt(event, panelId)}
+        />
+      )}
       {windows.map(({ panel, rect, z }) => (
         <OrchestratorWindow
           key={panel.id}

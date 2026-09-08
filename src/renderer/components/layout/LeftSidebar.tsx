@@ -23,7 +23,7 @@ export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Eleme
   const title = isChanges
     ? 'Changes'
     : isAccounts
-      ? 'AI Accounts'
+      ? 'CLI accounts'
       : isTasks
         ? 'Tasks'
         : isProfile

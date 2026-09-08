@@ -7,36 +7,55 @@ import type {
   MusicTrack,
   PlaybackStatus,
   RepeatMode,
-  SpotifyDevice,
-  SpotifyPlaybackResult,
-  SpotifyPlaybackState
+  YouTubeSearchHit
 } from '@shared/contracts/music'
 import { createDefaultMusicSettings, trackPlaybackUrl } from '@shared/contracts/music'
-import type { MusicSource, SpotifyCatalogTrack, SpotifyConnectionStatus, SpotifyTimeRange } from '@shared/contracts/music'
-import { resolveSpotifyPlayRoute, spotifyTrackUri, spotifyWebTrackUrl } from '@shared/music-playback'
+import type { MusicSource } from '@shared/contracts/music'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { attachPlaybackAnalyser, resumePlaybackAnalyser } from '@renderer/lib/audio-analyser'
-import { pauseYouTube, playYouTubeVideo, resumeYouTube, seekYouTube, setYouTubeVolume, stopYouTube } from '@renderer/lib/streaming/youtube-player'
+import { stopYouTube } from '@renderer/lib/streaming/youtube-player'
 
 function api(): Window['api']['music'] | null {
   return typeof window !== 'undefined' && window.api?.music ? window.api.music : null
 }
+
+let youtubeSearchSeq = 0
+let playSeq = 0
 
 let audio: HTMLAudioElement | null = null
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 let listenStartedAt = 0
 let activeHistoryId: string | null = null
 
+function prepareAudioElement(element: HTMLAudioElement): HTMLAudioElement {
+  element.preload = 'auto'
+  element.crossOrigin = 'anonymous'
+  attachPlaybackAnalyser(element)
+  return element
+}
+
 function getAudio(): HTMLAudioElement {
   if (!audio) {
-    audio = new Audio()
-    audio.preload = 'auto'
+    audio = prepareAudioElement(new Audio())
   }
   return audio
 }
 
 export function getPlaybackAudioElement(): HTMLAudioElement | null {
   return audio
+}
+
+export function readPlaybackClock(): { positionMs: number; durationMs: number } {
+  const state = useMusicStore.getState()
+  const element = audio
+  if (element?.currentSrc && Number.isFinite(element.currentTime)) {
+    const hasDuration = Number.isFinite(element.duration) && element.duration > 0
+    return {
+      positionMs: Math.max(0, Math.floor(element.currentTime * 1000)),
+      durationMs: hasDuration ? Math.floor(element.duration * 1000) : state.durationMs
+    }
+  }
+  return { positionMs: state.positionMs, durationMs: state.durationMs }
 }
 
 function formatBytes(bytes: number): string {
@@ -46,32 +65,67 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
-function waitForAudioReady(element: HTMLAudioElement, timeoutMs = 12_000): Promise<void> {
-  if (element.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return Promise.resolve()
+function waitWithTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup()
-      reject(new Error('This track could not be decoded.'))
-    }, timeoutMs)
-    const onReady = (): void => {
-      cleanup()
-      resolve()
-    }
-    const onError = (): void => {
-      cleanup()
-      reject(new Error(mediaErrorMessage(element)))
-    }
-    const cleanup = (): void => {
-      clearTimeout(timer)
-      element.removeEventListener('canplay', onReady)
-      element.removeEventListener('error', onError)
-    }
-    element.addEventListener('canplay', onReady, { once: true })
-    element.addEventListener('error', onError, { once: true })
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      }
+    )
   })
 }
 
-async function loadLocalPlayback(trackId: string, cors: boolean): Promise<HTMLAudioElement> {
+async function playThroughElement(
+  trackId: string,
+  volume: number,
+  seq: number,
+  timeoutMs: number,
+  skipEnsurePlayable: boolean
+): Promise<void> {
+  const bridge = api()
+  if (!skipEnsurePlayable && bridge?.ensurePlayable) {
+    const prepared = await bridge.ensurePlayable(trackId)
+    if (!prepared.ok) throw new Error(prepared.error)
+    if (seq !== playSeq) return
+  }
+
+  const element = getAudio()
+  element.pause()
+  element.volume = volume
+  prepareAudioElement(element)
+  await resumePlaybackAnalyser()
+  if (seq !== playSeq) return
+
+  element.src = `${trackPlaybackUrl(trackId)}?t=${Date.now()}`
+  element.load()
+  prepareAudioElement(element)
+
+  try {
+    await waitWithTimeout(
+      element.play(),
+      timeoutMs,
+      'This track is taking too long to open.'
+    )
+  } catch (error) {
+    if (seq !== playSeq) return
+    if (element.error) throw new Error(mediaErrorMessage(element))
+    throw error instanceof Error ? error : new Error('Playback failed')
+  }
+
+  if (seq !== playSeq) {
+    element.pause()
+    return
+  }
+  await resumePlaybackAnalyser()
+}
+
+async function loadPlaybackSource(trackId: string): Promise<void> {
   const bridge = api()
   if (bridge?.ensurePlayable) {
     const prepared = await bridge.ensurePlayable(trackId)
@@ -79,32 +133,9 @@ async function loadLocalPlayback(trackId: string, cors: boolean): Promise<HTMLAu
   }
   const element = getAudio()
   element.pause()
-  if (cors) element.crossOrigin = 'anonymous'
-  else element.removeAttribute('crossorigin')
+  prepareAudioElement(element)
   element.src = `${trackPlaybackUrl(trackId)}?t=${Date.now()}`
   element.load()
-  return element
-}
-
-async function playLocalFile(trackId: string, volume: number): Promise<void> {
-  const start = async (cors: boolean): Promise<HTMLAudioElement> => {
-    const element = await loadLocalPlayback(trackId, cors)
-    element.volume = volume
-    await waitForAudioReady(element, cors ? 6_000 : 12_000)
-    await element.play()
-    attachPlaybackAnalyser(element)
-    await resumePlaybackAnalyser()
-    return element
-  }
-  try {
-    await start(true)
-  } catch {
-    try {
-      await start(false)
-    } catch {
-      throw new Error(mediaErrorMessage(getAudio()))
-    }
-  }
 }
 
 function mediaErrorMessage(element: HTMLAudioElement): string {
@@ -124,8 +155,18 @@ function playsFromFile(track: MusicTrack | null): boolean {
   return Boolean(track?.isOfflineAvailable && track.filePath)
 }
 
-function usesSpotifyConnect(track: MusicTrack | null): boolean {
-  return Boolean(track && resolveSpotifyPlayRoute(track).kind === 'connect')
+function bumpRecent(track: MusicTrack, set: (partial: Partial<MusicState> | ((state: MusicState) => Partial<MusicState>)) => void): void {
+  const next: MusicTrack = {
+    ...track,
+    lastPlayedAt: Date.now(),
+    playCount: track.playCount + 1
+  }
+  set((state) => ({
+    recent: [
+      next,
+      ...state.recent.filter((item) => item.id !== next.id && !(next.sourceId && item.sourceId === next.sourceId))
+    ].slice(0, 30)
+  }))
 }
 
 function buildPlayOrder(state: MusicState): string[] {
@@ -162,9 +203,8 @@ interface MusicState {
   shuffle: boolean
   repeat: RepeatMode
   error: string | null
-  spotifyStatus: SpotifyConnectionStatus | null
-  spotifyDevices: SpotifyDevice[]
-  spotifyPlayback: SpotifyPlaybackState | null
+  youtubeResults: YouTubeSearchHit[]
+  youtubeSearching: boolean
   showStreamingPlayer: boolean
 
   bootstrap: () => Promise<void>
@@ -178,17 +218,8 @@ interface MusicState {
   importPaths: (paths: string[]) => Promise<void>
   addLink: (url: string) => Promise<string | null>
   openExternal: (url: string) => Promise<void>
-  refreshSpotifyStatus: () => Promise<void>
-  refreshSpotifyDevices: () => Promise<string | null>
-  selectSpotifyDevice: (deviceId: string | null) => Promise<void>
-  setSpotifyClientId: (clientId: string) => Promise<void>
-  connectSpotify: () => Promise<string | null>
-  disconnectSpotify: () => Promise<void>
-  openSpotifyTrack: (sourceId?: string) => Promise<void>
-  loadSpotifyTopTracks: (timeRange?: SpotifyTimeRange, limit?: number) => Promise<string | null>
-  importSpotifyTopTracks: (timeRange?: SpotifyTimeRange, limit?: number) => Promise<string | null>
-  playSpotifyCatalogTrack: (sourceId: string) => Promise<string | null>
-  spotifyTopTracks: SpotifyCatalogTrack[]
+  searchYouTube: (query: string) => Promise<string | null>
+  playYouTubeResult: (hit: YouTubeSearchHit) => Promise<string | null>
   removeTrack: (trackId: string) => Promise<void>
   createPlaylist: (name: string) => Promise<void>
   renamePlaylist: (id: string, name: string) => Promise<void>
@@ -218,65 +249,6 @@ interface MusicState {
   currentSource: () => MusicSource | null
 }
 
-function applySpotifyResult(
-  result: SpotifyPlaybackResult,
-  setState: (partial: Partial<MusicState>) => void
-): void {
-  if (!result.state) return
-  setState({
-    spotifyPlayback: result.state,
-    ...(result.state.durationMs > 0 ? { durationMs: result.state.durationMs } : {}),
-    positionMs: result.state.positionMs
-  })
-}
-
-let spotifyPollTimer: ReturnType<typeof setInterval> | null = null
-let endingFromPoll = false
-
-function stopSpotifyPoll(): void {
-  if (!spotifyPollTimer) return
-  clearInterval(spotifyPollTimer)
-  spotifyPollTimer = null
-}
-
-function startSpotifyPoll(): void {
-  stopSpotifyPoll()
-  spotifyPollTimer = setInterval(() => {
-    void pollSpotifyPlayback()
-  }, 1000)
-}
-
-async function pollSpotifyPlayback(): Promise<void> {
-  const snapshot = useMusicStore.getState()
-  if (!usesSpotifyConnect(trackById(snapshot.tracks, snapshot.currentTrackId))) {
-    stopSpotifyPoll()
-    return
-  }
-  const result = await api()?.spotify.playbackState()
-  if (!result?.ok) return
-  const playback = result.state
-  useMusicStore.setState({
-    spotifyPlayback: playback,
-    positionMs: playback.positionMs,
-    ...(playback.durationMs > 0 ? { durationMs: playback.durationMs } : {}),
-    status: snapshot.status === 'loading' ? snapshot.status : playback.isPlaying ? 'playing' : 'paused'
-  })
-  if (
-    !endingFromPoll &&
-    !playback.isPlaying &&
-    playback.durationMs > 0 &&
-    playback.positionMs >= playback.durationMs - 1500
-  ) {
-    endingFromPoll = true
-    void useMusicStore
-      .getState()
-      .handleEnded()
-      .finally(() => {
-        endingFromPoll = false
-      })
-  }
-}
-
 export const useMusicStore = create<MusicState>((set, get) => ({
   loaded: false,
   loading: false,
@@ -299,10 +271,8 @@ export const useMusicStore = create<MusicState>((set, get) => ({
   shuffle: false,
   repeat: 'off',
   error: null,
-  spotifyStatus: null,
-  spotifyDevices: [],
-  spotifyPlayback: null,
-  spotifyTopTracks: [],
+  youtubeResults: [],
+  youtubeSearching: false,
   showStreamingPlayer: false,
 
   bootstrap: async () => {
@@ -310,7 +280,7 @@ export const useMusicStore = create<MusicState>((set, get) => ({
     if (!bridge || get().loaded) return
     set({ loading: true })
     try {
-      const [tracks, playlists, favorites, queue, recent, summary, settings, playback, spotifyStatus] =
+      const [tracks, playlists, favorites, queue, recent, summary, settings, playback] =
         await Promise.all([
           bridge.library.list(),
           bridge.playlists.list(),
@@ -319,8 +289,7 @@ export const useMusicStore = create<MusicState>((set, get) => ({
           bridge.recentlyPlayed(),
           bridge.library.summary(),
           bridge.getSettings(),
-          bridge.getPlayback(),
-          bridge.spotify.status()
+          bridge.getPlayback()
         ])
       set({
         loaded: true,
@@ -332,21 +301,19 @@ export const useMusicStore = create<MusicState>((set, get) => ({
         recent,
         summary,
         settings,
-        spotifyStatus,
         volume: playback?.volume ?? 0.8,
         shuffle: playback?.shuffle ?? false,
         repeat: playback?.repeat ?? 'off',
         currentTrackId: playback?.trackId ?? null,
         positionMs: playback?.positionMs ?? 0
       })
-      if (spotifyStatus?.connected) void get().refreshSpotifyDevices()
       const element = getAudio()
       element.volume = playback?.volume ?? 0.8
       if (playback?.trackId) {
         const check = await bridge.checkTrack(playback.trackId)
         if (check.ok) {
           try {
-            await loadLocalPlayback(playback.trackId, false)
+            await loadPlaybackSource(playback.trackId)
             element.currentTime = (playback.positionMs ?? 0) / 1000
           } catch {
             // restore without audio buffer if the file cannot be read yet
@@ -435,103 +402,29 @@ export const useMusicStore = create<MusicState>((set, get) => ({
     await api()?.openExternal(url)
   },
 
-  refreshSpotifyStatus: async () => {
-    const bridge = api()
-    if (!bridge) return
-    const spotifyStatus = await bridge.spotify.status()
-    set({ spotifyStatus })
-  },
-
-  refreshSpotifyDevices: async () => {
+  searchYouTube: async (query) => {
     const bridge = api()
     if (!bridge) return 'Music API unavailable'
-    const result = await bridge.spotify.devices()
-    if (!result.ok) return result.error.message
-    set({ spotifyDevices: result.devices })
-    return null
-  },
-
-  selectSpotifyDevice: async (deviceId) => {
-    const bridge = api()
-    if (!bridge) return
-    await bridge.spotify.selectDevice(deviceId)
-    const settings = { ...get().settings, spotifyDeviceId: deviceId }
-    set({ settings })
-    await get().refreshSpotifyStatus()
-  },
-
-  setSpotifyClientId: async (clientId) => {
-    const bridge = api()
-    if (!bridge) return
-    const spotifyStatus = await bridge.spotify.setClientId(clientId)
-    set({ spotifyStatus })
-  },
-
-  connectSpotify: async () => {
-    const bridge = api()
-    if (!bridge) return 'Music API unavailable'
-    const result = await bridge.spotify.connect()
-    await get().refreshSpotifyStatus()
-    if (result.ok) {
-      const deviceError = await get().refreshSpotifyDevices()
-      return deviceError
-    }
-    return result.error ?? 'Spotify connection failed'
-  },
-
-  disconnectSpotify: async () => {
-    const bridge = api()
-    if (!bridge) return
-    stopSpotifyPoll()
-    await bridge.spotify.disconnect()
-    set({ spotifyTopTracks: [], spotifyDevices: [], spotifyPlayback: null })
-    await get().refreshSpotifyStatus()
-  },
-
-  openSpotifyTrack: async (sourceId) => {
-    const id = sourceId ?? trackById(get().tracks, get().currentTrackId)?.sourceId
-    if (id) {
-      const desktop = await api()?.openExternal(spotifyTrackUri(id))
-      if (desktop && 'ok' in desktop && desktop.ok) return
-      await api()?.openExternal(spotifyWebTrackUrl(id))
-      return
-    }
-    await api()?.openExternal('https://open.spotify.com')
-  },
-
-  loadSpotifyTopTracks: async (timeRange = 'long_term', limit = 5) => {
-    const bridge = api()
-    if (!bridge?.spotify.topTracks) return 'Music API unavailable'
+    const seq = ++youtubeSearchSeq
+    set({ youtubeSearching: true })
     try {
-      const spotifyTopTracks = await bridge.spotify.topTracks({ timeRange, limit })
-      set({ spotifyTopTracks })
+      const result = await bridge.youtube.search(query)
+      if (seq !== youtubeSearchSeq) return null
+      if (!result.ok) {
+        set({ youtubeSearching: false, youtubeResults: [] })
+        return result.error ?? 'YouTube search failed'
+      }
+      set({ youtubeSearching: false, youtubeResults: (result.items ?? []).slice(0, 3) })
       return null
     } catch (error) {
-      return error instanceof Error ? error.message : 'Could not load Spotify top tracks'
+      if (seq !== youtubeSearchSeq) return null
+      set({ youtubeSearching: false, youtubeResults: [] })
+      return error instanceof Error ? error.message : 'YouTube search failed'
     }
   },
 
-  importSpotifyTopTracks: async (timeRange = 'long_term', limit = 5) => {
-    const bridge = api()
-    if (!bridge?.spotify.importTop) return 'Music API unavailable'
-    try {
-      await bridge.spotify.importTop({ timeRange, limit })
-      await get().refreshLibrary()
-      await get().loadSpotifyTopTracks(timeRange, limit)
-      return null
-    } catch (error) {
-      return error instanceof Error ? error.message : 'Could not add Spotify tracks'
-    }
-  },
-
-  playSpotifyCatalogTrack: async (sourceId) => {
-    const bridge = api()
-    if (!bridge?.spotify.importOne) return 'Music API unavailable'
-    const result = await bridge.spotify.importOne(sourceId)
-    if (!result.ok) return result.error
-    await get().refreshLibrary()
-    await get().playTrack(result.track.id)
-    return null
+  playYouTubeResult: async (hit) => {
+    return get().addLink(hit.sourceUrl)
   },
 
   removeTrack: async (trackId) => {
@@ -636,65 +529,39 @@ export const useMusicStore = create<MusicState>((set, get) => ({
       await get().addToQueue([trackId])
     }
 
+    const seq = ++playSeq
     getAudio().pause()
     stopYouTube()
-    stopSpotifyPoll()
-    if (get().spotifyPlayback?.isPlaying && track?.source !== 'spotify') {
-      void bridge.spotify.pause()
-    }
     set({
       status: 'loading',
       error: null,
       currentTrackId: trackId,
       positionMs: 0,
-      showStreamingPlayer: !playsFromFile(track) && track?.source === 'youtube',
-      spotifyPlayback: track?.source === 'spotify' ? get().spotifyPlayback : null
+      showStreamingPlayer: false
     })
 
-    try {
-      if (playsFromFile(track) || (track && resolveSpotifyPlayRoute(track).kind === 'local')) {
-        set({ error: 'Preparing this track…' })
-        await playLocalFile(trackId, get().volume)
-        set({ status: 'playing', error: null })
-        void get().refreshLibrary()
-      } else if (track?.source === 'youtube' && track.sourceId) {
-        await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
-        await playYouTubeVideo(track.sourceId)
-        set({ status: 'playing' })
-      } else if (track?.source === 'spotify') {
-        const route = resolveSpotifyPlayRoute(track)
-        if (route.kind !== 'connect') {
-          throw new Error(route.kind === 'unavailable' ? route.reason : 'This Spotify track is not ready to play')
-        }
-        set({ error: 'Starting on the selected Spotify device…' })
-        const selectedDeviceId = get().settings.spotifyDeviceId
-        const result = await bridge.spotify.play({
-          sourceId: route.sourceId,
-          ...(selectedDeviceId ? { deviceId: selectedDeviceId } : {})
-        })
-        applySpotifyResult(result, set)
-        if (!result.ok) throw new Error(result.error?.message ?? 'Spotify playback failed')
-        set({
-          status: result.state?.isPlaying === false ? 'paused' : 'playing',
-          error: result.state?.isPlaying === false
-            ? 'Command sent. Confirm Spotify is playing on the selected device.'
-            : null,
-          durationMs: result.state?.durationMs || track.durationMs || 0,
-          positionMs: result.state?.positionMs ?? 0
-        })
-        startSpotifyPoll()
-      } else {
-        await playLocalFile(trackId, get().volume)
-        set({ status: 'playing' })
-      }
+    if (track) bumpRecent(track, set)
+    listenStartedAt = Date.now()
+    const projectId = useWorkspaceStore.getState().activeProjectId ?? undefined
+    const { historyId } = await bridge.history.recordPlay({ trackId, projectId })
+    activeHistoryId = historyId
 
-      listenStartedAt = Date.now()
-      const projectId = useWorkspaceStore.getState().activeProjectId ?? undefined
-      const { historyId } = await bridge.history.recordPlay({ trackId, projectId })
-      activeHistoryId = historyId
+    try {
+      const youtubeStream = track?.source === 'youtube' && Boolean(track.sourceId) && !playsFromFile(track)
+      set({ error: youtubeStream ? 'Opening this song…' : 'Preparing this track…' })
+      await playThroughElement(
+        trackId,
+        get().volume,
+        seq,
+        youtubeStream ? 24_000 : 12_000,
+        youtubeStream
+      )
+      if (seq !== playSeq) return
+      set({ status: 'playing', error: null })
       await get().refreshLibrary()
       scheduleSavePlayback(get())
     } catch (error) {
+      if (seq !== playSeq) return
       const message = error instanceof Error ? error.message : 'Playback failed'
       set({
         status: 'error',
@@ -725,30 +592,12 @@ export const useMusicStore = create<MusicState>((set, get) => ({
       return
     }
     useWorkspaceStore.getState().openPlayerPanel()
-    const current = trackById(get().tracks, currentTrackId)
-    if (!playsFromFile(current)) {
-      if (current?.source === 'youtube') {
-        set({ status: 'playing', error: null })
-        resumeYouTube()
-        return
-      }
-      if (usesSpotifyConnect(current)) {
-        const result = await api()?.spotify.resume()
-        if (result) applySpotifyResult(result, set)
-        if (!result?.ok) {
-          set({ status: 'error', error: result?.error?.message ?? 'Could not resume Spotify' })
-          return
-        }
-        set({ status: result.state?.isPlaying === false ? 'paused' : 'playing', error: null })
-        startSpotifyPoll()
-        return
-      }
-    }
     const element = getAudio()
     try {
-      attachPlaybackAnalyser(element)
+      prepareAudioElement(element)
       await resumePlaybackAnalyser()
-      await element.play()
+      if (element.currentSrc) await element.play()
+      else await get().playTrack(currentTrackId)
       set({ status: 'playing', error: null })
     } catch (error) {
       set({ status: 'error', error: error instanceof Error ? error.message : 'Playback failed' })
@@ -756,14 +605,8 @@ export const useMusicStore = create<MusicState>((set, get) => ({
   },
 
   pause: () => {
-    const current = trackById(get().tracks, get().currentTrackId)
     getAudio().pause()
-    if (current?.source === 'youtube') pauseYouTube()
-    if (usesSpotifyConnect(current)) {
-      void api()?.spotify.pause().then((result) => {
-        if (result) applySpotifyResult(result, useMusicStore.setState)
-      })
-    }
+    stopYouTube()
     set({ status: 'paused' })
     void flushListen()
     scheduleSavePlayback(get())
@@ -783,12 +626,6 @@ export const useMusicStore = create<MusicState>((set, get) => ({
   },
 
   previous: async () => {
-    const current = trackById(get().tracks, get().currentTrackId)
-    if (usesSpotifyConnect(current) && get().positionMs > 3000) {
-      await api()?.spotify.seek(0)
-      set({ positionMs: 0 })
-      return
-    }
     const element = getAudio()
     if (element.currentTime > 3) {
       element.currentTime = 0
@@ -803,22 +640,8 @@ export const useMusicStore = create<MusicState>((set, get) => ({
   },
 
   seek: (positionMs) => {
-    const current = trackById(get().tracks, get().currentTrackId)
-    if (!playsFromFile(current)) {
-      if (current?.source === 'youtube') {
-        seekYouTube(positionMs / 1000)
-        set({ positionMs })
-        scheduleSavePlayback(get())
-        return
-      }
-      if (usesSpotifyConnect(current)) {
-        set({ positionMs })
-        void api()?.spotify.seek(positionMs)
-        scheduleSavePlayback(get())
-        return
-      }
-    }
     const element = getAudio()
+    if (!element.currentSrc) return
     element.currentTime = positionMs / 1000
     set({ positionMs })
     scheduleSavePlayback(get())
@@ -826,12 +649,7 @@ export const useMusicStore = create<MusicState>((set, get) => ({
 
   setVolume: (volume) => {
     const next = Math.min(1, Math.max(0, volume))
-    const source = get().currentSource()
     getAudio().volume = next
-    if (source === 'youtube') setYouTubeVolume(next * 100)
-    if (usesSpotifyConnect(trackById(get().tracks, get().currentTrackId))) {
-      void api()?.spotify.setVolume(next)
-    }
     set({ volume: next })
     scheduleSavePlayback(get())
   },
@@ -855,7 +673,10 @@ export const useMusicStore = create<MusicState>((set, get) => ({
   },
 
   bindAudioElement: (element) => {
-    audio = element
+    if (audio && audio !== element) {
+      audio.pause()
+    }
+    audio = prepareAudioElement(element)
     element.volume = get().volume
   },
 
@@ -877,21 +698,20 @@ export const useMusicStore = create<MusicState>((set, get) => ({
   },
 
   handleEnded: async () => {
-    const source = get().currentSource()
     await flushListen()
     if (get().repeat === 'one') {
-      if (source === 'youtube' || source === 'spotify') {
-        await get().playTrack(get().currentTrackId!)
-        return
-      }
-      getAudio().currentTime = 0
-      await getAudio().play()
+      const element = getAudio()
+      element.currentTime = 0
+      prepareAudioElement(element)
+      await resumePlaybackAnalyser()
+      await element.play()
       return
     }
     await get().next()
   },
 
   handleError: () => {
+    if (get().status === 'loading') return
     set({ status: 'error', error: mediaErrorMessage(getAudio()) })
   },
 
@@ -933,7 +753,7 @@ function scheduleSavePlayback(state: MusicState): void {
 }
 
 export function formatTrackDuration(ms: number | undefined): string {
-  if (!ms || ms <= 0) return '—'
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return '—'
   const totalSeconds = Math.floor(ms / 1000)
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds % 60

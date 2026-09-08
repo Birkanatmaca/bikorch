@@ -27,7 +27,6 @@ export function MiniPlayer(): React.JSX.Element {
   const shuffle = useMusicStore((state) => state.shuffle)
   const repeat = useMusicStore((state) => state.repeat)
   const error = useMusicStore((state) => state.error)
-  const spotifyPlayback = useMusicStore((state) => state.spotifyPlayback)
   const togglePlay = useMusicStore((state) => state.togglePlay)
   const next = useMusicStore((state) => state.next)
   const previous = useMusicStore((state) => state.previous)
@@ -38,14 +37,7 @@ export function MiniPlayer(): React.JSX.Element {
   const openExternal = useMusicStore((state) => state.openExternal)
 
   const current = tracks.find((track) => track.id === currentTrackId) ?? null
-  const sourceLabel =
-    current?.source === 'youtube'
-      ? 'YouTube'
-      : current?.source === 'spotify'
-        ? spotifyPlayback?.deviceName
-          ? `Spotify · ${spotifyPlayback.deviceName}`
-          : 'Spotify Connect'
-        : 'Local library'
+  const sourceLabel = current?.source === 'youtube' ? 'YouTube' : 'Local library'
   const progress = durationMs > 0 ? Math.min(100, (positionMs / durationMs) * 100) : 0
   const show = tracks.length > 0 || currentTrackId
 
@@ -65,7 +57,7 @@ export function MiniPlayer(): React.JSX.Element {
             {error ?? current?.artist ?? sourceLabel}
           </div>
           <div className="mt-1 flex items-center gap-2">
-            {current?.sourceUrl && (current.source === 'youtube' || current.source === 'spotify') && (
+            {current?.sourceUrl && current.source === 'youtube' && (
               <button
                 type="button"
                 className="music-icon-btn shrink-0"

@@ -144,7 +144,7 @@ export function PanelContent({ panelId, type, launchMode, accountId }: PanelCont
     case 'player':
       return (
         <Suspense fallback={<PanelLoading />}>
-          <div className="h-full min-h-0">
+          <div className="h-full min-h-0 overflow-hidden">
             <WorkspacePlayerPanel />
           </div>
         </Suspense>

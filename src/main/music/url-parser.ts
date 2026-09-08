@@ -2,9 +2,7 @@ import type { MusicSource } from '@shared/contracts/music'
 import { MUSIC_AUDIO_EXTENSIONS } from '@shared/contracts/music'
 import { extname } from 'path'
 
-export type ParsedMusicLink =
-  | { source: 'youtube'; sourceId: string; sourceUrl: string }
-  | { source: 'spotify'; sourceId: string; sourceUrl: string }
+export type ParsedMusicLink = { source: 'youtube'; sourceId: string; sourceUrl: string }
 
 export function parseMusicUrl(raw: string): ParsedMusicLink | null {
   const trimmed = raw.trim()
@@ -24,24 +22,6 @@ export function parseMusicUrl(raw: string): ParsedMusicLink | null {
       const id = url.searchParams.get('v') ?? url.pathname.match(/^\/(?:embed|shorts|live)\/([^/?]+)/)?.[1]
       if (!id) return null
       return { source: 'youtube', sourceId: id, sourceUrl: `https://www.youtube.com/watch?v=${id}` }
-    }
-
-    if (host === 'open.spotify.com') {
-      const match = url.pathname.match(/^\/(track|episode)\/([a-zA-Z0-9]+)/)
-      if (!match) return null
-      const kind = match[1]
-      const id = match[2]
-      return {
-        source: 'spotify',
-        sourceId: id,
-        sourceUrl: `https://open.spotify.com/${kind}/${id}`
-      }
-    }
-
-    if (host === 'spotify.com' && url.pathname.startsWith('/track/')) {
-      const id = url.pathname.split('/')[2]
-      if (!id) return null
-      return { source: 'spotify', sourceId: id, sourceUrl: `https://open.spotify.com/track/${id}` }
     }
   } catch {
     return null
@@ -68,6 +48,5 @@ export function parseDirectAudioUrl(raw: string): string | null {
 
 export function sourceLabel(source: MusicSource): string {
   if (source === 'youtube') return 'YouTube'
-  if (source === 'spotify') return 'Spotify'
   return 'Local'
 }

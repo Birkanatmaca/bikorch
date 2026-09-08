@@ -89,14 +89,7 @@ import {
   type MusicTrack,
   type RecordPlayRequest,
   type RenamePlaylistRequest,
-  type SpotifyAccessTokenResponse,
-  type SpotifyCatalogTrack,
-  type SpotifyConnectionStatus,
-  type SpotifyDevice,
-  type SpotifyError,
-  type SpotifyPlaybackResult,
-  type SpotifyPlaybackState,
-  type SpotifyTimeRange
+  type YouTubeSearchResult
 } from '@shared/contracts/music'
 import {
   MUSIC_DOWNLOAD_IPC,
@@ -163,35 +156,8 @@ export interface MusicApi {
   recentlyPlayed: () => Promise<MusicTrack[]>
   addLink: (url: string) => Promise<AddLinkResult>
   openExternal: (url: string) => Promise<{ ok: true } | { ok: false; error: string }>
-  spotify: {
-    status: () => Promise<SpotifyConnectionStatus>
-    setClientId: (clientId: string) => Promise<SpotifyConnectionStatus>
-    connect: () => Promise<{ ok: true } | { ok: false; error: string }>
-    disconnect: () => Promise<{ ok: true }>
-    accessToken: () => Promise<SpotifyAccessTokenResponse>
-    topTracks: (request?: {
-      timeRange?: SpotifyTimeRange
-      limit?: number
-    }) => Promise<SpotifyCatalogTrack[]>
-    importTop: (request?: {
-      timeRange?: SpotifyTimeRange
-      limit?: number
-    }) => Promise<{ imported: number; skipped: number; tracks: MusicTrack[] }>
-    importOne: (
-      sourceId: string
-    ) => Promise<{ ok: true; track: MusicTrack; duplicate: boolean } | { ok: false; error: string }>
-    devices: () => Promise<{ ok: true; devices: SpotifyDevice[] } | { ok: false; error: SpotifyError }>
-    selectDevice: (deviceId: string | null) => Promise<{ ok: true; deviceId: string | null }>
-    play: (request: { sourceId: string; deviceId?: string }) => Promise<SpotifyPlaybackResult>
-    pause: () => Promise<SpotifyPlaybackResult>
-    resume: () => Promise<SpotifyPlaybackResult>
-    next: () => Promise<SpotifyPlaybackResult>
-    previous: () => Promise<SpotifyPlaybackResult>
-    seek: (positionMs: number) => Promise<SpotifyPlaybackResult>
-    setVolume: (volume: number) => Promise<SpotifyPlaybackResult>
-    playbackState: () => Promise<
-      { ok: true; state: SpotifyPlaybackState } | { ok: false; error: SpotifyError }
-    >
+  youtube: {
+    search: (query: string) => Promise<YouTubeSearchResult>
   }
   downloads: {
     engineStatus: () => Promise<DownloadEngineStatus>
@@ -470,25 +436,8 @@ const musicApi: MusicApi = {
   recentlyPlayed: () => ipcRenderer.invoke('music:recently-played'),
   addLink: (url) => ipcRenderer.invoke(MUSIC_IPC.ADD_LINK, url),
   openExternal: (url) => ipcRenderer.invoke(MUSIC_IPC.OPEN_EXTERNAL, url),
-  spotify: {
-    status: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_STATUS),
-    setClientId: (clientId) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_SET_CLIENT_ID, clientId),
-    connect: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_CONNECT),
-    disconnect: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_DISCONNECT),
-    accessToken: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_ACCESS_TOKEN),
-    topTracks: (request) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_TOP_TRACKS, request ?? {}),
-    importTop: (request) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_IMPORT_TOP, request ?? {}),
-    importOne: (sourceId) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_IMPORT_ONE, { sourceId }),
-    devices: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_DEVICES),
-    selectDevice: (deviceId) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_SELECT_DEVICE, { deviceId }),
-    play: (request) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_PLAY, request),
-    pause: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_PAUSE),
-    resume: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_RESUME),
-    next: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_NEXT),
-    previous: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_PREVIOUS),
-    seek: (positionMs) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_SEEK, { positionMs }),
-    setVolume: (volume) => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_VOLUME, { volume }),
-    playbackState: () => ipcRenderer.invoke(MUSIC_IPC.SPOTIFY_PLAYBACK_STATE)
+  youtube: {
+    search: (query) => ipcRenderer.invoke(MUSIC_IPC.YOUTUBE_SEARCH, { query })
   },
   downloads: {
     engineStatus: () => ipcRenderer.invoke(MUSIC_DOWNLOAD_IPC.ENGINE_STATUS),

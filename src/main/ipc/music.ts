@@ -9,35 +9,19 @@ import {
   ensurePlayableTrack,
   readPlaybackMedia,
   clearQueue,
-  connectSpotify,
   createPlaylist,
   deletePlaylist,
-  disconnectSpotify,
   getPlaybackSnapshot,
   getPlaylistTracks,
   getQueue,
   getSettings,
-  getSpotifyAccessToken,
   importPaths,
-  importSpotifyTopTracks,
-  importSpotifyTrackById,
-  getSpotifyPlaybackState,
-  listSpotifyDevices,
-  nextSpotifyConnect,
-  pauseSpotifyConnect,
-  playSpotifyConnect,
-  previousSpotifyConnect,
-  resumeSpotifyConnect,
-  seekSpotifyConnect,
-  selectSpotifyDevice,
-  setSpotifyConnectVolume,
   librarySummary,
   listFavorites,
   listHistory,
   listLibrary,
   listPlaylists,
   listRecentlyPlayed,
-  listSpotifyTopTracks,
   openExternalUrl,
   recordListen,
   recordPlay,
@@ -49,9 +33,8 @@ import {
   reorderQueue,
   savePlaybackSnapshot,
   searchLibrary,
+  searchYouTubeVideos,
   setQueue,
-  setSpotifyClientId,
-  spotifyStatusForRenderer,
   toggleFavorite,
   updateSettings,
   updateTrackDuration
@@ -69,13 +52,7 @@ import {
   parseReorderQueue,
   parseSearchQuery,
   parseSettingsUpdate,
-  parseSpotifyClientId,
-  parseSpotifyDeviceId,
-  parseSpotifyPlayRequest,
-  parseSpotifySeekRequest,
-  parseSpotifySourceId,
-  parseSpotifyTopRequest,
-  parseSpotifyVolumeRequest,
+  parseYouTubeSearchQuery,
   parseStorageMode,
   parseEnsurePlayable,
   parseTrackId,
@@ -323,63 +300,12 @@ export function registerMusicHandlers(): void {
     return openExternalUrl(url)
   })
 
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_STATUS, () => spotifyStatusForRenderer())
-
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_SET_CLIENT_ID, (_event, payload: unknown) => {
-    const clientId = parseSpotifyClientId(payload)
-    if (!clientId) throw new Error('Invalid Spotify Client ID')
-    setSpotifyClientId(clientId)
-    return spotifyStatusForRenderer()
+  ipcMain.handle(MUSIC_IPC.YOUTUBE_SEARCH, async (event, payload: unknown) => {
+    assertTrustedSender(event)
+    const query = parseYouTubeSearchQuery(payload)
+    if (!query) throw new Error('Invalid YouTube search')
+    return searchYouTubeVideos(query)
   })
-
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_CONNECT, () => connectSpotify())
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_DISCONNECT, () => disconnectSpotify())
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_ACCESS_TOKEN, () => getSpotifyAccessToken())
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_TOP_TRACKS, async (_event, payload: unknown) => {
-    const request = parseSpotifyTopRequest(payload)
-    return listSpotifyTopTracks(request.timeRange, request.limit)
-  })
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_IMPORT_TOP, async (_event, payload: unknown) => {
-    const request = parseSpotifyTopRequest(payload)
-    return importSpotifyTopTracks(request.timeRange, request.limit)
-  })
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_IMPORT_ONE, async (_event, payload: unknown) => {
-    const sourceId = parseSpotifySourceId(payload)
-    if (!sourceId) throw new Error('Invalid Spotify track')
-    return importSpotifyTrackById(sourceId)
-  })
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_DEVICES, () => listSpotifyDevices())
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_SELECT_DEVICE, (_event, payload: unknown) => {
-    if (
-      payload === null ||
-      (typeof payload === 'object' && payload !== null && (payload as { deviceId?: unknown }).deviceId === null)
-    ) {
-      return selectSpotifyDevice(null)
-    }
-    const deviceId = parseSpotifyDeviceId(payload)
-    if (!deviceId) throw new Error('Invalid Spotify device')
-    return selectSpotifyDevice(deviceId)
-  })
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_PLAY, async (_event, payload: unknown) => {
-    const request = parseSpotifyPlayRequest(payload)
-    if (!request) throw new Error('Invalid Spotify track')
-    return playSpotifyConnect(request.sourceId, request.deviceId)
-  })
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_PAUSE, () => pauseSpotifyConnect())
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_RESUME, () => resumeSpotifyConnect())
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_NEXT, () => nextSpotifyConnect())
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_PREVIOUS, () => previousSpotifyConnect())
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_SEEK, async (_event, payload: unknown) => {
-    const positionMs = parseSpotifySeekRequest(payload)
-    if (positionMs === null) throw new Error('Invalid seek position')
-    return seekSpotifyConnect(positionMs)
-  })
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_VOLUME, async (_event, payload: unknown) => {
-    const volume = parseSpotifyVolumeRequest(payload)
-    if (volume === null) throw new Error('Invalid volume')
-    return setSpotifyConnectVolume(volume)
-  })
-  ipcMain.handle(MUSIC_IPC.SPOTIFY_PLAYBACK_STATE, () => getSpotifyPlaybackState())
 
   ipcMain.handle('music:recently-played', () => listRecentlyPlayed())
 

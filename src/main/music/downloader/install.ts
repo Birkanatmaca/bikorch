@@ -1,6 +1,6 @@
 import { execFile } from 'child_process'
 import { createWriteStream, existsSync } from 'fs'
-import { copyFile, mkdir, readdir, readFile, unlink } from 'fs/promises'
+import { chmod, copyFile, mkdir, readdir, readFile, unlink } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { Readable } from 'stream'
@@ -8,9 +8,14 @@ import { pipeline } from 'stream/promises'
 import { promisify } from 'util'
 import { net } from 'electron'
 import { detectDownloadEngine, managedBinDir } from './binaries'
-import { FFMPEG_WINDOWS_ZIP_URL, YTDLP_WINDOWS_URL } from './official-urls'
+import {
+  FFMPEG_WINDOWS_ZIP_URL,
+  YTDLP_WINDOWS_URL,
+  ytDlpBinaryName,
+  ytDlpOfficialUrl
+} from './official-urls'
 
-export { FFMPEG_WINDOWS_ZIP_URL, YTDLP_WINDOWS_URL }
+export { FFMPEG_WINDOWS_ZIP_URL, YTDLP_WINDOWS_URL, ytDlpBinaryName, ytDlpOfficialUrl }
 
 const execFileAsync = promisify(execFile)
 
@@ -26,6 +31,17 @@ export interface EngineInstallResult {
 
 function isWindowsPe(buffer: Buffer): boolean {
   return buffer.length > 2 && buffer[0] === 0x4d && buffer[1] === 0x5a
+}
+
+function isUnixBinary(buffer: Buffer): boolean {
+  if (buffer.length < 4) return false
+  if (buffer[0] === 0x23 && buffer[1] === 0x21) return true
+  if (buffer[0] === 0xcf && buffer[1] === 0xfa) return true
+  if (buffer[0] === 0xfe && buffer[1] === 0xed) return true
+  if (buffer[0] === 0xca && buffer[1] === 0xfe) return true
+  if (buffer[0] === 0xbe && buffer[1] === 0xba) return true
+  if (buffer[0] === 0x7f && buffer[1] === 0x45 && buffer[2] === 0x4c && buffer[3] === 0x46) return true
+  return false
 }
 
 async function downloadOfficialFileTo(url: string, destPath: string, maxBytes: number): Promise<void> {
@@ -108,13 +124,15 @@ async function extractFfmpeg(zipPath: string, destDir: string): Promise<void> {
 }
 
 async function installYtdlp(destDir: string): Promise<void> {
-  const dest = join(destDir, 'yt-dlp.exe')
-  await downloadOfficialFileTo(YTDLP_WINDOWS_URL, dest, YTDLP_MAX_BYTES)
+  const dest = join(destDir, ytDlpBinaryName())
+  await downloadOfficialFileTo(ytDlpOfficialUrl(), dest, YTDLP_MAX_BYTES)
   const header = await readFile(dest)
-  if (!isWindowsPe(header.subarray(0, 2))) {
+  const valid = process.platform === 'win32' ? isWindowsPe(header.subarray(0, 2)) : isUnixBinary(header)
+  if (!valid) {
     await unlink(dest)
-    throw new Error('yt-dlp download was not a Windows executable')
+    throw new Error('yt-dlp download was not a valid executable')
   }
+  if (process.platform !== 'win32') await chmod(dest, 0o755)
 }
 
 async function installFfmpeg(destDir: string): Promise<void> {
@@ -134,7 +152,7 @@ export async function installOfficialEngine(): Promise<EngineInstallResult> {
 
   const tasks: Promise<void>[] = []
   if (!current.ytDlp.available) tasks.push(installYtdlp(destDir))
-  if (!current.ffmpeg.available) tasks.push(installFfmpeg(destDir))
+  if (process.platform === 'win32' && !current.ffmpeg.available) tasks.push(installFfmpeg(destDir))
 
   if (tasks.length === 0) {
     return { ok: true, engine: current }

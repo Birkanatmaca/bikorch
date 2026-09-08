@@ -85,7 +85,7 @@ export function recordRendererConsole(
   const logLevel: AppLogLevel = level >= 3 ? 'error' : level === 2 ? 'warn' : level === 0 ? 'debug' : 'info'
   const source = sourceId ? `renderer · ${basename(sourceId)}` : 'renderer'
   const entry = append(logLevel, message, source)
-  if (message.includes('[spotify]') || logLevel === 'error' || logLevel === 'warn') {
+  if (logLevel === 'error' || logLevel === 'warn') {
     process.stdout.write(`[${entry.level}] ${entry.message}\n`)
   }
   return entry

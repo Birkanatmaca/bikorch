@@ -26,11 +26,13 @@ import {
 import {
   applyCursorCredentialsForAccount,
   captureCursorCredentialsForAccount,
+  findConflictingCursorAccount,
   getCursorSessionAccount,
   hasStoredCursorCredentials,
   markCursorSessionAccount,
   readCursorKeychainTokens,
   readStoredCursorConfigIdentity,
+  readStoredCursorTokens,
   removeStoredCursorCredentials
 } from './cursor-credential'
 import { withAntigravityCredentialLock, withCursorCredentialLock } from './credential-lock'
@@ -189,30 +191,6 @@ async function captureAntigravity(request: AuthProfileRequest): Promise<AuthProf
   }
 }
 
-function cursorEmailTakenByOtherAccount(accountId: string, email: string): boolean {
-  const target = email.trim().toLowerCase()
-  if (!target) return false
-  const kindRoot = join(profilesRoot(), 'cursor')
-  if (!existsSync(kindRoot)) return false
-
-  let entries
-  try {
-    entries = readdirSync(kindRoot, { withFileTypes: true })
-  } catch {
-    return false
-  }
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    const metadata = readJson(join(kindRoot, entry.name, 'profile.json'))
-    const otherId = asString(metadata?.accountId)
-    if (!otherId || otherId === accountId) continue
-    const otherEmail = asString(metadata?.email)?.toLowerCase()
-    if (otherEmail === target) return true
-  }
-  return false
-}
-
 async function captureCursor(request: AuthProfileRequest): Promise<AuthProfileResult> {
   if (!safeStorage.isEncryptionAvailable()) {
     return {
@@ -226,14 +204,19 @@ async function captureCursor(request: AuthProfileRequest): Promise<AuthProfileRe
   })
   ensureProfileRoot(request.kind, request.accountId)
   const identity = readStoredCursorConfigIdentity(request.accountId)
-  const email = request.email || identity?.email
-  if (email && cursorEmailTakenByOtherAccount(request.accountId, email)) {
+  const email = identity?.email || request.email
+  const conflict = findConflictingCursorAccount(
+    request.accountId,
+    readStoredCursorTokens(request.accountId),
+    email
+  )
+  if (conflict) {
     removeStoredCursorCredentials(request.accountId)
+    const savedAs = conflict.email ? `${conflict.name} (${conflict.email})` : conflict.name
     return {
       ok: false,
       ready: false,
-      error:
-        'This Cursor account is already saved. Sign in with a different account in the browser.'
+      error: `This Cursor login is already saved as ${savedAs}. Open that account instead of adding it again.`
     }
   }
   if (!captured) return { ok: true, ready: false }
@@ -414,14 +397,10 @@ export function inspectAuthProfile(request: AuthProfileRequest): AuthProfileResu
     } else if (request.kind === 'cursor') {
       ready = hasStoredCursorCredentials(request.accountId)
       const configIdentity = readStoredCursorConfigIdentity(request.accountId)
-      identity =
-        readMetadataIdentity(request.kind, request.accountId) ??
-        (configIdentity
-          ? {
-              email: configIdentity.email ?? '',
-              name: configIdentity.name ?? configIdentity.email ?? ''
-            }
-          : undefined)
+      const metadata = readMetadataIdentity(request.kind, request.accountId)
+      const email = configIdentity?.email || metadata?.email || ''
+      const name = configIdentity?.name || metadata?.name || email
+      identity = email || name ? { email, name } : undefined
     } else if (request.kind === 'codex') {
       const auth = readJson(join(root, 'auth.json'))
       const tokens = asRecord(auth?.tokens)

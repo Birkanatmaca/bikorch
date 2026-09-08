@@ -20,7 +20,13 @@ function text(value: unknown): string | undefined {
 }
 
 function integer(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : undefined
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.floor(value)
+  if (typeof value === 'bigint') return Number(value)
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return Math.floor(parsed)
+  }
+  return undefined
 }
 
 function bool(value: unknown, fallback: boolean): boolean {
@@ -36,10 +42,19 @@ function parseJson<T>(value: unknown, fallback: T): T {
   }
 }
 
+/** Map persisted rows onto the public sources. Leftover Spotify stream refs are hidden, not deleted. */
+function normalizeMusicSource(raw: string | undefined, filePath?: string): MusicSource | null {
+  if (raw === 'youtube') return 'youtube'
+  if (raw === 'local') return 'local'
+  if (raw === 'spotify') return filePath ? 'local' : null
+  return raw ? 'local' : null
+}
+
 function rowToTrack(row: Row): MusicTrack | null {
   const id = text(row['id'])
   const title = text(row['title'])
-  const source = text(row['source']) as MusicSource | undefined
+  const filePath = text(row['file_path'])
+  const source = normalizeMusicSource(text(row['source']), filePath)
   const addedAt = integer(row['added_at'])
   if (!id || !title || !source || addedAt === undefined) return null
   return {
@@ -48,7 +63,7 @@ function rowToTrack(row: Row): MusicTrack | null {
     ...(text(row['artist']) ? { artist: text(row['artist']) } : {}),
     ...(text(row['album']) ? { album: text(row['album']) } : {}),
     ...(integer(row['duration_ms']) !== undefined ? { durationMs: integer(row['duration_ms']) } : {}),
-    ...(text(row['file_path']) ? { filePath: text(row['file_path']) } : {}),
+    ...(filePath ? { filePath } : {}),
     ...(text(row['artwork_path']) ? { artworkPath: text(row['artwork_path']) } : {}),
     source,
     ...(text(row['source_id']) ? { sourceId: text(row['source_id']) } : {}),
@@ -400,7 +415,7 @@ export class MusicStore {
         startedAt: integer(row['started_at']) ?? 0,
         ...(integer(row['ended_at']) !== undefined ? { endedAt: integer(row['ended_at']) } : {}),
         ...(integer(row['listened_ms']) !== undefined ? { listenedMs: integer(row['listened_ms']) } : {}),
-        source: (text(row['source']) ?? 'local') as MusicSource,
+        source: normalizeMusicSource(text(row['source'])) ?? 'local',
         ...(text(row['project_id']) ? { projectId: text(row['project_id']) } : {})
       })
     }
@@ -460,11 +475,7 @@ export function readMusicSettings(): MusicSettings {
     associateWithProjects: typeof parsed.associateWithProjects === 'boolean' ? parsed.associateWithProjects : defaults.associateWithProjects,
     useInDeveloperInsights: typeof parsed.useInDeveloperInsights === 'boolean' ? parsed.useInDeveloperInsights : defaults.useInDeveloperInsights,
     libraryMode: parsed.libraryMode === 'managed' ? 'managed' : defaults.libraryMode,
-    persistQueue: typeof parsed.persistQueue === 'boolean' ? parsed.persistQueue : defaults.persistQueue,
-    spotifyDeviceId:
-      typeof parsed.spotifyDeviceId === 'string' && parsed.spotifyDeviceId.trim()
-        ? parsed.spotifyDeviceId.trim()
-        : null
+    persistQueue: typeof parsed.persistQueue === 'boolean' ? parsed.persistQueue : defaults.persistQueue
   }
 }
 

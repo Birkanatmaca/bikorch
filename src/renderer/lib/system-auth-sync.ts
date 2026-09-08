@@ -24,6 +24,7 @@ function findMatchingAccount(
     return kindAccounts.find((account) => normalizeEmail(account.email) === targetEmail)
   }
 
+  if (discovery.kind === 'cursor' || discovery.kind === 'antigravity') return undefined
   return kindAccounts[0]
 }
 
@@ -71,6 +72,12 @@ export async function syncDiscoveredSystemAccounts(): Promise<void> {
   const suppressed = useAiAccountsStore.getState().suppressSystemImportByKind
   for (const discovery of discoveries) {
     if (!discovery.ready || suppressed[discovery.kind]) continue
+    if (discovery.kind === 'cursor' || discovery.kind === 'antigravity') {
+      const readyCount = useAiAccountsStore
+        .getState()
+        .accounts.filter((account) => account.kind === discovery.kind && account.profileReady).length
+      if (readyCount > 0) continue
+    }
     await importDiscovery(discovery)
   }
 }

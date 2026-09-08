@@ -25,7 +25,12 @@ import {
   hasStoredAntigravityCredentials
 } from '../accounts/antigravity-credential'
 import {
-  cursorCredentialsSupported
+  applyCursorCredentialsForAccount,
+  cursorCredentialsSupported,
+  getCursorSessionAccount,
+  hasStoredCursorCredentials,
+  readCursorKeychainTokens,
+  restoreCursorKeychainTokens
 } from '../accounts/cursor-credential'
 import {
   withAntigravityCredentialLock,
@@ -934,13 +939,32 @@ async function readProviderUsage(
 async function readCursorAccountUsage(
   requests: UsageAccountRequest[]
 ): Promise<CliUsageInfo[]> {
-  const providers: CliUsageInfo[] = []
-  for (const request of requests) {
-    providers.push(
-      await readProviderUsage('cursor', { accountId: request.accountId }, false, true)
-    )
-  }
-  return providers
+  return withCursorUsageLock(async () => {
+    const liveId = getCursorSessionAccount()
+    const previousTokens = await readCursorKeychainTokens().catch(() => null)
+    const providers: CliUsageInfo[] = []
+
+    try {
+      for (const request of requests) {
+        providers.push(
+          await readProviderUsage('cursor', { accountId: request.accountId }, false, true)
+        )
+        await delay(400)
+      }
+    } finally {
+      try {
+        if (liveId && hasStoredCursorCredentials(liveId)) {
+          await applyCursorCredentialsForAccount(liveId)
+        } else {
+          await restoreCursorKeychainTokens(previousTokens)
+        }
+      } catch (error) {
+        console.error('Could not restore Cursor credentials after usage check:', error)
+      }
+    }
+
+    return providers
+  })
 }
 
 async function readAntigravityAccountUsage(

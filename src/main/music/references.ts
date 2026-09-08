@@ -9,7 +9,7 @@ export async function addStreamingLink(url: string): Promise<AddLinkResult> {
   if (!parsed) {
     return {
       ok: false,
-      error: 'Unsupported streaming link. Use a YouTube or Spotify track URL.'
+      error: 'Unsupported streaming link. Use a YouTube track URL.'
     }
   }
 

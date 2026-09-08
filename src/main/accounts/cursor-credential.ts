@@ -13,6 +13,13 @@ import {
 import { homedir } from 'os'
 import { dirname, join } from 'path'
 
+import {
+  identityFromCursorJwt,
+  looksLikeEmail,
+  cursorIdentitiesMatch,
+  type CursorTokenIdentity
+} from './cursor-identity'
+
 export interface CursorKeychainTokens {
   accessToken: string
   refreshToken: string
@@ -22,6 +29,8 @@ interface StoredCursorSession {
   accessToken?: string
   refreshToken?: string
   signedIn?: boolean
+  email?: string
+  name?: string
 }
 
 function cursorProfileRoot(accountId: string): string {
@@ -65,23 +74,8 @@ function pickString(record: Record<string, unknown>, keys: string[]): string | u
   return undefined
 }
 
-function identityFromJwt(token: string): { email?: string; name?: string } | undefined {
-  const encoded = token.split('.')[1]
-  if (!encoded) return undefined
-  try {
-    const normalized = encoded.replace(/-/g, '+').replace(/_/g, '/')
-    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
-    const payload = asRecord(JSON.parse(Buffer.from(padded, 'base64').toString('utf8')))
-    if (!payload) return undefined
-    const email =
-      pickString(payload, ['email', 'email_address', 'preferred_username']) ??
-      (asString(payload.sub)?.includes('@') ? asString(payload.sub) : undefined)
-    const name = pickString(payload, ['name', 'displayName', 'given_name'])
-    if (!email && !name) return undefined
-    return { ...(email ? { email } : {}), ...(name ? { name } : {}) }
-  } catch {
-    return undefined
-  }
+function identityFromJwt(token: string): CursorTokenIdentity | undefined {
+  return identityFromCursorJwt(token)
 }
 
 function mergeIdentity(
@@ -106,14 +100,14 @@ function hasCursorAuthInfo(value: unknown): boolean {
 function identityFromAuthInfo(
   auth: Record<string, unknown>
 ): { email?: string; name?: string } | undefined {
-  const email = pickString(auth, [
+  const emailRaw = pickString(auth, [
     'email',
     'emailAddress',
     'userEmail',
-    'accountEmail',
-    'preferred_username'
+    'accountEmail'
   ])
-  const name = pickString(auth, ['displayName', 'name', 'userName', 'username'])
+  const email = looksLikeEmail(emailRaw) ? emailRaw : undefined
+  const name = pickString(auth, ['displayName', 'name', 'userName', 'username', 'preferred_username'])
   const token =
     pickString(auth, ['accessToken', 'access_token', 'token', 'idToken', 'id_token']) ?? ''
   return mergeIdentity(
@@ -185,10 +179,7 @@ function readProfileCursorConfigTokens(accountId: string): CursorKeychainTokens 
 }
 
 export function hasCursorAuthInfoForAccount(accountId: string): boolean {
-  return (
-    hasCursorAuthInfo(readCursorConfigFile(profileCursorConfigPath(accountId))?.authInfo) ||
-    hasSystemCursorAuthInfo()
-  )
+  return hasCursorAuthInfo(readCursorConfigFile(profileCursorConfigPath(accountId))?.authInfo)
 }
 
 function missingCredential(action: CredentialAction): CredentialResponse {
@@ -511,82 +502,152 @@ function snapshotCursorConfig(accountId: string): void {
 
 function restoreCursorConfig(accountId: string): void {
   const snapshot = snapshotConfigPath(accountId)
+  const profileConfig = profileCursorConfigPath(accountId)
   const legacy = join(cursorProfileRoot(accountId), 'config', 'cli-config.json')
-  const source = existsSync(snapshot) ? snapshot : legacy
+  const source = existsSync(snapshot)
+    ? snapshot
+    : existsSync(profileConfig)
+      ? profileConfig
+      : legacy
   if (!existsSync(source)) return
-  copyIfPresent(source, profileCursorConfigPath(accountId))
+  copyIfPresent(source, profileConfig)
+  copyIfPresent(source, systemCursorConfigPath())
 }
 
 function tokensEqual(left: CursorKeychainTokens, right: CursorKeychainTokens): boolean {
   return left.accessToken === right.accessToken && left.refreshToken === right.refreshToken
 }
 
-function tokensOwnedByOtherAccount(accountId: string, tokens: CursorKeychainTokens): boolean {
+function metadataNameAndEmail(
+  metadata: { accountId?: string; email?: string; name?: string } | null,
+  identity: CursorTokenIdentity | undefined
+): { email: string; name: string } {
+  const email = identity?.email || asString(metadata?.email) || ''
+  const name = identity?.name || asString(metadata?.name) || email || 'Cursor CLI account'
+  return { email, name }
+}
+
+export interface CursorAccountConflict {
+  accountId: string
+  email: string
+  name: string
+}
+
+export function readStoredCursorTokens(accountId: string): CursorKeychainTokens | null {
+  return readStoredTokens(cursorProfileRoot(accountId))
+}
+
+export function findConflictingCursorAccount(
+  accountId: string,
+  tokens: CursorKeychainTokens | null,
+  email?: string
+): CursorAccountConflict | null {
   const kindRoot = join(app.getPath('userData'), 'cli-profiles', 'cursor')
-  if (!existsSync(kindRoot)) return false
+  if (!existsSync(kindRoot)) return null
 
   let entries
   try {
     entries = readdirSync(kindRoot, { withFileTypes: true })
   } catch {
-    return false
+    return null
   }
+
+  const incoming = tokens
+    ? identityFromJwt(tokens.accessToken)
+    : looksLikeEmail(email)
+      ? { email }
+      : undefined
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
-    const otherMeta = join(kindRoot, entry.name, 'profile.json')
-    const otherTokens = readStoredTokens(join(kindRoot, entry.name))
-    if (!otherTokens) continue
+    const root = join(kindRoot, entry.name)
+    let metadata: { accountId?: string; email?: string; name?: string } | null = null
     try {
-      const metadata = JSON.parse(readFileSync(otherMeta, 'utf8')) as { accountId?: string }
-      if (metadata.accountId === accountId) continue
+      metadata = JSON.parse(readFileSync(join(root, 'profile.json'), 'utf8')) as {
+        accountId?: string
+        email?: string
+        name?: string
+      }
     } catch {
-      continue
+      metadata = null
     }
-    if (tokensEqual(otherTokens, tokens)) return true
+    const otherId = asString(metadata?.accountId)
+    if (!otherId || otherId === accountId) continue
+
+    const otherTokens = readStoredTokens(root)
+    if (tokens && otherTokens && tokensEqual(tokens, otherTokens)) {
+      const identity = identityFromJwt(otherTokens.accessToken)
+      return { accountId: otherId, ...metadataNameAndEmail(metadata, identity) }
+    }
+
+    const otherIdentity = otherTokens
+      ? identityFromJwt(otherTokens.accessToken)
+      : looksLikeEmail(asString(metadata?.email))
+        ? { email: asString(metadata?.email) }
+        : undefined
+
+    if (cursorIdentitiesMatch(incoming, otherIdentity)) {
+      return { accountId: otherId, ...metadataNameAndEmail(metadata, otherIdentity) }
+    }
   }
-  return false
+  return null
+}
+
+function tokensOwnedByOtherAccount(accountId: string, tokens: CursorKeychainTokens): boolean {
+  return findConflictingCursorAccount(accountId, tokens) !== null
 }
 
 export function hasStoredCursorCredentials(accountId: string): boolean {
-  const session = readStoredSession(cursorProfileRoot(accountId))
-  return Boolean(session?.signedIn) || sessionTokens(session) !== null
+  return sessionTokens(readStoredSession(cursorProfileRoot(accountId))) !== null
 }
 
 export async function captureCursorCredentialsForAccount(
   accountId: string,
   options?: { signedInHint?: boolean }
 ): Promise<boolean> {
-  const keychainTokens = await readCursorKeychainTokens().catch(() => null)
-  const configTokens = readProfileCursorConfigTokens(accountId) ?? readSystemCursorConfigTokens()
-  const tokens = keychainTokens ?? configTokens
-  if (tokens && tokensOwnedByOtherAccount(accountId, tokens)) return false
+  const readTokens = async (): Promise<CursorKeychainTokens | null> => {
+    const keychainTokens = await readCursorKeychainTokens().catch(() => null)
+    const profileTokens = readProfileCursorConfigTokens(accountId)
+    const systemTokens = readSystemCursorConfigTokens()
+    return keychainTokens ?? profileTokens ?? systemTokens
+  }
 
-  const signedIn = Boolean(
-    tokens ||
-      hasCursorAuthInfoForAccount(accountId) ||
-      readStoredCursorConfigIdentity(accountId) ||
-      options?.signedInHint
+  let tokens = await readTokens()
+  if (tokens && tokensOwnedByOtherAccount(accountId, tokens) && options?.signedInHint) {
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    tokens = await readTokens()
+  }
+  if (!tokens) return false
+  if (tokensOwnedByOtherAccount(accountId, tokens)) return false
+
+  const keychainTokens = await readCursorKeychainTokens().catch(() => null)
+  const profileTokens = readProfileCursorConfigTokens(accountId)
+  const identity = mergeIdentity(
+    identityFromJwt(tokens.accessToken),
+    readCursorConfigIdentityFromPath(profileCursorConfigPath(accountId)),
+    keychainTokens || profileTokens ? undefined : readSystemCursorConfigIdentity()
   )
-  if (!signedIn) return false
+  if (!identity?.email && !options?.signedInHint) return false
 
   snapshotCursorConfig(accountId)
   writeStoredSession(cursorProfileRoot(accountId), {
-    ...(tokens ?? {}),
-    signedIn: true
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    signedIn: true,
+    ...(identity?.email ? { email: identity.email } : {}),
+    ...(identity?.name ? { name: identity.name } : {})
   })
   return true
 }
 
 export async function applyCursorCredentialsForAccount(accountId: string): Promise<boolean> {
   const session = readStoredSession(cursorProfileRoot(accountId))
-  if (!session?.signedIn && !sessionTokens(session)) return false
+  const tokens = sessionTokens(session)
+  if (!tokens) return false
   restoreCursorConfig(accountId)
-  return (
-    existsSync(profileCursorConfigPath(accountId)) ||
-    session?.signedIn === true ||
-    sessionTokens(session) !== null
-  )
+  await writeCursorKeychainTokens(tokens)
+  markCursorSessionAccount(accountId)
+  return true
 }
 
 export function removeStoredCursorCredentials(accountId: string): void {
@@ -600,11 +661,14 @@ export function readStoredCursorConfigIdentity(
   const snapshot = existsSync(snapshotConfigPath(accountId))
     ? snapshotConfigPath(accountId)
     : join(cursorProfileRoot(accountId), 'config', 'cli-config.json')
-  const storedTokens = readStoredTokens(cursorProfileRoot(accountId))
+  const session = readStoredSession(cursorProfileRoot(accountId))
+  const storedTokens = sessionTokens(session)
   return mergeIdentity(
+    session?.email || session?.name
+      ? { ...(session.email ? { email: session.email } : {}), ...(session.name ? { name: session.name } : {}) }
+      : undefined,
     readCursorConfigIdentityFromPath(profileCursorConfigPath(accountId)),
     readCursorConfigIdentityFromPath(snapshot),
-    readSystemCursorConfigIdentity(),
     storedTokens ? identityFromJwt(storedTokens.accessToken) : undefined
   )
 }

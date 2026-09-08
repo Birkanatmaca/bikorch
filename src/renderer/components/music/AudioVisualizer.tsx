@@ -3,8 +3,7 @@ import { getVisualizerBarCount, readVisualizerState, resumePlaybackAnalyser } fr
 
 const ROWS = 16
 
-function segmentColor(rowFromTop: number, lit: boolean): string {
-  const band = rowFromTop / (ROWS - 1)
+function segmentColor(band: number, lit: boolean): string {
   if (!lit) return 'rgb(18 22 16 / 0.92)'
   if (band < 0.18) return '#ff3b30'
   if (band < 0.42) return '#f5c518'
@@ -19,33 +18,34 @@ function drawPioneer(
   peaks: number[]
 ): void {
   ctx.clearRect(0, 0, width, height)
-  ctx.fillStyle = '#070807'
+  ctx.fillStyle = '#0a0c10'
   ctx.fillRect(0, 0, width, height)
 
   const cols = getVisualizerBarCount()
-  const gapX = Math.max(2, width * 0.012)
-  const gapY = Math.max(2, height * 0.018)
+  const rows = height < 40 ? 8 : height < 64 ? 12 : ROWS
+  const gapX = Math.max(1, width * 0.012)
+  const gapY = Math.max(1, height * 0.018)
   const barWidth = (width - gapX * (cols + 1)) / cols
-  const segHeight = (height - gapY * (ROWS + 1)) / ROWS
+  const segHeight = (height - gapY * (rows + 1)) / rows
 
   for (let col = 0; col < cols; col += 1) {
     const level = Math.max(0, Math.min(1, levels[col] ?? 0))
     const peak = Math.max(0, Math.min(1, peaks[col] ?? 0))
-    const litRows = Math.round(level * ROWS)
-    const peakRow = Math.max(0, ROWS - 1 - Math.round(peak * (ROWS - 1)))
+    const litRows = Math.round(level * rows)
+    const peakRow = Math.max(0, rows - 1 - Math.round(peak * (rows - 1)))
     const x = gapX + col * (barWidth + gapX)
 
-    for (let row = 0; row < ROWS; row += 1) {
+    for (let row = 0; row < rows; row += 1) {
       const y = gapY + row * (segHeight + gapY)
-      const fromBottom = ROWS - row
+      const fromBottom = rows - row
       const lit = fromBottom <= litRows
-      ctx.fillStyle = segmentColor(row, lit)
-      ctx.fillRect(Math.round(x), Math.round(y), Math.max(2, Math.round(barWidth)), Math.max(2, Math.round(segHeight)))
+      ctx.fillStyle = segmentColor(row / Math.max(1, rows - 1), lit)
+      ctx.fillRect(Math.round(x), Math.round(y), Math.max(2, Math.round(barWidth)), Math.max(1, Math.round(segHeight)))
     }
 
     const peakY = gapY + peakRow * (segHeight + gapY)
-    ctx.fillStyle = segmentColor(peakRow, true)
-    ctx.fillRect(Math.round(x), Math.round(peakY), Math.max(2, Math.round(barWidth)), Math.max(2, Math.round(segHeight)))
+    ctx.fillStyle = segmentColor(peakRow / Math.max(1, rows - 1), true)
+    ctx.fillRect(Math.round(x), Math.round(peakY), Math.max(2, Math.round(barWidth)), Math.max(1, Math.round(segHeight)))
   }
 }
 

@@ -35,10 +35,15 @@ export function registerMusicProtocol(): void {
     try {
       const resource = parseMusicResource(request.url)
       if (!resource) return new Response('Not found', { status: 404 })
-      const filePath =
-        resource.kind === 'art' ? resolveArtworkFilePath(resource.id) : resolveTrackFilePath(resource.id)
-      if (!filePath) return new Response('Not found', { status: 404 })
-      return await serveLocalFile(filePath)
+      if (resource.kind === 'art') {
+        const filePath = resolveArtworkFilePath(resource.id)
+        if (!filePath) return new Response('Not found', { status: 404 })
+        return await serveLocalFile(filePath)
+      }
+      const filePath = resolveTrackFilePath(resource.id)
+      if (filePath) return await serveLocalFile(filePath)
+      const { serveYouTubeAudio } = await import('./youtube-audio')
+      return await serveYouTubeAudio(resource.id, request)
     } catch {
       return new Response('Error', { status: 500 })
     }

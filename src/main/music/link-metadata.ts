@@ -9,9 +9,7 @@ interface OEmbedPayload {
 export async function fetchLinkMetadata(
   sourceUrl: string
 ): Promise<{ title: string; artist?: string; artworkUrl?: string }> {
-  const endpoint = sourceUrl.includes('spotify.com')
-    ? `https://open.spotify.com/oembed?url=${encodeURIComponent(sourceUrl)}`
-    : `https://www.youtube.com/oembed?url=${encodeURIComponent(sourceUrl)}&format=json`
+  const endpoint = `https://www.youtube.com/oembed?url=${encodeURIComponent(sourceUrl)}&format=json`
 
   try {
     const response = await net.fetch(endpoint, { method: 'GET' })

@@ -1,6 +1,19 @@
 import { useCallback, useState } from 'react'
-import { Bot, GitBranch, Keyboard, MessageCircle, Music2, Sparkles, Terminal, X } from 'lucide-react'
-import { clampOrchestratorRect, DEFAULT_ORCHESTRATOR_RECT } from '@shared/types'
+import {
+  Bot,
+  GitBranch,
+  Keyboard,
+  MessageCircle,
+  Music2,
+  PanelBottom,
+  PanelLeft,
+  PanelRight,
+  PanelTop,
+  Sparkles,
+  Terminal,
+  X
+} from 'lucide-react'
+import { clampOrchestratorRect, DEFAULT_ORCHESTRATOR_RECT, DEFAULT_PLAYER_RECT } from '@shared/types'
 import type { PanelType } from '@shared/types'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import {
@@ -17,7 +30,10 @@ interface MenuState {
   targetPanelId: string | null
 }
 
-export function useOrchestratorContextMenu(getCanvasRect: () => DOMRect | null): {
+export function useOrchestratorContextMenu(
+  getCanvasRect: () => DOMRect | null,
+  tiled = false
+): {
   menu: MenuState | null
   groups: ContextMenuGroup[]
   openAt: (e: React.MouseEvent, targetPanelId?: string | null) => void
@@ -25,6 +41,7 @@ export function useOrchestratorContextMenu(getCanvasRect: () => DOMRect | null):
 } {
   const addPanel = useWorkspaceStore((s) => s.addPanel)
   const removePanel = useWorkspaceStore((s) => s.removePanel)
+  const splitTiledPanel = useWorkspaceStore((s) => s.splitTiledPanel)
   const [menu, setMenu] = useState<MenuState | null>(null)
 
   const close = useCallback(() => setMenu(null), [])
@@ -46,11 +63,13 @@ export function useOrchestratorContextMenu(getCanvasRect: () => DOMRect | null):
       if (!menu) return
       const canvas = getCanvasRect()
       const box = canvas ?? new DOMRect(0, 0, 1, 1)
+      const size =
+        type === 'player'
+          ? { w: DEFAULT_PLAYER_RECT.w, h: DEFAULT_PLAYER_RECT.h }
+          : { w: DEFAULT_ORCHESTRATOR_RECT.w, h: DEFAULT_ORCHESTRATOR_RECT.h }
       const rect = clampOrchestratorRect(
-        rectFromCanvasClick(box, menu.canvasX, menu.canvasY, {
-          w: DEFAULT_ORCHESTRATOR_RECT.w,
-          h: DEFAULT_ORCHESTRATOR_RECT.h
-        })
+        rectFromCanvasClick(box, menu.canvasX, menu.canvasY, size),
+        type === 'player' ? { minW: 22, minH: 22 } : undefined
       )
       addPanel(type, 'center', rect)
     },
@@ -140,6 +159,37 @@ export function useOrchestratorContextMenu(getCanvasRect: () => DOMRect | null):
 
   if (menu?.targetPanelId) {
     const panelId = menu.targetPanelId
+    if (tiled) {
+      groups.push({
+        id: 'split',
+        items: [
+          {
+            id: 'split-left',
+            label: 'Split Left',
+            icon: PanelLeft,
+            action: () => void splitTiledPanel(panelId, 'left')
+          },
+          {
+            id: 'split-right',
+            label: 'Split Right',
+            icon: PanelRight,
+            action: () => void splitTiledPanel(panelId, 'right')
+          },
+          {
+            id: 'split-up',
+            label: 'Split Up',
+            icon: PanelTop,
+            action: () => void splitTiledPanel(panelId, 'up')
+          },
+          {
+            id: 'split-down',
+            label: 'Split Down',
+            icon: PanelBottom,
+            action: () => void splitTiledPanel(panelId, 'down')
+          }
+        ]
+      })
+    }
     groups.push({
       id: 'panel',
       items: [

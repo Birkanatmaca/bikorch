@@ -25,6 +25,9 @@ export default function App(): React.JSX.Element {
   const { openFolderPicker } = useOpenProject()
   const projects = useWorkspaceStore((s) => s.projects)
   const addPanel = useWorkspaceStore((s) => s.addPanel)
+  const workspaceScale = useWorkspaceStore((s) => s.workspaceScale)
+  const nudgeWorkspaceScale = useWorkspaceStore((s) => s.nudgeWorkspaceScale)
+  const setWorkspaceScale = useWorkspaceStore((s) => s.setWorkspaceScale)
   const platformClass = isMacOS()
     ? 'platform-macos'
     : isWindows()
@@ -54,11 +57,26 @@ export default function App(): React.JSX.Element {
           addPanel('terminal', 'center')
         }
       }
+
+      if (e.key === '=' || e.key === '+' || e.code === 'NumpadAdd') {
+        e.preventDefault()
+        nudgeWorkspaceScale(1)
+      }
+
+      if (e.key === '-' || e.code === 'NumpadSubtract') {
+        e.preventDefault()
+        nudgeWorkspaceScale(-1)
+      }
+
+      if (e.key === '0' || e.code === 'Numpad0') {
+        e.preventDefault()
+        setWorkspaceScale(100)
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [addPanel, openFolderPicker])
+  }, [addPanel, nudgeWorkspaceScale, openFolderPicker, setWorkspaceScale])
 
   useEffect(() => {
     const handleOpenPalette = (): void => {
@@ -90,7 +108,18 @@ export default function App(): React.JSX.Element {
           </div>
         )}
         <AppHeader showWorkspaceControls={projects.length > 0} onCommandPalette={openPalette} />
-        {projects.length > 0 ? <WorkspaceLayout /> : <WelcomeScreen />}
+        {projects.length > 0 ? (
+          <div className="workspace-zoom-host">
+            <div
+              className="workspace-zoom-canvas"
+              style={{ ['--workspace-scale' as string]: String(workspaceScale / 100) }}
+            >
+              <WorkspaceLayout />
+            </div>
+          </div>
+        ) : (
+          <WelcomeScreen />
+        )}
         <StatusBar />
         <MusicPlayerHost />
         <CommandPalette open={open} onClose={closePalette} />
