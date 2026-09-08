@@ -14,11 +14,10 @@ import {
   getAuthProfileEnv,
   prepareAuthProfileLaunch
 } from '../accounts/profile-manager'
-import { withAntigravityCredentialLock, withCursorCredentialLock } from '../accounts/credential-lock'
+import { withAntigravityCredentialLock } from '../accounts/credential-lock'
+import { withCursorAccountLock } from '../accounts/cursor-profile'
 import { logoutAntigravityCli } from '../accounts/antigravity-logout'
-import { logoutCursorCli } from '../accounts/cursor-logout'
 import { markAntigravitySessionAccount } from '../accounts/antigravity-credential'
-import { markCursorSessionAccount } from '../accounts/cursor-credential'
 import { recordLog } from '../logs'
 
 interface PtySession {
@@ -39,6 +38,14 @@ class PtyManager {
   private sessions = new Map<string, PtySession>()
 
   async create(request: PtyCreateRequest, webContents: WebContents): Promise<PtyCreateResponse> {
+    if (request.kind === 'cursor') {
+      if (!request.accountId) return { sessionId: request.sessionId, status: 'error', error: 'Accounts bölümünden bir Cursor hesabı seçin.' }
+      return withCursorAccountLock(request.accountId, () => this.createSession(request, webContents))
+    }
+    return this.createSession(request, webContents)
+  }
+
+  private async createSession(request: PtyCreateRequest, webContents: WebContents): Promise<PtyCreateResponse> {
     const { sessionId, kind, cols = 80, rows = 24 } = request
 
     if (!isValidSessionId(sessionId)) {
@@ -77,7 +84,7 @@ class PtyManager {
       for (const session of this.sessions.values()) {
         if (session.kind !== kind || session.id === sessionId) continue
         const sameAccount = Boolean(request.accountId && session.accountId === request.accountId)
-        if (request.launchMode === 'login' || sameAccount) {
+        if (request.launchMode === 'login' && sameAccount) {
           this.kill(session.id)
         }
       }
@@ -119,22 +126,6 @@ class PtyManager {
         return { sessionId, status: 'error', error: message, kind }
       }
     }
-    if (kind === 'cursor' && !request.accountId) {
-      try {
-        await withCursorCredentialLock(() => logoutCursorCli())
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'Could not sign out the previous Cursor account'
-        this.emit(webContents, {
-          type: 'status',
-          sessionId,
-          status: 'error',
-          error: message,
-          kind
-        })
-        return { sessionId, status: 'error', error: message, kind }
-      }
-    }
     if (request.accountId && kind !== 'terminal') {
       const accountId = request.accountId
       const prepareLaunch = (): Promise<Awaited<ReturnType<typeof prepareAuthProfileLaunch>>> =>
@@ -142,9 +133,7 @@ class PtyManager {
       const prepared =
         kind === 'antigravity'
           ? await withAntigravityCredentialLock(prepareLaunch)
-          : kind === 'cursor'
-            ? await withCursorCredentialLock(prepareLaunch)
-            : await prepareLaunch()
+          : await prepareLaunch()
       if (!prepared.ok) {
         const message = prepared.error ?? `Could not prepare ${getKindLabel(kind)} account`
         this.emit(webContents, {
@@ -199,9 +188,6 @@ class PtyManager {
         this.emit(webContents, { type: 'status', sessionId, status: 'running' })
         if (kind === 'antigravity') {
           markAntigravitySessionAccount(request.accountId ?? null)
-        }
-        if (kind === 'cursor') {
-          markCursorSessionAccount(request.accountId ?? null)
         }
         recordLog('info', `${getKindLabel(kind)} session started (${sessionId})`, 'pty')
 
@@ -289,10 +275,8 @@ class PtyManager {
       .filter(
         (session) =>
           session.kind === kind &&
-          (kind === 'antigravity' ||
-            kind === 'cursor' ||
-            !session.accountId ||
-            session.accountId === accountId)
+          (kind === 'antigravity' || session.accountId === accountId ||
+            (kind !== 'cursor' && !session.accountId))
       )
       .map((session) => session.id)
     for (const sessionId of sessionIds) this.kill(sessionId)

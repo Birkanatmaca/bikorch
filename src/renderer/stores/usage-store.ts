@@ -27,6 +27,7 @@ function keepLastGoodUsage(
   next: CliUsageInfo | undefined
 ): CliUsageInfo | undefined {
   if (!next) return previous
+  if (next.kind === 'cursor') return next
   if (next.status === 'available' && (next.primary || next.secondary)) return next
   if (previous?.status === 'available' && (previous.primary || previous.secondary)) {
     return previous
@@ -42,10 +43,12 @@ function toUsageSnapshotRecord(
   checkedAt: number
 ): UsageSnapshotRecord | null {
   if (!provider.accountId) return null
+  if (provider.kind === 'cursor' && provider.identityVerified !== true) return null
   return {
     checkedAt,
     accountId: provider.accountId,
     kind: provider.kind,
+    ...(provider.identityVerified === true ? { identityVerified: true } : {}),
     status: provider.status,
     ...(provider.primary ? {
       primaryUsedPercent: provider.primary.usedPercent,
@@ -69,12 +72,14 @@ export const useUsageStore = create<UsageStore>((set, get) => ({
   hydrate: (snapshot) => {
     const next = snapshot ?? createEmptyUsageSnapshot()
     set({
-      providers: Array.isArray(next.providers) ? next.providers : [],
+      providers: Array.isArray(next.providers)
+        ? next.providers.filter((provider) => provider.kind !== 'cursor' || provider.identityVerified === true) : [],
       checkedAtByAccountId:
         next.checkedAtByAccountId && typeof next.checkedAtByAccountId === 'object'
           ? { ...next.checkedAtByAccountId }
           : {},
-      history: Array.isArray(next.history) ? next.history : []
+      history: Array.isArray(next.history)
+        ? next.history.filter((record) => record.kind !== 'cursor' || record.identityVerified === true) : []
     })
   },
 

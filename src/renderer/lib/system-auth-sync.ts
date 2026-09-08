@@ -45,6 +45,7 @@ async function importDiscovery(discovery: SystemAuthDiscovery): Promise<AiAccoun
     const result = await window.api.authProfiles.importCurrent({
       kind: discovery.kind,
       accountId,
+      source: 'system',
       ...(discovery.email ? { email: discovery.email } : {})
     })
 
@@ -73,10 +74,12 @@ export async function syncDiscoveredSystemAccounts(): Promise<void> {
   for (const discovery of discoveries) {
     if (!discovery.ready || suppressed[discovery.kind]) continue
     if (discovery.kind === 'cursor' || discovery.kind === 'antigravity') {
-      const readyCount = useAiAccountsStore
+      const savedCount = useAiAccountsStore
         .getState()
-        .accounts.filter((account) => account.kind === discovery.kind && account.profileReady).length
-      if (readyCount > 0) continue
+        .accounts.filter((account) => account.kind === discovery.kind &&
+          (discovery.kind === 'cursor' || account.profileReady)).length
+      // A saved Cursor card can intentionally be logged out. Do not recreate it from the system login.
+      if (savedCount > 0) continue
     }
     await importDiscovery(discovery)
   }

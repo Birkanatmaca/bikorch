@@ -419,6 +419,7 @@ function parseUsageProvider(raw: unknown): CliUsageInfo | null {
     label: provider.label,
     status,
     detail: provider.detail,
+    ...(provider.identityVerified === true ? { identityVerified: true } : {}),
     ...(typeof provider.accountEmail === 'string' ? { accountEmail: provider.accountEmail } : {}),
     ...(typeof provider.accountName === 'string' ? { accountName: provider.accountName } : {}),
     ...(typeof provider.planType === 'string' || provider.planType === null
@@ -477,6 +478,7 @@ function parseUsage(raw: unknown): PersistedUsageSnapshot {
           checkedAt: record.checkedAt,
           accountId: record.accountId,
           kind: record.kind as UsageSnapshotRecord['kind'],
+          ...(record.identityVerified === true ? { identityVerified: true } : {}),
           status,
           ...(numberOrUndefined(record.primaryUsedPercent) !== undefined
             ? { primaryUsedPercent: numberOrUndefined(record.primaryUsedPercent) }

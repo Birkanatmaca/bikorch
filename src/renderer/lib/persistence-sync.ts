@@ -6,6 +6,7 @@ import { useAiAccountsStore } from '@renderer/stores/ai-accounts-store'
 import { useTasksStore } from '@renderer/stores/tasks-store'
 import { useUsageStore } from '@renderer/stores/usage-store'
 import { useSubscriptionStore } from '@renderer/stores/subscription-store'
+import { AI_ACCOUNTS_REFRESH_EVENT } from './app-events'
 
 const SAVE_DEBOUNCE_MS = 400
 
@@ -35,10 +36,8 @@ export function buildPersistedSnapshot(): PersistedSnapshot {
 }
 
 export async function hydrateFromDisk(): Promise<void> {
-  const [snapshot, profiles] = await Promise.all([
-    window.api.persistence.load(),
-    window.api.authProfiles.list().catch(() => null)
-  ])
+  const profilesPromise = window.api.authProfiles.list().catch(() => null)
+  const snapshot = await window.api.persistence.load()
   isHydrating = true
 
   useWorkspaceStore.getState().hydrate({
@@ -52,11 +51,17 @@ export async function hydrateFromDisk(): Promise<void> {
     accounts: snapshot.accounts,
     activeAccountByKind: snapshot.activeAccountByKind
   })
-  if (profiles) useAiAccountsStore.getState().syncAuthProfiles(profiles)
   useTasksStore.getState().hydrate({ tasksByProject: snapshot.tasksByProject ?? {} })
   useUsageStore.getState().hydrate(snapshot.usage)
   useSubscriptionStore.getState().hydrate(snapshot.subscriptions)
   isHydrating = false
+
+  // Legacy account verification can involve a remote service; never hold up workspace loading.
+  void profilesPromise.then((profiles) => {
+    if (!profiles) return
+    useAiAccountsStore.getState().syncAuthProfiles(profiles)
+    window.dispatchEvent(new Event(AI_ACCOUNTS_REFRESH_EVENT))
+  }).catch(() => undefined)
 
   // Restore diff in background — don't block app startup
   void restorePersistedEditorSession()

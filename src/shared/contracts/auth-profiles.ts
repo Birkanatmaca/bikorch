@@ -5,6 +5,7 @@ export interface AuthProfileRequest {
   accountId: string
   email?: string
   signedIn?: boolean
+  source?: 'system' | 'profile'
 }
 
 export interface AuthProfileIdentity {
@@ -40,5 +41,6 @@ export const AUTH_PROFILES_IPC = {
   IMPORT_CURRENT: 'auth-profiles:import-current',
   ACTIVATE: 'auth-profiles:activate',
   INSPECT: 'auth-profiles:inspect',
+  LOGOUT: 'auth-profiles:logout',
   REMOVE: 'auth-profiles:remove'
 } as const

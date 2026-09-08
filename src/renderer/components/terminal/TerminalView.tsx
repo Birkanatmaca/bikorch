@@ -176,7 +176,8 @@ export function TerminalView({
       const email = emailMatches?.at(-1)
       const signedIn = looksCliSignedIn(kind, outputTail)
       if (kind === 'antigravity' && !email) return
-      if (kind === 'cursor' && !signedIn && !email) return
+      // Cursor capture reads only this profile's credential file and verifies it with the server.
+      // Do not depend on CLI output wording to detect a completed login.
 
       authCaptureInFlight = true
       try {

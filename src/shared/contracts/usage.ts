@@ -34,6 +34,7 @@ export interface CliUsageInfo {
   detail: string
   accountEmail?: string
   accountName?: string
+  identityVerified?: boolean
   planType?: string | null
   primary?: CliUsageWindow
   secondary?: CliUsageWindow

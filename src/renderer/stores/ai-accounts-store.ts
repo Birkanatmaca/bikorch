@@ -24,6 +24,7 @@ interface AiAccountsStore extends AiAccountsSnapshot {
     identity?: { email?: string; name?: string }
   ) => void
   syncAuthProfiles: (profiles: AuthProfileSummary[]) => void
+  markAccountLoggedOut: (accountId: string) => void
 }
 
 function createDefaultSuppressSystemImport(): Record<CliUsageKind, boolean> {
@@ -167,6 +168,18 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
               [authenticated.kind]: false
             }
           : state.suppressSystemImportByKind
+      }
+    })
+  },
+
+  markAccountLoggedOut: (accountId) => {
+    set((state) => {
+      const account = state.accounts.find((item) => item.id === accountId)
+      if (!account) return state
+      return {
+        accounts: state.accounts.map((item) => item.id === accountId ? { ...item, profileReady: false } : item),
+        activeAccountByKind: { ...state.activeAccountByKind,
+          ...(state.activeAccountByKind[account.kind] === accountId ? { [account.kind]: null } : {}) }
       }
     })
   },

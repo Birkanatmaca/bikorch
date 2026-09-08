@@ -22,10 +22,11 @@ import {
 } from '@renderer/stores/ai-accounts-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useUsageStore } from '@renderer/stores/usage-store'
+import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useSubscriptionStore } from '@renderer/stores/subscription-store'
 import { cn } from '@renderer/lib/utils'
 import { importSystemAccountForKind } from '@renderer/lib/system-auth-sync'
-import { checkAllAccountUsage } from '@renderer/lib/usage-sync'
+import { checkAccountUsage, checkAllAccountUsage, invalidateAccountUsage } from '@renderer/lib/usage-sync'
 
 let installedCliCache: Partial<Record<CliUsageKind, boolean>> = {}
 
@@ -203,6 +204,8 @@ function AccountForm({
             <span className="mb-1 block text-[10px] font-medium text-text-secondary">Email or handle</span>
             <input
               value={draft.email}
+              disabled={account.kind === 'cursor'}
+              title={account.kind === 'cursor' ? 'The email is verified when you log in.' : undefined}
               onChange={(event) => update('email', event.target.value)}
               placeholder="name@example.com"
               className="h-8 w-full rounded-md border border-border bg-panel-bg px-2 text-xs text-text-primary outline-none placeholder:text-text-muted focus:border-primary/60"
@@ -256,6 +259,9 @@ function AccountCard({
   subscriptions,
   isActive,
   isRemoving,
+  isChecking,
+  onCheck,
+  onLogout,
   onOpen,
   onEdit,
   onRemove
@@ -265,6 +271,9 @@ function AccountCard({
   subscriptions: SubscriptionRecord[]
   isActive: boolean
   isRemoving: boolean
+  isChecking: boolean
+  onCheck: () => void
+  onLogout: () => void
   onOpen: () => void
   onEdit: () => void
   onRemove: () => void
@@ -273,7 +282,8 @@ function AccountCard({
     !account.email ||
     !provider?.accountEmail ||
     account.email.trim().toLowerCase() === provider.accountEmail.trim().toLowerCase()
-  const liveUsage = provider?.status === 'available' && usageBelongsToAccount
+  const liveUsage = account.profileReady && provider?.status === 'available' && usageBelongsToAccount &&
+    (account.kind !== 'cursor' || provider.identityVerified === true)
   const meters: { remaining: number; label: string }[] = []
   if (liveUsage && provider?.primary) {
     meters.push({
@@ -333,9 +343,14 @@ function AccountCard({
             <UsageMeter key={`${meter.label}-${index}`} remaining={meter.remaining} label={meter.label} />
           ))
         ) : (
-          <UsageMeter remaining={null} label={account.profileReady ? 'No usage yet' : 'Sign in'} />
+          <UsageMeter remaining={null} label={isChecking ? 'Checking…' : account.profileReady ? provider?.detail || 'No usage yet' : 'Login required'} />
         )}
       </div>
+      {account.kind === 'cursor' && meters.length === 0 && (
+        <p className="mt-1 text-[10px] text-text-muted" role="status">
+          {isChecking ? 'Checking this account…' : !account.profileReady ? 'Login to connect this account.' : provider?.detail || 'Usage has not been checked yet.'}
+        </p>
+      )}
 
       <div className="account-card-foot">
         {subscription ? (
@@ -344,6 +359,15 @@ function AccountCard({
           <span />
         )}
         <div className="account-card-tools">
+          <button type="button" className="account-card-action" onClick={onCheck} disabled={isRemoving || isChecking || !account.profileReady} title="Check this account usage" aria-label={`Check ${account.name} usage`}>
+            <RefreshCw className={cn('h-3 w-3', isChecking && 'animate-spin')} />
+            Check
+          </button>
+          {account.kind === 'cursor' && account.profileReady && (
+            <button type="button" className="account-card-action" onClick={onLogout} disabled={isRemoving} aria-label={`Logout ${account.name}`}>
+              Logout
+            </button>
+          )}
           <button type="button" onClick={onEdit} disabled={isRemoving} aria-label={`Edit ${account.name}`}>
             <Pencil className="h-3 w-3" />
           </button>
@@ -362,6 +386,7 @@ export function AiAccountsPanel(): React.JSX.Element {
   const setActiveAccount = useAiAccountsStore((state) => state.setActiveAccount)
   const addAccount = useAiAccountsStore((state) => state.addAccount)
   const removeAccount = useAiAccountsStore((state) => state.removeAccount)
+  const markAccountLoggedOut = useAiAccountsStore((state) => state.markAccountLoggedOut)
   const syncAuthProfiles = useAiAccountsStore((state) => state.syncAuthProfiles)
   const usageProviders = useUsageStore((state) => state.providers)
   const removeUsageAccount = useUsageStore((state) => state.removeAccount)
@@ -375,6 +400,7 @@ export function AiAccountsPanel(): React.JSX.Element {
   const [addingKind, setAddingKind] = useState<CliUsageKind | null>(null)
   const [removingAccountIds, setRemovingAccountIds] = useState<Set<string>>(() => new Set())
   const [refreshingUsage, setRefreshingUsage] = useState(false)
+  const [checkingAccountIds, setCheckingAccountIds] = useState<Set<string>>(() => new Set())
   const [installedByKind, setInstalledByKind] = useState<
     Partial<Record<CliUsageKind, boolean>>
   >(() => installedCliCache)
@@ -472,7 +498,12 @@ export function AiAccountsPanel(): React.JSX.Element {
         plan: '',
         note: ''
       })
-    if (kind === 'cursor' || kind === 'antigravity') {
+    if (kind === 'cursor') {
+      invalidateAccountUsage(accountId)
+      markAccountLoggedOut(accountId)
+      removeUsageAccount(accountId)
+    }
+    if (kind === 'antigravity') {
       closeOtherAccountCliPanels(kind, accountId)
     } else {
       removePanelsForAccount(kind, accountId)
@@ -490,7 +521,7 @@ export function AiAccountsPanel(): React.JSX.Element {
   const handleRemove = async (account: AiAccount): Promise<void> => {
     if (
       !window.confirm(
-        account.kind === 'antigravity' || account.kind === 'cursor'
+        account.kind === 'antigravity'
           ? `Sign out and remove ${account.name}? This signs ${AI_ACCOUNT_LABELS[account.kind]} out on this computer and closes open sessions.`
           : `Sign out and remove ${account.name}? Open sessions for this account will be closed.`
       )
@@ -499,6 +530,7 @@ export function AiAccountsPanel(): React.JSX.Element {
     }
 
     setError(null)
+    invalidateAccountUsage(account.id)
     setRemovingAccountIds((current) => new Set(current).add(account.id))
     removePanelsForAccount(account.kind, account.id)
     try {
@@ -543,10 +575,20 @@ export function AiAccountsPanel(): React.JSX.Element {
         await openLoginCli(account.kind, account)
         return
       }
-      if (account.kind === 'antigravity' || account.kind === 'cursor') {
+      if (account.kind === 'antigravity') {
         closeOtherAccountCliPanels(account.kind, account.id)
       }
       setActiveAccount(account.kind, account.id)
+      if (account.kind === 'cursor') {
+        const existing = useWorkspaceStore.getState().getActiveWorkspace()?.panels.find(
+          (panel) => panel.type === 'cursor' && panel.accountId === account.id && panel.launchMode !== 'login' &&
+            ['starting', 'running', 'waiting', 'busy'].includes(useTerminalStore.getState().getStatus(panel.id) ?? '')
+        )
+        if (existing) {
+          window.dispatchEvent(new CustomEvent('bikorch:focus-panel', { detail: existing.id }))
+          return
+        }
+      }
       addPanel(
         account.kind,
         'center',
@@ -600,6 +642,29 @@ export function AiAccountsPanel(): React.JSX.Element {
     } finally {
       setAddingKind(null)
     }
+  }
+
+  const logoutAccount = async (account: AiAccount): Promise<void> => {
+    invalidateAccountUsage(account.id)
+    setRemovingAccountIds((current) => new Set(current).add(account.id))
+    setError(null)
+    try {
+      const result = await window.api.authProfiles.logout({ kind: account.kind, accountId: account.id })
+      if (!result.ok) throw new Error(result.error || 'Could not log out this account')
+      removePanelsForAccount(account.kind, account.id)
+      markAccountLoggedOut(account.id)
+      removeUsageAccount(account.id)
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not log out this account')
+    } finally {
+      setRemovingAccountIds((current) => { const next = new Set(current); next.delete(account.id); return next })
+    }
+  }
+
+  const checkUsage = async (account: AiAccount): Promise<void> => {
+    setCheckingAccountIds((current) => new Set(current).add(account.id))
+    try { await checkAccountUsage(account) }
+    finally { setCheckingAccountIds((current) => { const next = new Set(current); next.delete(account.id); return next }) }
   }
 
   return (
@@ -683,6 +748,9 @@ export function AiAccountsPanel(): React.JSX.Element {
                         subscriptions={subscriptionsByAccount.get(account.id) ?? []}
                         isActive={activeAccountByKind[account.kind] === account.id}
                         isRemoving={removingAccountIds.has(account.id)}
+                        isChecking={checkingAccountIds.has(account.id)}
+                        onCheck={() => void checkUsage(account)}
+                        onLogout={() => void logoutAccount(account)}
                         onOpen={() => void openAccountCli(account)}
                         onEdit={() => setFormAccount(account)}
                         onRemove={() => void handleRemove(account)}

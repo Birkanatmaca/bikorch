@@ -24,20 +24,12 @@ import {
   readAntigravityCredential
 } from './windows-credential'
 import {
-  applyCursorCredentialsForAccount,
-  captureCursorCredentialsForAccount,
-  findConflictingCursorAccount,
-  getCursorSessionAccount,
-  hasStoredCursorCredentials,
-  markCursorSessionAccount,
-  readCursorKeychainTokens,
-  readStoredCursorConfigIdentity,
-  readStoredCursorTokens,
-  removeStoredCursorCredentials
-} from './cursor-credential'
-import { withAntigravityCredentialLock, withCursorCredentialLock } from './credential-lock'
+  captureCursorProfile, cursorExpectedIdentity, cursorProfileEnv,
+  hasCursorProfileCredentials, inspectSystemCursor, logoutCursorProfile, prepareCursorProfile,
+  withCursorAccountLock
+} from './cursor-profile'
+import { withAntigravityCredentialLock } from './credential-lock'
 import { logoutAntigravityCli } from './antigravity-logout'
-import { logoutCursorCli } from './cursor-logout'
 import {
   applyAntigravityCredentialsForAccount,
   captureAntigravityCredentialsForAccount,
@@ -192,46 +184,8 @@ async function captureAntigravity(request: AuthProfileRequest): Promise<AuthProf
 }
 
 async function captureCursor(request: AuthProfileRequest): Promise<AuthProfileResult> {
-  if (!safeStorage.isEncryptionAvailable()) {
-    return {
-      ok: false,
-      ready: false,
-      error: 'Secure local credential encryption is not available on this computer'
-    }
-  }
-  const captured = await captureCursorCredentialsForAccount(request.accountId, {
-    signedInHint: request.signedIn === true
-  })
-  ensureProfileRoot(request.kind, request.accountId)
-  const identity = readStoredCursorConfigIdentity(request.accountId)
-  const email = identity?.email || request.email
-  const conflict = findConflictingCursorAccount(
-    request.accountId,
-    readStoredCursorTokens(request.accountId),
-    email
-  )
-  if (conflict) {
-    removeStoredCursorCredentials(request.accountId)
-    const savedAs = conflict.email ? `${conflict.name} (${conflict.email})` : conflict.name
-    return {
-      ok: false,
-      ready: false,
-      error: `This Cursor login is already saved as ${savedAs}. Open that account instead of adding it again.`
-    }
-  }
-  if (!captured) return { ok: true, ready: false }
-  writeMetadata({
-    ...request,
-    ...(email ? { email } : {})
-  })
-  return {
-    ok: true,
-    ready: true,
-    identity: {
-      email: email || '',
-      name: identity?.name || email || 'Cursor CLI account'
-    }
-  }
+  const identity = await captureCursorProfile(request)
+  return identity ? { ok: true, ready: true, identity } : { ok: true, ready: false }
 }
 
 export async function importCurrentAuthProfile(
@@ -289,9 +243,7 @@ export function getAuthProfileEnv(
   if (kind === 'antigravity') return { GEMINI_CLI_HOME: root }
   if (kind === 'claude') return { CLAUDE_CONFIG_DIR: root }
   if (kind === 'cursor') {
-    const configDir = join(root, '.cursor')
-    mkdirSync(configDir, { recursive: true })
-    return { CURSOR_CONFIG_DIR: configDir }
+    return cursorProfileEnv(accountId)
   }
   return {}
 }
@@ -311,12 +263,9 @@ export async function prepareAuthProfileLaunch(
         await logoutAntigravityCli()
       }
       if (request.kind === 'cursor') {
-        const liveId = getCursorSessionAccount()
-        if (liveId && liveId !== request.accountId) {
-          await captureCursorCredentialsForAccount(liveId).catch(() => false)
-        }
-        markCursorSessionAccount(null)
-        await logoutCursorCli()
+        logoutCursorProfile(request.accountId)
+        writeMetadata(request)
+        return { ok: true, ready: false }
       }
       removeProfileDirectory(request.kind, request.accountId)
       const root = ensureProfileRoot(request.kind, request.accountId)
@@ -347,30 +296,12 @@ export async function prepareAuthProfileLaunch(
     }
 
     if (request.kind === 'cursor') {
-      if (!hasStoredCursorCredentials(request.accountId)) {
-        return { ok: true, ready: false }
-      }
-      const applied = await applyCursorCredentialsForAccount(request.accountId)
-      if (!applied) {
-        return {
-          ok: false,
-          ready: false,
-          error:
-            'Could not activate this Cursor account. Sign in again to recapture its token.'
-        }
-      }
-      const configIdentity = readStoredCursorConfigIdentity(request.accountId)
+      const ready = await prepareCursorProfile(request.accountId)
+      const identity = cursorExpectedIdentity(request.accountId)
       return {
         ok: true,
-        ready: true,
-        identity:
-          readMetadataIdentity(request.kind, request.accountId) ??
-          (configIdentity
-            ? {
-                email: configIdentity.email ?? '',
-                name: configIdentity.name ?? configIdentity.email ?? ''
-              }
-            : undefined)
+        ready,
+        identity: { email: identity.email ?? '', name: identity.name ?? identity.email ?? '' }
       }
     }
 
@@ -395,8 +326,8 @@ export function inspectAuthProfile(request: AuthProfileRequest): AuthProfileResu
       ready = existsSync(join(root, 'credential.bin'))
       identity = readMetadataIdentity(request.kind, request.accountId)
     } else if (request.kind === 'cursor') {
-      ready = hasStoredCursorCredentials(request.accountId)
-      const configIdentity = readStoredCursorConfigIdentity(request.accountId)
+      ready = hasCursorProfileCredentials(request.accountId)
+      const configIdentity = cursorExpectedIdentity(request.accountId)
       const metadata = readMetadataIdentity(request.kind, request.accountId)
       const email = configIdentity?.email || metadata?.email || ''
       const name = configIdentity?.name || metadata?.name || email
@@ -426,7 +357,7 @@ export function inspectAuthProfile(request: AuthProfileRequest): AuthProfileResu
       if (email) identity = { email, name: email }
     }
 
-    if (ready && request.email) {
+    if (ready && request.email && request.kind !== 'cursor') {
       writeMetadata(request)
       identity ??= { email: request.email, name: request.email }
     }
@@ -440,9 +371,23 @@ export function inspectAuthProfile(request: AuthProfileRequest): AuthProfileResu
   }
 }
 
-export function listAuthProfiles(): AuthProfileSummary[] {
+export async function listAuthProfiles(): Promise<AuthProfileSummary[]> {
   const profiles: AuthProfileSummary[] = []
+  const cursorRoot = join(profilesRoot(), 'cursor')
+  const migrations: Promise<unknown>[] = []
+  if (existsSync(cursorRoot)) {
+    for (const entry of readdirSync(cursorRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const metadata = readJson(join(cursorRoot, entry.name, 'profile.json'))
+      const accountId = asString(metadata?.accountId)
+      if (accountId && metadata?.cursorIsolationVersion !== 1) {
+        migrations.push(withCursorAccountLock(accountId, () => prepareCursorProfile(accountId)))
+      }
+    }
+  }
+  await Promise.allSettled(migrations)
 
+  // Take a fresh local snapshot after migration. Existing profiles never wait for usage checks.
   for (const kind of AI_ACCOUNT_KINDS) {
     const kindRoot = join(profilesRoot(), kind)
     if (!existsSync(kindRoot)) continue
@@ -462,7 +407,7 @@ export function listAuthProfiles(): AuthProfileSummary[] {
       if (!accountId) continue
 
       const inspected = inspectAuthProfile({ kind, accountId })
-      if (!inspected.ready) continue
+      if (!inspected.ready && kind !== 'cursor') continue
 
       const storedEmail = asString(metadata?.email)
       const email = inspected.identity?.email || storedEmail || ''
@@ -477,7 +422,7 @@ export function listAuthProfiles(): AuthProfileSummary[] {
         accountId,
         name,
         email,
-        ready: true
+        ready: inspected.ready
       })
     }
   }
@@ -492,9 +437,7 @@ export async function removeAuthProfile(request: AuthProfileRequest): Promise<Au
       await withAntigravityCredentialLock(() => logoutAntigravityCli())
     }
     if (request.kind === 'cursor') {
-      markCursorSessionAccount(null)
-      await withCursorCredentialLock(() => logoutCursorCli())
-      removeStoredCursorCredentials(request.accountId)
+      logoutCursorProfile(request.accountId)
     }
     removeProfileDirectory(request.kind, request.accountId)
     return { ok: true, ready: false }
@@ -522,22 +465,8 @@ export async function inspectSystemAuthProfile(kind: CliUsageKind): Promise<Auth
     }
 
     if (kind === 'cursor') {
-      const tokens = await readCursorKeychainTokens()
-      const config = readJson(join(home, '.cursor', 'cli-config.json'))
-      const auth = asRecord(config?.authInfo)
-      const hasAuthInfo = Boolean(auth && Object.keys(auth).length > 0) ||
-        (typeof config?.authInfo === 'string' && config.authInfo.trim().length > 0)
-      if (!tokens && !hasAuthInfo) return { ok: true, ready: false }
-      const email = asString(auth?.email) ?? asString(auth?.emailAddress)
-      const name = asString(auth?.displayName) ?? asString(auth?.name)
-      return {
-        ok: true,
-        ready: true,
-        identity: {
-          email: email ?? '',
-          name: name ?? email ?? `${AI_ACCOUNT_LABELS[kind]} account`
-        }
-      }
+      const identity = await inspectSystemCursor()
+      return identity ? { ok: true, ready: true, identity } : { ok: true, ready: false }
     }
 
     if (kind === 'codex') {

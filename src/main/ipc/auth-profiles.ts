@@ -13,7 +13,8 @@ import {
   removeAuthProfile
 } from '../accounts/profile-manager'
 import { ptyManager } from '../cli/pty-manager'
-import { withAntigravityCredentialLock, withCursorCredentialLock } from '../accounts/credential-lock'
+import { withAntigravityCredentialLock } from '../accounts/credential-lock'
+import { logoutCursorProfile, withCursorAccountLock } from '../accounts/cursor-profile'
 
 function isAuthProfileRequest(payload: unknown): payload is AuthProfileRequest {
   if (!payload || typeof payload !== 'object') return false
@@ -25,7 +26,8 @@ function isAuthProfileRequest(payload: unknown): payload is AuthProfileRequest {
     AI_ACCOUNT_KINDS.includes(request.kind) &&
     (request.email === undefined ||
       (typeof request.email === 'string' && request.email.length <= 320)) &&
-    (request.signedIn === undefined || typeof request.signedIn === 'boolean')
+    (request.signedIn === undefined || typeof request.signedIn === 'boolean') &&
+    (request.source === undefined || request.source === 'system' || request.source === 'profile')
   )
 }
 
@@ -42,7 +44,7 @@ export function registerAuthProfileHandlers(): void {
       return withAntigravityCredentialLock(() => importCurrentAuthProfile(payload))
     }
     if (payload.kind === 'cursor') {
-      return withCursorCredentialLock(() => importCurrentAuthProfile(payload))
+      return withCursorAccountLock(payload.accountId, () => importCurrentAuthProfile(payload))
     }
     return importCurrentAuthProfile(payload)
   })
@@ -55,7 +57,7 @@ export function registerAuthProfileHandlers(): void {
       return withAntigravityCredentialLock(() => prepareAuthProfileLaunch(payload, 'normal'))
     }
     if (payload.kind === 'cursor') {
-      return withCursorCredentialLock(() => prepareAuthProfileLaunch(payload, 'normal'))
+      return withCursorAccountLock(payload.accountId, () => prepareAuthProfileLaunch(payload, 'normal'))
     }
     return prepareAuthProfileLaunch(payload, 'normal')
   })
@@ -67,11 +69,25 @@ export function registerAuthProfileHandlers(): void {
     return inspectAuthProfile(payload)
   })
 
+  ipcMain.handle(AUTH_PROFILES_IPC.LOGOUT, async (_event, payload: unknown) => {
+    if (!isAuthProfileRequest(payload) || payload.kind !== 'cursor') {
+      return { ok: false, ready: false, error: 'Invalid Cursor account request' }
+    }
+    return withCursorAccountLock(payload.accountId, async () => {
+      ptyManager.killForAccount('cursor', payload.accountId)
+      logoutCursorProfile(payload.accountId)
+      return { ok: true, ready: false }
+    })
+  })
+
   ipcMain.handle(AUTH_PROFILES_IPC.REMOVE, async (_event, payload: unknown) => {
     if (!isAuthProfileRequest(payload)) {
       return { ok: false, ready: false, error: 'Invalid account profile request' }
     }
-    ptyManager.killForAccount(payload.kind, payload.accountId)
-    return await removeAuthProfile(payload)
+    const remove = async () => {
+      ptyManager.killForAccount(payload.kind, payload.accountId)
+      return removeAuthProfile(payload)
+    }
+    return payload.kind === 'cursor' ? withCursorAccountLock(payload.accountId, remove) : remove()
   })
 }

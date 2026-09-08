@@ -5,6 +5,7 @@ import type { ProjectTask } from './tasks'
 import type { CliUsageInfo, CliUsageKind, CliUsageStatus } from './usage'
 
 export interface UsageSnapshotRecord {
+  identityVerified?: boolean
   checkedAt: number
   accountId: string
   kind: CliUsageKind

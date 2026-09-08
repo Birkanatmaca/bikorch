@@ -24,17 +24,9 @@ import {
   getAntigravitySessionAccount,
   hasStoredAntigravityCredentials
 } from '../accounts/antigravity-credential'
+import { readCursorAccountUsage } from './cursor'
 import {
-  applyCursorCredentialsForAccount,
-  cursorCredentialsSupported,
-  getCursorSessionAccount,
-  hasStoredCursorCredentials,
-  readCursorKeychainTokens,
-  restoreCursorKeychainTokens
-} from '../accounts/cursor-credential'
-import {
-  withAntigravityCredentialLock,
-  withCursorCredentialLock
+  withAntigravityCredentialLock
 } from '../accounts/credential-lock'
 
 const USAGE_KINDS: CliUsageKind[] = ['claude', 'cursor', 'gemini', 'antigravity', 'codex']
@@ -71,10 +63,6 @@ const INTERACTIVE_USAGE_RETRY_DELAY_MS = 3500
 const INTERACTIVE_USAGE_SETTLE_DELAY_MS = 120
 const INTERACTIVE_USAGE_TIMEOUT_MS = 18000
 const INTERACTIVE_USAGE_OUTPUT_LIMIT = 120000
-
-function withCursorUsageLock<T>(task: () => Promise<T>): Promise<T> {
-  return withCursorCredentialLock(task)
-}
 
 function withAntigravityUsageLock<T>(task: () => Promise<T>): Promise<T> {
   return withAntigravityCredentialLock(task)
@@ -336,13 +324,6 @@ function queryCodexRateLimits(profileEnv: Record<string, string> = {}): Promise<
   })
 }
 
-interface CursorUsageSnapshot {
-  planType: string | null
-  resetLabel: string | null
-  primary: CliUsageWindow | undefined
-  breakdown: CliUsageBreakdown[]
-}
-
 interface AntigravityUsageSnapshot {
   accountEmail: string | null
   planType: string | null
@@ -388,55 +369,6 @@ function stripTerminalControlCodes(value: string): string {
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/\u001b[@-_]/g, '')
     .replace(/\r/g, '')
-}
-
-function parseCursorUsage(output: string): CursorUsageSnapshot | null {
-  const lines = stripTerminalControlCodes(output)
-    .split('\n')
-    .map((line) => line.trimEnd())
-  const usageIndex = lines.findIndex((line) => /Usage\s*[•·]/i.test(line))
-  if (usageIndex < 0) return null
-
-  const header = lines[usageIndex] ?? ''
-  const headerMatch = header.match(/Usage\s*[•·]\s*(.+?)(?:\s+Resets\s+(.+))?$/i)
-  const planType = headerMatch?.[1]?.trim() || null
-  const resetLabel = headerMatch?.[2]?.trim() || null
-  const breakdown: CliUsageBreakdown[] = []
-
-  for (const line of lines.slice(usageIndex + 1, usageIndex + 16)) {
-    const match = line.match(/^\s*(Included|Auto|API|On-Demand)\s+(.+?)\s*$/i)
-    if (!match) continue
-
-    const label = match[1]
-    const value = match[2].replace(/\s+[█▉▊▋▓▒░—─-]{2,}.*$/, '').trim()
-    if (!value) continue
-    const percentMatch = value.match(/(\d+(?:\.\d+)?)%\s+used/i)
-    breakdown.push({
-      label,
-      value,
-      ...(percentMatch ? { usedPercent: Number(percentMatch[1]) } : {})
-    })
-  }
-
-  const included = breakdown.find((item) => item.label.toLowerCase() === 'included')
-  const includedPercent = included?.usedPercent
-  if (includedPercent === undefined && breakdown.length === 0) return null
-
-  return {
-    planType,
-    resetLabel,
-    primary:
-      includedPercent === undefined
-        ? undefined
-        : {
-            label: 'Included usage',
-            usedPercent: Math.min(100, Math.max(0, includedPercent)),
-            windowDurationMins: 43200,
-            resetsAt: null,
-            resetLabel
-          },
-    breakdown
-  }
 }
 
 function queryInteractiveUsage<T>(
@@ -571,27 +503,6 @@ function queryInteractiveUsage<T>(
       )
     })
   })
-}
-
-function queryCursorUsage(profileEnv: Record<string, string> = {}): Promise<CursorUsageSnapshot> {
-  return queryInteractiveUsage(
-    'cursor',
-    {
-      command: '/usage',
-      parse: parseCursorUsage,
-      isReady: (output) => /Plan,\s*search,\s*build anything/i.test(output),
-      // Each account has its own Cursor data directory. New profiles otherwise
-      // stop at the interactive workspace trust prompt before /usage is sent.
-      extraArgs: ['--trust'],
-      detectFailure: (output) => {
-        if (/not logged in|please (?:sign|log) in|authentication required/i.test(output)) {
-          return { status: 'unavailable', detail: 'Cursor hesabı yeniden giriş gerektiriyor' }
-        }
-        return null
-      }
-    },
-    profileEnv
-  )
 }
 
 function parseGeminiUsage(output: string): GeminiUsageSnapshot | null {
@@ -810,14 +721,15 @@ function withAccountScope(info: CliUsageInfo, accountId?: string): CliUsageInfo 
 async function readProviderUsage(
   kind: CliUsageKind,
   scope: UsageScope = {},
-  antigravityLockHeld = false,
-  cursorLockHeld = false
+  antigravityLockHeld = false
 ): Promise<CliUsageInfo> {
   if (kind === 'antigravity' && !antigravityLockHeld) {
-    return withAntigravityUsageLock(() => readProviderUsage(kind, scope, true, cursorLockHeld))
+    return withAntigravityUsageLock(() => readProviderUsage(kind, scope, true))
   }
-  if (kind === 'cursor' && !cursorLockHeld && cursorCredentialsSupported()) {
-    return withCursorUsageLock(() => readProviderUsage(kind, scope, antigravityLockHeld, true))
+  if (kind === 'cursor') {
+    return scope.accountId
+      ? readCursorAccountUsage(scope.accountId)
+      : baseUsageInfo('cursor', 'unavailable', 'Accounts bölümünden bir Cursor hesabı seçin.')
   }
 
   const scoped = (info: CliUsageInfo): CliUsageInfo => withAccountScope(info, scope.accountId)
@@ -859,19 +771,8 @@ async function readProviderUsage(
   }
 
   if (kind !== 'codex') {
-    if (kind === 'cursor' || kind === 'gemini' || kind === 'antigravity') {
+    if (kind === 'gemini' || kind === 'antigravity') {
       try {
-        if (kind === 'cursor') {
-          const snapshot = await queryCursorUsage(profileEnv)
-          return scoped({
-            ...baseUsageInfo(kind, 'available', 'Live usage pulled from /usage'),
-            ...localIdentity,
-            planType: snapshot.planType,
-            primary: snapshot.primary,
-            breakdown: snapshot.breakdown
-          })
-        }
-
         if (kind === 'gemini') {
           const snapshot = await queryGeminiUsage(profileEnv)
           return scoped({
@@ -934,37 +835,6 @@ async function readProviderUsage(
       ...localIdentity
     })
   }
-}
-
-async function readCursorAccountUsage(
-  requests: UsageAccountRequest[]
-): Promise<CliUsageInfo[]> {
-  return withCursorUsageLock(async () => {
-    const liveId = getCursorSessionAccount()
-    const previousTokens = await readCursorKeychainTokens().catch(() => null)
-    const providers: CliUsageInfo[] = []
-
-    try {
-      for (const request of requests) {
-        providers.push(
-          await readProviderUsage('cursor', { accountId: request.accountId }, false, true)
-        )
-        await delay(400)
-      }
-    } finally {
-      try {
-        if (liveId && hasStoredCursorCredentials(liveId)) {
-          await applyCursorCredentialsForAccount(liveId)
-        } else {
-          await restoreCursorKeychainTokens(previousTokens)
-        }
-      } catch (error) {
-        console.error('Could not restore Cursor credentials after usage check:', error)
-      }
-    }
-
-    return providers
-  })
 }
 
 async function readAntigravityAccountUsage(
@@ -1110,7 +980,7 @@ async function readAccountUsage(requests: UsageAccountRequest[]): Promise<CliUsa
     (request) => providersByRequest.get(usageRequestKey(request)) as CliUsageInfo
   )
   const cursorProviders =
-    cursorRequests.length > 0 ? await readCursorAccountUsage(cursorRequests) : []
+    cursorRequests.length > 0 ? await Promise.all(cursorRequests.map((request) => readCursorAccountUsage(request.accountId))) : []
   const antigravityProviders =
     antigravityRequests.length > 0
       ? await readAntigravityAccountUsage(antigravityRequests)

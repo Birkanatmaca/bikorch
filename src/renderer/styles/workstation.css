@@ -841,7 +841,7 @@ kbd {
   display: flex;
   margin-left: auto;
   gap: 2px;
-  opacity: 0;
+  opacity: 1;
   transition: opacity 120ms ease;
 }
 .account-card:hover .account-card-tools,
@@ -860,6 +860,16 @@ kbd {
 .account-card-tools button:hover:not(:disabled) {
   color: var(--color-text-primary);
   background: rgb(255 255 255 / 0.08);
+}
+.account-card-tools button.account-card-action {
+  width: auto;
+  gap: 4px;
+  padding: 0 6px;
+  font-size: 10px;
+}
+.account-card-tools button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .account-card-tools button:last-child:hover:not(:disabled) {
   color: #ffb4b8;

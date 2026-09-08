@@ -16,7 +16,12 @@ let started = false
 let tickTimer: ReturnType<typeof setInterval> | null = null
 let startTimer: ReturnType<typeof setTimeout> | null = null
 let queue: Promise<void> = Promise.resolve()
-const pendingIds = new Set<string>()
+const pending = new Map<string, Promise<void>>()
+const revisions = new Map<string, number>()
+
+export function invalidateAccountUsage(accountId: string): void {
+  revisions.set(accountId, (revisions.get(accountId) ?? 0) + 1)
+}
 
 function readyAccounts(): AiAccount[] {
   return useAiAccountsStore.getState().accounts.filter((account) => account.profileReady)
@@ -36,15 +41,25 @@ async function readAccounts(accounts: AiAccount[]): Promise<void> {
   if (accounts.length === 0) return
 
   for (const account of accounts) {
-    if (!started) return
+    const revision = revisions.get(account.id) ?? 0
+    if (!useAiAccountsStore.getState().accounts.some((item) => item.id === account.id && item.profileReady)) continue
     try {
       const response = await window.api.usage.read({
         accounts: [{ kind: account.kind, accountId: account.id }]
       })
+      const current = useAiAccountsStore.getState().accounts.find((item) => item.id === account.id)
+      if (!current?.profileReady || (revisions.get(account.id) ?? 0) !== revision) continue
+      const returned = response.providers.find((item) => item.accountId === account.id && item.kind === account.kind)
+      if (account.kind === 'cursor' && returned?.status === 'available' &&
+        (returned.identityVerified !== true || !returned.accountEmail ||
+          (current.email && returned.accountEmail.toLowerCase() !== current.email.toLowerCase()))) {
+        useUsageStore.getState().removeAccount(account.id)
+        continue
+      }
       useUsageStore.getState().applyResponse(response, [account.id])
       const provider = response.providers.find((item) => item.accountId === account.id)
       if (!provider) continue
-      recordDeveloperEvent({
+      if (provider.status === 'available') recordDeveloperEvent({
         type: 'usage.snapshot',
         provider: account.kind,
         accountId: account.id,
@@ -70,30 +85,30 @@ async function readAccounts(accounts: AiAccount[]): Promise<void> {
         })
       }
     } catch {
-      useUsageStore.getState().markChecked([account.id])
+      if ((revisions.get(account.id) ?? 0) === revision &&
+        useAiAccountsStore.getState().accounts.some((item) => item.id === account.id && item.profileReady)) {
+        useUsageStore.getState().markChecked([account.id])
+      }
     }
   }
 }
 
 function enqueue(accounts: AiAccount[]): Promise<void> {
-  const next = accounts.filter((account) => !pendingIds.has(account.id))
-  if (next.length === 0) return Promise.resolve()
-  for (const account of next) pendingIds.add(account.id)
-
-  const run = async (): Promise<void> => {
-    try {
-      await readAccounts(next)
-    } finally {
-      for (const account of next) pendingIds.delete(account.id)
+  const tasks = accounts.map((account) => {
+    const existing = pending.get(account.id)
+    if (existing) return existing
+    const revision = revisions.get(account.id) ?? 0
+    const run = async (): Promise<void> => {
+      if ((revisions.get(account.id) ?? 0) === revision) await readAccounts([account])
     }
-  }
-
-  const queued = queue.then(run, run)
-  queue = queued.then(
-    () => undefined,
-    () => undefined
-  )
-  return queued
+    // Cursor requests are isolated and can finish while shared-store CLIs wait in their queue.
+    const task = account.kind === 'cursor' ? Promise.resolve().then(run) : queue.then(run, run)
+    if (account.kind !== 'cursor') queue = task.catch(() => undefined)
+    pending.set(account.id, task)
+    void task.finally(() => { if (pending.get(account.id) === task) pending.delete(account.id) }).catch(() => undefined)
+    return task
+  })
+  return Promise.all(tasks).then(() => undefined)
 }
 
 function tick(force = false): void {
@@ -134,7 +149,7 @@ export function startUsageSync(): () => void {
   window.addEventListener(AI_ACCOUNTS_REFRESH_EVENT, onRefresh)
 
   startTimer = setTimeout(() => {
-    tick()
+    tick(true)
     tickTimer = setInterval(() => tick(), TICK_MS)
   }, START_DELAY_MS)
 

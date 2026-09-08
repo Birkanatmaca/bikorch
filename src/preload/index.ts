@@ -243,6 +243,7 @@ export interface AuthProfilesApi {
   importCurrent: (request: AuthProfileRequest) => Promise<AuthProfileResult>
   activate: (request: AuthProfileRequest) => Promise<AuthProfileResult>
   inspect: (request: AuthProfileRequest) => Promise<AuthProfileResult>
+  logout: (request: AuthProfileRequest) => Promise<AuthProfileResult>
   remove: (request: AuthProfileRequest) => Promise<AuthProfileResult>
 }
 
@@ -352,6 +353,7 @@ const authProfilesApi: AuthProfilesApi = {
   importCurrent: (request) => ipcRenderer.invoke(AUTH_PROFILES_IPC.IMPORT_CURRENT, request),
   activate: (request) => ipcRenderer.invoke(AUTH_PROFILES_IPC.ACTIVATE, request),
   inspect: (request) => ipcRenderer.invoke(AUTH_PROFILES_IPC.INSPECT, request),
+  logout: (request) => ipcRenderer.invoke(AUTH_PROFILES_IPC.LOGOUT, request),
   remove: (request) => ipcRenderer.invoke(AUTH_PROFILES_IPC.REMOVE, request)
 }
 

@@ -515,9 +515,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           .filter(
             (panel) =>
               panel.type === kind &&
-              (kind === 'antigravity' ||
-                !panel.accountId ||
-                panel.accountId === accountId)
+              (kind === 'antigravity' || panel.accountId === accountId ||
+                (kind !== 'cursor' && !panel.accountId))
           )
           .map((panel) => panel.id)
       )
