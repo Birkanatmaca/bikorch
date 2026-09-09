@@ -3,6 +3,20 @@ import { v4 as uuidv4 } from 'uuid'
 import type { ProjectTask, TaskPriority, TaskStatus, TasksSnapshot } from '@shared/contracts/tasks'
 import { recordDeveloperEvent } from '@renderer/lib/developer-events'
 
+function withStatusFields(task: ProjectTask, status: TaskStatus, now: number): ProjectTask {
+  if (status === 'done') {
+    return {
+      ...task,
+      status,
+      updatedAt: now,
+      completedAt: task.status === 'done' ? (task.completedAt ?? now) : now
+    }
+  }
+  const next = { ...task, status, updatedAt: now }
+  delete next.completedAt
+  return next
+}
+
 function noteTaskTransition(projectId: string, task: ProjectTask, previousStatus: TaskStatus): void {
   if (task.status === previousStatus) return
   const type =
@@ -78,11 +92,20 @@ export const useTasksStore = create<TasksStore>((set, get) => ({
           if (task.id !== taskId) return task
           const title = updates.title === undefined ? task.title : normalizedTitle(updates.title)
           if (updates.title !== undefined && !title) return task
-          const next: ProjectTask = {
+          const now = Date.now()
+          let next: ProjectTask = {
             ...task,
             ...updates,
             ...(updates.title !== undefined ? { title } : {}),
-            updatedAt: Date.now()
+            updatedAt: now
+          }
+          if (updates.status !== undefined) {
+            next = withStatusFields(
+              { ...next, status: task.status, completedAt: task.completedAt },
+              updates.status,
+              now
+            )
+            if (updates.title !== undefined) next.title = title
           }
           transition = { task: next, previousStatus: task.status }
           return next

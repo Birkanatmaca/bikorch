@@ -19,6 +19,11 @@ import {
   type GitDiscoverResponse,
   type GitStatusRequest,
   type GitStatusResponse,
+  type GitEnsureWorktreeRequest,
+  type GitEnsureWorktreeResponse,
+  type GitRemoveWorktreeRequest,
+  type GitSessionSnapshot,
+  type GitSessionSnapshotRequest,
   GIT_IPC
 } from '@shared/contracts/git'
 import {
@@ -73,7 +78,10 @@ import {
   type PromptHistoryFilter,
   type PromptHistoryPage,
   type RecordPromptRequest,
-  type RecordPromptResponse
+  type RecordPromptResponse,
+  type AgentSessionDetail,
+  type AgentSessionListPage,
+  type AgentSessionListRequest
 } from '@shared/contracts/developer-intelligence'
 import {
   MUSIC_IPC,
@@ -213,6 +221,9 @@ export interface GitApi {
   stageAll: (request: GitStatusRequest) => Promise<{ ok: true }>
   unstageAll: (request: GitStatusRequest) => Promise<{ ok: true }>
   commit: (request: GitCommitRequest) => Promise<{ ok: true }>
+  ensureWorktree: (request: GitEnsureWorktreeRequest) => Promise<GitEnsureWorktreeResponse>
+  removeWorktree: (request: GitRemoveWorktreeRequest) => Promise<{ ok: true } | { ok: false; error: string }>
+  sessionSnapshot: (request: GitSessionSnapshotRequest) => Promise<GitSessionSnapshot>
 }
 
 export interface PersistenceApi {
@@ -266,6 +277,8 @@ export interface DeveloperIntelligenceApi {
   clear: (target: ClearTarget) => Promise<{ ok: true }>
   analyzeMemories: (request: MetricsRequest) => Promise<AnalyzeMemoriesResult>
   getContext: (request?: MemoryContextRequest) => Promise<MemoryContextPackage>
+  listSessions: (request?: AgentSessionListRequest) => Promise<AgentSessionListPage>
+  getSession: (id: string) => Promise<AgentSessionDetail | null>
 }
 
 export interface AppApi {
@@ -321,7 +334,10 @@ const gitApi: GitApi = {
   unstage: (request) => ipcRenderer.invoke(GIT_IPC.UNSTAGE, request),
   stageAll: (request) => ipcRenderer.invoke(GIT_IPC.STAGE_ALL, request),
   unstageAll: (request) => ipcRenderer.invoke(GIT_IPC.UNSTAGE_ALL, request),
-  commit: (request) => ipcRenderer.invoke(GIT_IPC.COMMIT, request)
+  commit: (request) => ipcRenderer.invoke(GIT_IPC.COMMIT, request),
+  ensureWorktree: (request) => ipcRenderer.invoke(GIT_IPC.ENSURE_WORKTREE, request),
+  removeWorktree: (request) => ipcRenderer.invoke(GIT_IPC.REMOVE_WORKTREE, request),
+  sessionSnapshot: (request) => ipcRenderer.invoke(GIT_IPC.SESSION_SNAPSHOT, request)
 }
 
 const persistenceApi: PersistenceApi = {
@@ -381,7 +397,9 @@ const developerIntelligenceApi: DeveloperIntelligenceApi = {
   exportData: () => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.EXPORT),
   clear: (target) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.CLEAR, target),
   analyzeMemories: (request) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.ANALYZE, request),
-  getContext: (request) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.GET_CONTEXT, request ?? {})
+  getContext: (request) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.GET_CONTEXT, request ?? {}),
+  listSessions: (request) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.LIST_SESSIONS, request ?? {}),
+  getSession: (id) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.GET_SESSION, id)
 }
 
 const musicApi: MusicApi = {

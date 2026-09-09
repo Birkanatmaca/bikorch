@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import {
   Brain,
   CircleDollarSign,
+  History,
   LayoutDashboard,
   MessageSquareText,
   ShieldCheck,
@@ -19,6 +20,7 @@ import { ProfileOverview } from './ProfileOverview'
 import { DeveloperInsights } from './DeveloperInsights'
 import { AiCosts } from './AiCosts'
 import { PromptHistory } from './PromptHistory'
+import { SessionTimeline } from './SessionTimeline'
 import { MemoryManager } from './MemoryManager'
 import { PrivacySettings } from './PrivacySettings'
 
@@ -27,6 +29,7 @@ const SECTIONS: Array<{ id: ProfileSection; label: string; icon: LucideIcon }> =
   { id: 'insights', label: 'Insights', icon: Sparkles },
   { id: 'costs', label: 'Costs', icon: CircleDollarSign },
   { id: 'prompts', label: 'Prompts', icon: MessageSquareText },
+  { id: 'sessions', label: 'Sessions', icon: History },
   { id: 'memory', label: 'Memory', icon: Brain },
   { id: 'privacy', label: 'Privacy', icon: ShieldCheck }
 ]
@@ -117,6 +120,7 @@ export function ProfilePanel({ visible = true }: ProfilePanelProps): React.JSX.E
         {section === 'insights' && <DeveloperInsights />}
         {section === 'costs' && <AiCosts />}
         {section === 'prompts' && <PromptHistory />}
+        {section === 'sessions' && <SessionTimeline />}
         {section === 'memory' && <MemoryManager />}
         {section === 'privacy' && <PrivacySettings />}
       </div>

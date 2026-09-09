@@ -1,16 +1,13 @@
 import { useMemo, useState } from 'react'
-import {
-  Circle,
-  CircleDot,
-  Check,
-  Plus,
-  Search,
-  Trash2,
-  ListChecks
-} from 'lucide-react'
+import { Circle, CircleDot, Check, Clock, Plus, Search, Trash2, ListChecks } from 'lucide-react'
 import {
   TASK_PRIORITIES,
   TASK_PRIORITY_LABELS,
+  TASK_STATUSES,
+  TASK_STATUS_LABELS,
+  isOpenTaskStatus,
+  nextTaskStatus,
+  summarizeTasks,
   type ProjectTask,
   type TaskPriority,
   type TaskStatus
@@ -20,30 +17,27 @@ import { useActiveProject } from '@renderer/hooks/use-active-project'
 import { cn } from '@renderer/lib/utils'
 import { useTasksStore } from '@renderer/stores/tasks-store'
 
-type TaskFilter = 'all' | 'active' | 'done'
+type TaskFilter = 'all' | TaskStatus
 type PriorityFilter = 'all' | TaskPriority
 
 const priorityOrder: Record<TaskPriority, number> = { high: 0, medium: 1, low: 2 }
-const statusOrder: Record<TaskStatus, number> = { 'in-progress': 0, todo: 1, done: 2 }
+const statusOrder: Record<TaskStatus, number> = {
+  'in-progress': 0,
+  wait: 1,
+  todo: 2,
+  done: 3
+}
+const GROUP_ORDER: TaskStatus[] = ['in-progress', 'wait', 'todo', 'done']
 const EMPTY_TASKS: ProjectTask[] = []
 
 function sortTasks(a: ProjectTask, b: ProjectTask): number {
-  const aDone = a.status === 'done' ? 1 : 0
-  const bDone = b.status === 'done' ? 1 : 0
-  if (aDone !== bDone) return aDone - bDone
-  if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
-    return priorityOrder[a.priority] - priorityOrder[b.priority]
-  }
   if (statusOrder[a.status] !== statusOrder[b.status]) {
     return statusOrder[a.status] - statusOrder[b.status]
   }
+  if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
+    return priorityOrder[a.priority] - priorityOrder[b.priority]
+  }
   return b.updatedAt - a.updatedAt
-}
-
-function nextStatus(status: TaskStatus): TaskStatus {
-  if (status === 'todo') return 'in-progress'
-  if (status === 'in-progress') return 'done'
-  return 'todo'
 }
 
 function nextPriority(priority: TaskPriority): TaskPriority {
@@ -52,10 +46,11 @@ function nextPriority(priority: TaskPriority): TaskPriority {
   return 'medium'
 }
 
-function statusLabel(status: TaskStatus): string {
-  if (status === 'in-progress') return 'In progress'
-  if (status === 'done') return 'Done'
-  return 'To do'
+function StatusIcon({ status }: { status: TaskStatus }): React.JSX.Element {
+  if (status === 'done') return <Check className="h-3 w-3" strokeWidth={2.6} />
+  if (status === 'in-progress') return <CircleDot className="h-3.5 w-3.5" />
+  if (status === 'wait') return <Clock className="h-3.5 w-3.5" />
+  return <Circle className="h-3.5 w-3.5" />
 }
 
 function PriorityDot({
@@ -81,6 +76,13 @@ function PriorityDot({
   )
 }
 
+function countForStatus(stats: ReturnType<typeof summarizeTasks>, status: TaskStatus): number {
+  if (status === 'todo') return stats.todo
+  if (status === 'in-progress') return stats.inProgress
+  if (status === 'wait') return stats.wait
+  return stats.done
+}
+
 export function TasksPanel(): React.JSX.Element {
   const { projectId, projectName } = useActiveProject()
   const tasks = useTasksStore((state) => state.tasksByProject[projectId ?? ''] ?? EMPTY_TASKS)
@@ -98,22 +100,13 @@ export function TasksPanel(): React.JSX.Element {
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
 
-  const doneCount = tasks.filter((task) => task.status === 'done').length
-  const activeCount = tasks.length - doneCount
-  const openByPriority = useMemo(() => {
-    const counts: Record<TaskPriority, number> = { high: 0, medium: 0, low: 0 }
-    for (const task of tasks) {
-      if (task.status !== 'done') counts[task.priority] += 1
-    }
-    return counts
-  }, [tasks])
+  const stats = useMemo(() => summarizeTasks(tasks), [tasks])
 
   const visibleTasks = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return [...tasks]
       .filter((task) => {
-        if (filter === 'active' && task.status === 'done') return false
-        if (filter === 'done' && task.status !== 'done') return false
+        if (filter !== 'all' && task.status !== filter) return false
         if (priorityFilter !== 'all' && task.priority !== priorityFilter) return false
         return !needle || task.title.toLowerCase().includes(needle)
       })
@@ -121,15 +114,11 @@ export function TasksPanel(): React.JSX.Element {
   }, [filter, priorityFilter, query, tasks])
 
   const groups = useMemo(() => {
-    const open = visibleTasks.filter((task) => task.status !== 'done')
-    const done = visibleTasks.filter((task) => task.status === 'done')
-    const priorityGroups = TASK_PRIORITIES.map((priority) => ({
-      key: priority,
-      label: TASK_PRIORITY_LABELS[priority],
-      tasks: open.filter((task) => task.priority === priority)
+    return GROUP_ORDER.map((status) => ({
+      key: status,
+      label: TASK_STATUS_LABELS[status],
+      tasks: visibleTasks.filter((task) => task.status === status)
     })).filter((group) => group.tasks.length > 0)
-    if (done.length === 0) return priorityGroups
-    return [...priorityGroups, { key: 'done' as const, label: 'Done', tasks: done }]
   }, [visibleTasks])
 
   const showGroupLabels = groups.length > 1
@@ -154,6 +143,10 @@ export function TasksPanel(): React.JSX.Element {
     setEditingTitle('')
   }
 
+  const toggleStatusFilter = (status: TaskStatus): void => {
+    setFilter((current) => (current === status ? 'all' : status))
+  }
+
   const togglePriorityFilter = (priority: TaskPriority): void => {
     setPriorityFilter((current) => (current === priority ? 'all' : priority))
   }
@@ -174,7 +167,8 @@ export function TasksPanel(): React.JSX.Element {
         <p className="task-header-title">{projectName ?? 'Tasks'}</p>
         {tasks.length > 0 ? (
           <span className="task-header-count">
-            {activeCount === 0 ? 'All done' : `${activeCount} left`}
+            {stats.open === 0 ? 'All done' : `${stats.open} open`}
+            {stats.wait > 0 ? ` · ${stats.wait} wait` : ''}
           </span>
         ) : null}
       </div>
@@ -211,47 +205,75 @@ export function TasksPanel(): React.JSX.Element {
       </form>
 
       {tasks.length > 0 ? (
-        <div className="task-stats shrink-0" aria-label="Open tasks by priority">
-          {TASK_PRIORITIES.map((priority) => (
-            <button
-              key={priority}
-              type="button"
-              className={cn(
-                'task-stat',
-                `is-${priority}`,
-                priorityFilter === priority && 'is-active',
-                openByPriority[priority] === 0 && 'is-empty'
-              )}
-              onClick={() => togglePriorityFilter(priority)}
-              title={`${TASK_PRIORITY_LABELS[priority]} · ${openByPriority[priority]} open`}
-            >
-              <span className={cn('task-priority', `is-${priority}`)} aria-hidden />
-              <strong>{openByPriority[priority]}</strong>
-              <span>{TASK_PRIORITY_LABELS[priority]}</span>
-            </button>
-          ))}
+        <div className="task-stats shrink-0" aria-label="Task status counts">
+          {TASK_STATUSES.map((status) => {
+            const count = countForStatus(stats, status)
+            return (
+              <button
+                key={status}
+                type="button"
+                className={cn(
+                  'task-stat',
+                  `is-status-${status}`,
+                  filter === status && 'is-active',
+                  count === 0 && 'is-empty'
+                )}
+                onClick={() => toggleStatusFilter(status)}
+                title={`${TASK_STATUS_LABELS[status]} · ${count}`}
+              >
+                <span className={cn('task-status-dot', `is-${status}`)} aria-hidden />
+                <strong>{count}</strong>
+                <span>{TASK_STATUS_LABELS[status]}</span>
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
+
+      {stats.doneThisWeek > 0 ? (
+        <p className="task-week shrink-0">{stats.doneThisWeek} done this week</p>
+      ) : null}
+
+      {tasks.some((task) => isOpenTaskStatus(task.status)) ? (
+        <div className="task-stats is-priority shrink-0" aria-label="Open tasks by priority">
+          {TASK_PRIORITIES.map((priority) => {
+            const count = tasks.filter(
+              (task) => isOpenTaskStatus(task.status) && task.priority === priority
+            ).length
+            return (
+              <button
+                key={priority}
+                type="button"
+                className={cn(
+                  'task-stat',
+                  `is-${priority}`,
+                  priorityFilter === priority && 'is-active',
+                  count === 0 && 'is-empty'
+                )}
+                onClick={() => togglePriorityFilter(priority)}
+                title={`${TASK_PRIORITY_LABELS[priority]} · ${count} open`}
+              >
+                <span className={cn('task-priority', `is-${priority}`)} aria-hidden />
+                <strong>{count}</strong>
+                <span>{TASK_PRIORITY_LABELS[priority]}</span>
+              </button>
+            )
+          })}
         </div>
       ) : null}
 
       <div className="task-toolbar shrink-0">
         <div className="task-filters">
-          {(['all', 'active', 'done'] as TaskFilter[]).map((option) => (
-            <button
-              key={option}
-              type="button"
-              onClick={() => setFilter(option)}
-              className={cn('task-filter', filter === option && 'is-active')}
-            >
-              {option === 'all' ? 'All' : option === 'active' ? 'Open' : 'Done'}
-            </button>
-          ))}
-        </div>
-        {doneCount > 0 ? (
           <button
             type="button"
-            onClick={() => clearCompleted(projectId)}
-            className="task-clear"
+            onClick={() => setFilter('all')}
+            className={cn('task-filter', filter === 'all' && 'is-active')}
           >
+            All
+          </button>
+        </div>
+        {stats.done > 0 ? (
+          <button type="button" onClick={() => clearCompleted(projectId)} className="task-clear">
             Clear
           </button>
         ) : null}
@@ -287,29 +309,25 @@ export function TasksPanel(): React.JSX.Element {
           <ul className="task-rows">
             {groups.map((group) => (
               <li key={group.key} className="task-group">
-                {showGroupLabels ? (
-                  <p className="task-group-label">{group.label}</p>
-                ) : null}
+                {showGroupLabels ? <p className="task-group-label">{group.label}</p> : null}
                 <ul>
                   {group.tasks.map((task) => (
                     <li
                       key={task.id}
-                      className={cn('task-item', task.status === 'done' && 'is-done')}
+                      className={cn(
+                        'task-item',
+                        task.status === 'done' && 'is-done',
+                        task.status === 'wait' && 'is-wait'
+                      )}
                     >
                       <button
                         type="button"
-                        onClick={() => setTaskStatus(projectId, task.id, nextStatus(task.status))}
+                        onClick={() => setTaskStatus(projectId, task.id, nextTaskStatus(task.status))}
                         className={cn('task-check', `is-${task.status}`)}
-                        title={`Mark as ${statusLabel(nextStatus(task.status))}`}
-                        aria-label={`Mark ${task.title} as ${statusLabel(nextStatus(task.status))}`}
+                        title={`Mark as ${TASK_STATUS_LABELS[nextTaskStatus(task.status)]}`}
+                        aria-label={`Mark ${task.title} as ${TASK_STATUS_LABELS[nextTaskStatus(task.status)]}`}
                       >
-                        {task.status === 'done' ? (
-                          <Check className="h-3 w-3" strokeWidth={2.6} />
-                        ) : task.status === 'in-progress' ? (
-                          <CircleDot className="h-3.5 w-3.5" />
-                        ) : (
-                          <Circle className="h-3.5 w-3.5" />
-                        )}
+                        <StatusIcon status={task.status} />
                       </button>
 
                       {editingTaskId === task.id ? (
@@ -334,7 +352,7 @@ export function TasksPanel(): React.JSX.Element {
                           type="button"
                           className="task-title"
                           onDoubleClick={() => beginEdit(task)}
-                          title={`${task.title} · ${TASK_PRIORITY_LABELS[task.priority]} · Double-click to rename`}
+                          title={`${task.title} · ${TASK_STATUS_LABELS[task.status]} · ${TASK_PRIORITY_LABELS[task.priority]} · Double-click to rename`}
                         >
                           {task.title}
                         </button>

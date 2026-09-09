@@ -35,7 +35,7 @@ import {
   createDefaultActiveAccountByKind,
   type ActiveAccountByKind
 } from '@shared/contracts/accounts'
-import type { ProjectTask, TaskPriority, TaskStatus } from '@shared/contracts/tasks'
+import { parseTaskStatus, type ProjectTask, type TaskPriority } from '@shared/contracts/tasks'
 import { initMusicSchema } from '../music/store'
 import { initDownloadSchema } from '../music/downloader/job-store'
 import { v4 as uuidv4 } from 'uuid'
@@ -282,6 +282,11 @@ function parsePanels(raw: unknown): PanelDefinition[] {
         ...(panel.launchMode === 'login' ? { launchMode: 'login' as const } : {}),
         ...(typeof panel.accountId === 'string' && panel.accountId.length <= 200
           ? { accountId: panel.accountId }
+          : {}),
+        ...(typeof panel.worktreePath === 'string' &&
+        panel.worktreePath.length > 0 &&
+        panel.worktreePath.length <= 1000
+          ? { worktreePath: panel.worktreePath }
           : {})
       })
     }
@@ -621,10 +626,17 @@ function parseTasks(raw: unknown): ProjectTask[] {
       return []
     }
 
-    const status: TaskStatus =
-      task.status === 'in-progress' || task.status === 'done' ? task.status : 'todo'
+    const status = parseTaskStatus(task.status)
     const priority: TaskPriority =
       task.priority === 'low' || task.priority === 'high' ? task.priority : 'medium'
+    const createdAt = typeof task.createdAt === 'number' ? task.createdAt : Date.now()
+    const updatedAt = typeof task.updatedAt === 'number' ? task.updatedAt : createdAt
+    const completedAt =
+      status === 'done'
+        ? typeof task.completedAt === 'number'
+          ? task.completedAt
+          : updatedAt
+        : undefined
 
     return [
       {
@@ -632,8 +644,9 @@ function parseTasks(raw: unknown): ProjectTask[] {
         title: task.title.trim(),
         status,
         priority,
-        createdAt: typeof task.createdAt === 'number' ? task.createdAt : Date.now(),
-        updatedAt: typeof task.updatedAt === 'number' ? task.updatedAt : Date.now()
+        createdAt,
+        updatedAt,
+        ...(completedAt !== undefined ? { completedAt } : {})
       }
     ]
   })

@@ -36,10 +36,18 @@ import {
 import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import { useAiAccountsStore } from './ai-accounts-store'
-import { endAgentSession, recordDeveloperEvent } from '@renderer/lib/developer-events'
+import { endAgentSession, finalizeAgentSession, recordDeveloperEvent } from '@renderer/lib/developer-events'
 
 const PTY_PANEL_TYPES = new Set<PanelType>([
   'terminal',
+  'claude',
+  'cursor',
+  'gemini',
+  'antigravity',
+  'codex'
+])
+
+const AGENT_WORKTREE_TYPES = new Set<PanelType>([
   'claude',
   'cursor',
   'gemini',
@@ -56,10 +64,27 @@ function pruneCenterGrid(
   return next
 }
 
-function terminatePanelSession(panelId: string, type: PanelType): void {
-  if (!PTY_PANEL_TYPES.has(type) || typeof window === 'undefined' || !window.api?.pty) return
-  endAgentSession(panelId, null)
-  void window.api.pty.kill({ sessionId: panelId })
+function releasePanelIsolation(panel: PanelDefinition, projectRoot: string | null | undefined): void {
+  if (PTY_PANEL_TYPES.has(panel.type) && typeof window !== 'undefined' && window.api?.pty) {
+    void (async () => {
+      if (AGENT_WORKTREE_TYPES.has(panel.type)) {
+        await finalizeAgentSession(panel.id, null, 'closed')
+      } else {
+        endAgentSession(panel.id, null, 'closed')
+      }
+      await window.api.pty.kill({ sessionId: panel.id })
+      if (
+        panel.worktreePath &&
+        projectRoot &&
+        AGENT_WORKTREE_TYPES.has(panel.type) &&
+        window.api.git?.removeWorktree
+      ) {
+        await window.api.git.removeWorktree({ projectRoot, worktreePath: panel.worktreePath })
+      }
+    })()
+    return
+  }
+  endAgentSession(panel.id, null, 'closed')
 }
 
 function noteProjectOpened(project: Project): void {
@@ -138,6 +163,7 @@ interface WorkspaceStore extends WorkspaceSnapshot {
     view: 'files' | 'changes' | 'accounts' | 'tasks' | 'profile' | 'music'
   ) => void
   clearPanelLaunchMode: (panelId: string) => void
+  setPanelWorktree: (panelId: string, worktreePath: string | null) => void
   workspaceScale: number
   setWorkspaceScale: (scale: number) => void
   nudgeWorkspaceScale: (deltaSteps: number) => void
@@ -254,7 +280,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   removeProject: (projectId) => {
     const workspace = get().workspaces[projectId]
-    workspace?.panels.forEach((panel) => terminatePanelSession(panel.id, panel.type))
+    const projectRoot = get().projects.find((project) => project.id === projectId)?.folderPath
+    workspace?.panels.forEach((panel) => releasePanelIsolation(panel, projectRoot))
 
     set((state) => {
       const projects = state.projects.filter((p) => p.id !== projectId)
@@ -483,7 +510,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     if (!workspace) return
 
     const removedPanel = workspace.panels.find((p) => p.id === panelId)
-    if (removedPanel) terminatePanelSession(removedPanel.id, removedPanel.type)
+    const projectRoot = get().projects.find((project) => project.id === activeProjectId)?.folderPath
+    if (removedPanel) releasePanelIsolation(removedPanel, projectRoot)
 
     const nextPanels = workspace.panels.filter((p) => p.id !== panelId)
     const { [panelId]: _removed, ...restRects } = workspace.layout.centerPanelRects ?? {}
@@ -526,8 +554,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       }
 
       changed = true
+      const projectRoot = get().projects.find((project) => project.id === projectId)?.folderPath
       for (const panel of workspace.panels) {
-        if (removedIds.has(panel.id)) terminatePanelSession(panel.id, panel.type)
+        if (removedIds.has(panel.id)) releasePanelIsolation(panel, projectRoot)
       }
       const centerPanelRects = Object.fromEntries(
         Object.entries(workspace.layout.centerPanelRects ?? {}).filter(
@@ -569,8 +598,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       }
 
       changed = true
+      const projectRoot = get().projects.find((project) => project.id === projectId)?.folderPath
       for (const panel of workspace.panels) {
-        if (removedIds.has(panel.id)) terminatePanelSession(panel.id, panel.type)
+        if (removedIds.has(panel.id)) releasePanelIsolation(panel, projectRoot)
       }
       const centerPanelRects = Object.fromEntries(
         Object.entries(workspace.layout.centerPanelRects ?? {}).filter(
@@ -874,6 +904,29 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         }
       }
     })
+  },
+
+  setPanelWorktree: (panelId, worktreePath) => {
+    const { workspaces } = get()
+    let changed = false
+    const nextWorkspaces: Record<string, ProjectWorkspaceState> = {}
+    for (const [projectId, workspace] of Object.entries(workspaces)) {
+      if (!workspace.panels.some((panel) => panel.id === panelId)) {
+        nextWorkspaces[projectId] = workspace
+        continue
+      }
+      changed = true
+      nextWorkspaces[projectId] = {
+        ...workspace,
+        panels: workspace.panels.map((panel) => {
+          if (panel.id !== panelId) return panel
+          if (worktreePath) return { ...panel, worktreePath }
+          const { worktreePath: _removed, ...rest } = panel
+          return rest
+        })
+      }
+    }
+    if (changed) set({ workspaces: nextWorkspaces })
   },
 
   clearPanelLaunchMode: (panelId) => {

@@ -21,6 +21,8 @@ export interface PanelDefinition {
   zone: PanelZone
   launchMode?: 'normal' | 'login'
   accountId?: string
+  /** Isolated git worktree for this agent. Detached HEAD, not a new named branch. */
+  worktreePath?: string
 }
 
 export type PanelZone = 'left' | 'center' | 'right' | 'bottom'

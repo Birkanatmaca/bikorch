@@ -15,7 +15,8 @@ import {
   type PromptHistoryFilter,
   type PromptSource,
   type RecordPromptRequest,
-  type WorkCategory
+  type WorkCategory,
+  type AgentSessionListRequest
 } from '@shared/contracts/developer-intelligence'
 
 /** Validation for everything that crosses the IPC boundary into Developer Intelligence. */
@@ -89,12 +90,22 @@ export function parseEventInput(payload: unknown): DeveloperEventInput | null {
     case 'agent.session.started': {
       const kind = body['kind']
       if (typeof kind !== 'string' || !KINDS.has(kind)) return null
+      const worktreePath =
+        typeof body['worktreePath'] === 'string' && body['worktreePath'].length > 0 && body['worktreePath'].length <= 1000
+          ? body['worktreePath']
+          : undefined
+      const headSha =
+        typeof body['headSha'] === 'string' && /^[a-fA-F0-9]{7,64}$/.test(body['headSha'])
+          ? body['headSha']
+          : undefined
       return {
         type: 'agent.session.started',
         ...common,
         payload: {
           kind: kind as 'terminal',
-          ...(body['launchMode'] === 'login' ? { launchMode: 'login' as const } : { launchMode: 'normal' as const })
+          ...(body['launchMode'] === 'login' ? { launchMode: 'login' as const } : { launchMode: 'normal' as const }),
+          ...(worktreePath ? { worktreePath } : {}),
+          ...(headSha ? { headSha } : {})
         }
       }
     }
@@ -104,6 +115,31 @@ export function parseEventInput(payload: unknown): DeveloperEventInput | null {
       const promptCount = finiteNumber(body['promptCount'])
       if (typeof kind !== 'string' || !KINDS.has(kind) || durationMs === null || durationMs < 0) return null
       const exitCode = finiteNumber(body['exitCode'])
+      const closeReason =
+        body['closeReason'] === 'exited' || body['closeReason'] === 'closed' || body['closeReason'] === 'error'
+          ? body['closeReason']
+          : undefined
+      const injectedContext = Array.isArray(body['injectedContext'])
+        ? body['injectedContext'].flatMap((item) => {
+            if (!isRecord(item)) return []
+            const category = typeof item['category'] === 'string' ? item['category'].trim().slice(0, 80) : ''
+            const preview = typeof item['preview'] === 'string' ? item['preview'].trim().slice(0, 160) : ''
+            return category && preview ? [{ category, preview }] : []
+          }).slice(0, 12)
+        : []
+      const changedFiles = stringList(body['changedFiles'], MAX_FILES, 1000)
+      const commits = Array.isArray(body['commits'])
+        ? body['commits'].flatMap((item) => {
+            if (!isRecord(item)) return []
+            const shortHash = typeof item['shortHash'] === 'string' ? item['shortHash'].trim().slice(0, 12) : ''
+            const subject = typeof item['subject'] === 'string' ? item['subject'].trim().slice(0, 200) : ''
+            return shortHash && subject ? [{ shortHash, subject }] : []
+          }).slice(0, 20)
+        : []
+      const headSha =
+        typeof body['headSha'] === 'string' && /^[a-fA-F0-9]{7,64}$/.test(body['headSha'])
+          ? body['headSha']
+          : undefined
       return {
         type: 'agent.session.ended',
         ...common,
@@ -111,7 +147,12 @@ export function parseEventInput(payload: unknown): DeveloperEventInput | null {
           kind: kind as 'terminal',
           durationMs: Math.floor(durationMs),
           promptCount: Math.max(0, Math.floor(promptCount ?? 0)),
-          exitCode: exitCode === null ? null : Math.floor(exitCode)
+          exitCode: exitCode === null ? null : Math.floor(exitCode),
+          ...(closeReason ? { closeReason } : {}),
+          ...(injectedContext.length > 0 ? { injectedContext } : {}),
+          ...(changedFiles.length > 0 ? { changedFiles } : {}),
+          ...(commits.length > 0 ? { commits } : {}),
+          ...(headSha ? { headSha } : {})
         }
       }
     }
@@ -204,6 +245,7 @@ export function parsePromptFilter(payload: unknown): PromptHistoryFilter {
   return {
     ...(optionalId(payload['provider']) ? { provider: optionalId(payload['provider']) } : {}),
     ...(optionalId(payload['projectId']) ? { projectId: optionalId(payload['projectId']) } : {}),
+    ...(optionalId(payload['sessionId']) ? { sessionId: optionalId(payload['sessionId']) } : {}),
     ...(typeof category === 'string' && WORK_CATEGORIES.includes(category as WorkCategory)
       ? { category: category as WorkCategory }
       : {}),
@@ -326,5 +368,16 @@ export function parseContextRequest(payload: unknown): MemoryContextRequest | nu
     ...(optionalId(payload['projectId']) ? { projectId: optionalId(payload['projectId']) } : {}),
     ...(query ? { query } : {}),
     ...(limit !== null ? { limit: Math.min(20, Math.max(1, Math.floor(limit))) } : {})
+  }
+}
+
+export function parseSessionListRequest(payload: unknown): AgentSessionListRequest {
+  if (!isRecord(payload)) return {}
+  const limit = finiteNumber(payload['limit'])
+  const offset = finiteNumber(payload['offset'])
+  return {
+    ...(optionalId(payload['projectId']) ? { projectId: optionalId(payload['projectId']) } : {}),
+    ...(limit !== null ? { limit: Math.min(80, Math.max(1, Math.floor(limit))) } : {}),
+    ...(offset !== null ? { offset: Math.max(0, Math.floor(offset)) } : {})
   }
 }

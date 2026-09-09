@@ -14,7 +14,10 @@ import {
   type MemoryUpdate,
   type MetricsRangeKey,
   type PromptHistoryFilter,
-  type PromptHistoryPage
+  type PromptHistoryPage,
+  type AgentSessionDetail,
+  type AgentSessionListPage,
+  type AgentSessionListRequest
 } from '@shared/contracts/developer-intelligence'
 
 export type ProfileSection =
@@ -22,6 +25,7 @@ export type ProfileSection =
   | 'insights'
   | 'costs'
   | 'prompts'
+  | 'sessions'
   | 'memory'
   | 'privacy'
 
@@ -42,6 +46,9 @@ interface DeveloperIntelligenceStore {
   prompts: PromptHistoryPage
   promptsLoading: boolean
   promptFilter: PromptHistoryFilter
+  sessions: AgentSessionListPage
+  sessionsLoading: boolean
+  sessionFilter: AgentSessionListRequest
   memories: DeveloperMemory[]
   memoriesLoaded: boolean
   stats: DeveloperIntelligenceStats | null
@@ -61,6 +68,9 @@ interface DeveloperIntelligenceStore {
   setPromptFilter: (filter: PromptHistoryFilter) => void
   loadPrompts: () => Promise<void>
   deletePrompts: (ids: string[] | 'all') => Promise<void>
+  setSessionFilter: (filter: AgentSessionListRequest) => void
+  loadSessions: () => Promise<void>
+  getSession: (id: string) => Promise<AgentSessionDetail | null>
   loadMemories: () => Promise<void>
   createMemory: (draft: MemoryDraft) => Promise<void>
   updateMemory: (id: string, updates: MemoryUpdate) => Promise<void>
@@ -73,6 +83,7 @@ interface DeveloperIntelligenceStore {
 }
 
 const EMPTY_PAGE: PromptHistoryPage = { items: [], total: 0 }
+const EMPTY_SESSIONS: AgentSessionListPage = { items: [], total: 0 }
 
 function api(): Window['api']['developerIntelligence'] | null {
   return typeof window !== 'undefined' && window.api?.developerIntelligence
@@ -91,6 +102,9 @@ export const useDeveloperIntelligenceStore = create<DeveloperIntelligenceStore>(
   prompts: EMPTY_PAGE,
   promptsLoading: false,
   promptFilter: { limit: 50, offset: 0 },
+  sessions: EMPTY_SESSIONS,
+  sessionsLoading: false,
+  sessionFilter: { limit: 40, offset: 0 },
   memories: [],
   memoriesLoaded: false,
   stats: null,
@@ -166,6 +180,30 @@ export const useDeveloperIntelligenceStore = create<DeveloperIntelligenceStore>(
     } finally {
       await get().loadPrompts()
       void get().loadStats()
+    }
+  },
+
+  setSessionFilter: (filter) => set({ sessionFilter: { limit: 40, offset: 0, ...filter } }),
+
+  loadSessions: async () => {
+    const bridge = api()
+    if (!bridge?.listSessions) return
+    set({ sessionsLoading: true })
+    try {
+      const sessions = await bridge.listSessions(get().sessionFilter)
+      set({ sessions, sessionsLoading: false })
+    } catch {
+      set({ sessions: EMPTY_SESSIONS, sessionsLoading: false })
+    }
+  },
+
+  getSession: async (id) => {
+    const bridge = api()
+    if (!bridge?.getSession) return null
+    try {
+      return await bridge.getSession(id)
+    } catch {
+      return null
     }
   },
 
@@ -261,7 +299,7 @@ export const useDeveloperIntelligenceStore = create<DeveloperIntelligenceStore>(
     if (!bridge) return
     await bridge.clear(target)
     if (target === 'all') set({ settings: createDefaultDeveloperIntelligenceSettings() })
-    await Promise.all([get().loadPrompts(), get().loadMemories(), get().loadStats()])
+    await Promise.all([get().loadPrompts(), get().loadMemories(), get().loadStats(), get().loadSessions()])
     get().noteActivity()
   }
 }))

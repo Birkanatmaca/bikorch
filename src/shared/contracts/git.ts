@@ -79,6 +79,37 @@ export interface GitCommitRequest {
   message: string
 }
 
+export const AGENT_WORKTREE_KINDS = ['claude', 'cursor', 'gemini', 'antigravity', 'codex'] as const
+export type AgentWorktreeKind = (typeof AGENT_WORKTREE_KINDS)[number]
+
+export interface GitEnsureWorktreeRequest {
+  projectRoot: string
+  panelId: string
+  kind: AgentWorktreeKind
+}
+
+export interface GitEnsureWorktreeResponse {
+  ok: boolean
+  worktreePath?: string
+  error?: string
+}
+
+export interface GitRemoveWorktreeRequest {
+  projectRoot: string
+  worktreePath: string
+}
+
+export interface GitSessionSnapshotRequest {
+  cwd: string
+  sinceSha?: string
+}
+
+export interface GitSessionSnapshot {
+  headSha: string | null
+  changedFiles: string[]
+  commits: Array<{ shortHash: string; subject: string }>
+}
+
 export const GIT_IPC = {
   DISCOVER: 'git:discover',
   STATUS: 'git:status',
@@ -89,7 +120,10 @@ export const GIT_IPC = {
   UNSTAGE: 'git:unstage',
   STAGE_ALL: 'git:stage-all',
   UNSTAGE_ALL: 'git:unstage-all',
-  COMMIT: 'git:commit'
+  COMMIT: 'git:commit',
+  ENSURE_WORKTREE: 'git:ensure-worktree',
+  REMOVE_WORKTREE: 'git:remove-worktree',
+  SESSION_SNAPSHOT: 'git:session-snapshot'
 } as const
 
 export const GIT_STATUS_LABELS: Record<GitChangeStatus, string> = {

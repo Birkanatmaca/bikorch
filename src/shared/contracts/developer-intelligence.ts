@@ -58,6 +58,20 @@ export interface PromptSentPayload {
 export interface SessionStartedPayload {
   kind: CliUsageKind | 'terminal'
   launchMode?: 'normal' | 'login'
+  worktreePath?: string
+  headSha?: string
+}
+
+export type SessionCloseReason = 'exited' | 'closed' | 'error'
+
+export interface SessionContextItem {
+  category: string
+  preview: string
+}
+
+export interface SessionCommitItem {
+  shortHash: string
+  subject: string
 }
 
 export interface SessionEndedPayload {
@@ -65,6 +79,46 @@ export interface SessionEndedPayload {
   durationMs: number
   promptCount: number
   exitCode: number | null
+  closeReason?: SessionCloseReason
+  injectedContext?: SessionContextItem[]
+  changedFiles?: string[]
+  commits?: SessionCommitItem[]
+  headSha?: string
+}
+
+export interface AgentSessionSummary {
+  id: string
+  sessionId: string
+  kind: CliUsageKind | 'terminal'
+  projectId?: string
+  startedAt: number
+  endedAt?: number
+  durationMs: number
+  promptCount: number
+  stillOpen: boolean
+  closeReason?: SessionCloseReason
+  fileCount: number
+  commitCount: number
+}
+
+export interface AgentSessionDetail extends AgentSessionSummary {
+  exitCode: number | null
+  injectedContext: SessionContextItem[]
+  changedFiles: string[]
+  commits: SessionCommitItem[]
+  prompts: PromptRecord[]
+  promptTextAvailable: boolean
+}
+
+export interface AgentSessionListRequest {
+  projectId?: string
+  limit?: number
+  offset?: number
+}
+
+export interface AgentSessionListPage {
+  items: AgentSessionSummary[]
+  total: number
 }
 
 export interface GitCommitPayload {
@@ -188,6 +242,7 @@ export interface RecordPromptResponse {
 export interface PromptHistoryFilter {
   provider?: string
   projectId?: string
+  sessionId?: string
   category?: WorkCategory
   source?: PromptSource
   from?: number
@@ -469,7 +524,9 @@ export const DEVELOPER_INTELLIGENCE_IPC = {
   EXPORT: 'developer-intelligence:export',
   CLEAR: 'developer-intelligence:clear',
   ANALYZE: 'developer-intelligence:analyze',
-  GET_CONTEXT: 'developer-intelligence:get-context'
+  GET_CONTEXT: 'developer-intelligence:get-context',
+  LIST_SESSIONS: 'developer-intelligence:list-sessions',
+  GET_SESSION: 'developer-intelligence:get-session'
 } as const
 
 export const DEVELOPER_EVENT_TYPES: DeveloperEventType[] = [

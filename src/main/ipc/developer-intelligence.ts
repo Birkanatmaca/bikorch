@@ -16,6 +16,8 @@ import {
   listPrompts,
   recordDeveloperEvent,
   recordPrompt,
+  listAgentSessions,
+  getAgentSession,
   updateDeveloperIntelligenceSettings,
   updateMemory
 } from '../developer-intelligence/service'
@@ -29,7 +31,8 @@ import {
   parseMetricsRequest,
   parsePromptFilter,
   parsePromptRequest,
-  parseSettingsUpdate
+  parseSettingsUpdate,
+  parseSessionListRequest
 } from '../developer-intelligence/validation'
 
 export function registerDeveloperIntelligenceHandlers(): void {
@@ -128,5 +131,16 @@ export function registerDeveloperIntelligenceHandlers(): void {
     const request = parseContextRequest(payload)
     if (!request) throw new Error('Invalid context request')
     return getMemoryContext(request)
+  })
+
+  ipcMain.handle(DEVELOPER_INTELLIGENCE_IPC.LIST_SESSIONS, (_event, payload: unknown) => {
+    return listAgentSessions(parseSessionListRequest(payload))
+  })
+
+  ipcMain.handle(DEVELOPER_INTELLIGENCE_IPC.GET_SESSION, async (_event, payload: unknown) => {
+    if (typeof payload !== 'string' || payload.length === 0 || payload.length > 300) {
+      throw new Error('Invalid session id')
+    }
+    return getAgentSession(payload)
   })
 }

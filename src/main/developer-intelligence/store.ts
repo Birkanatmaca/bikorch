@@ -299,7 +299,13 @@ export class DeveloperIntelligenceStore {
     this.onWrite()
   }
 
-  listEvents(options: { from?: number; to?: number; types?: DeveloperEventType[]; limit?: number } = {}): DeveloperEvent[] {
+  listEvents(options: {
+    from?: number
+    to?: number
+    types?: DeveloperEventType[]
+    limit?: number
+    order?: 'asc' | 'desc'
+  } = {}): DeveloperEvent[] {
     const clauses: string[] = []
     const params: SqlValue[] = []
     if (options.from !== undefined) {
@@ -316,9 +322,10 @@ export class DeveloperIntelligenceStore {
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
     const limit = options.limit ? `LIMIT ${Math.max(1, Math.floor(options.limit))}` : ''
+    const order = options.order === 'desc' ? 'DESC' : 'ASC'
     return rows(
       this.db,
-      `SELECT * FROM di_events ${where} ORDER BY occurred_at ASC ${limit}`,
+      `SELECT * FROM di_events ${where} ORDER BY occurred_at ${order} ${limit}`,
       params
     ).flatMap((row) => {
       const event = rowToEvent(row)
@@ -388,6 +395,10 @@ export class DeveloperIntelligenceStore {
     if (filter.projectId) {
       clauses.push('project_id = ?')
       params.push(filter.projectId)
+    }
+    if (filter.sessionId) {
+      clauses.push('session_id = ?')
+      params.push(filter.sessionId)
     }
     if (filter.category) {
       clauses.push('category = ?')

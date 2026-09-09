@@ -6,9 +6,15 @@ import {
   type GitCommitRequest,
   type GitDiscoverRequest,
   type GitCheckoutBranchRequest,
+  type GitEnsureWorktreeRequest,
+  type GitRemoveWorktreeRequest,
+  type GitSessionSnapshotRequest,
   type GitStatusRequest,
   GIT_IPC
 } from '@shared/contracts/git'
+import { isAgentWorktreeKind } from '../git/worktree-paths'
+import { ensureAgentWorktree, removeAgentWorktree } from '../git/worktrees'
+import { snapshotAgentGit } from '../git/session-snapshot'
 import {
   checkoutGitBranch,
   commitGitChanges,
@@ -90,6 +96,31 @@ function validateCommitRequest(payload: unknown): payload is GitCommitRequest {
   )
 }
 
+function validateEnsureWorktreeRequest(payload: unknown): payload is GitEnsureWorktreeRequest {
+  if (!payload || typeof payload !== 'object') return false
+  const req = payload as GitEnsureWorktreeRequest
+  return (
+    typeof req.projectRoot === 'string' &&
+    req.projectRoot.length > 0 &&
+    typeof req.panelId === 'string' &&
+    req.panelId.length >= 8 &&
+    req.panelId.length <= 80 &&
+    isAgentWorktreeKind(req.kind)
+  )
+}
+
+function validateRemoveWorktreeRequest(payload: unknown): payload is GitRemoveWorktreeRequest {
+  if (!payload || typeof payload !== 'object') return false
+  const req = payload as GitRemoveWorktreeRequest
+  return (
+    typeof req.projectRoot === 'string' &&
+    req.projectRoot.length > 0 &&
+    typeof req.worktreePath === 'string' &&
+    req.worktreePath.length > 0 &&
+    req.worktreePath.length <= 1000
+  )
+}
+
 export function registerGitHandlers(): void {
   ipcMain.handle(GIT_IPC.DISCOVER, async (_event, payload: unknown) => {
     if (!validateDiscoverRequest(payload)) {
@@ -161,5 +192,30 @@ export function registerGitHandlers(): void {
     if (!validateCommitRequest(payload)) throw new Error('Invalid git commit request')
     await commitGitChanges(payload.projectRoot, payload.message)
     return { ok: true }
+  })
+
+  ipcMain.handle(GIT_IPC.ENSURE_WORKTREE, async (_event, payload: unknown) => {
+    if (!validateEnsureWorktreeRequest(payload)) {
+      throw new Error('Invalid git worktree request')
+    }
+    return ensureAgentWorktree(payload)
+  })
+
+  ipcMain.handle(GIT_IPC.REMOVE_WORKTREE, async (_event, payload: unknown) => {
+    if (!validateRemoveWorktreeRequest(payload)) {
+      throw new Error('Invalid git worktree remove request')
+    }
+    return removeAgentWorktree(payload)
+  })
+
+  ipcMain.handle(GIT_IPC.SESSION_SNAPSHOT, async (_event, payload: unknown) => {
+    if (!payload || typeof payload !== 'object') throw new Error('Invalid git session snapshot request')
+    const req = payload as GitSessionSnapshotRequest
+    if (typeof req.cwd !== 'string' || req.cwd.length === 0 || req.cwd.length > 1000) {
+      throw new Error('Invalid git session snapshot request')
+    }
+    const sinceSha =
+      typeof req.sinceSha === 'string' && /^[a-fA-F0-9]{7,64}$/.test(req.sinceSha) ? req.sinceSha : undefined
+    return snapshotAgentGit(req.cwd, sinceSha)
   })
 }

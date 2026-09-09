@@ -2,6 +2,8 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import type { AgentWorktreeKind } from '@shared/contracts/git'
+import { AGENT_WORKTREE_KINDS } from '@shared/contracts/git'
 import type { PtyCreateResponse, PtyEvent, PtyKind, PtyLaunchMode } from '@shared/contracts/pty'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
@@ -26,8 +28,11 @@ import { formatMemoryContextBlock } from '@renderer/lib/developer-context'
 import {
   beginAgentSession,
   endAgentSession,
+  finalizeAgentSession,
   notePromptInSession,
-  recordPromptSent
+  noteSessionContext,
+  recordPromptSent,
+  resumeAgentSession
 } from '@renderer/lib/developer-events'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 
@@ -303,7 +308,7 @@ export function TerminalView({
             window.clearTimeout(idleTimer)
             idleTimer = null
           }
-          if (cli) endAgentSession(sessionId, event.exitCode)
+          if (cli) endAgentSession(sessionId, event.exitCode, 'exited')
           setStatus(sessionId, 'stopped')
           terminal.writeln(`\r\n\x1b[90m[Process exited with code ${event.exitCode}]\x1b[0m`)
           if (shouldCaptureAccount) {
@@ -330,6 +335,13 @@ export function TerminalView({
                 })
                 const prefix = formatMemoryContextBlock(context)
                 if (prefix) {
+                  noteSessionContext(
+                    sessionId,
+                    context.memories.map((memory) => ({
+                      category: memory.category,
+                      preview: memory.content.slice(0, 160)
+                    }))
+                  )
                   await window.api.pty.write({ sessionId, data: prefix })
                 }
               } catch {
@@ -380,7 +392,29 @@ export function TerminalView({
         )
       }
 
-      const cwd = project?.folderPath ?? ''
+      let cwd = project?.folderPath ?? ''
+      const isolate =
+        nextLaunchMode !== 'login' &&
+        (AGENT_WORKTREE_KINDS as readonly string[]).includes(kind) &&
+        Boolean(cwd) &&
+        Boolean(window.api.git?.ensureWorktree)
+      if (isolate && cwd) {
+        const isolated = await window.api.git.ensureWorktree({
+          projectRoot: cwd,
+          panelId: sessionId,
+          kind: kind as AgentWorktreeKind
+        })
+        if (isolated.ok && isolated.worktreePath) {
+          cwd = isolated.worktreePath
+          useWorkspaceStore.getState().setPanelWorktree(sessionId, isolated.worktreePath)
+          term.writeln(
+            '\x1b[90m[Bikorch] Isolated copy — this agent edits its own folder, not the main project tree.\x1b[0m'
+          )
+        } else if (!isolated.ok && isolated.error) {
+          term.writeln(`\x1b[33m[Bikorch] Could not isolate this agent: ${isolated.error}\x1b[0m`)
+          term.writeln('\x1b[33m[Bikorch] Falling back to the main project folder.\x1b[0m')
+        }
+      }
       const result: PtyCreateResponse = await window.api.pty.create({
         sessionId,
         cwd,
@@ -395,13 +429,31 @@ export function TerminalView({
       }
       if (cli) {
         if (result.status === 'error' || (result.reattached && result.status === 'stopped')) {
-          endAgentSession(sessionId, null)
+          endAgentSession(sessionId, null, 'error')
         } else if (!result.reattached) {
+          let headSha: string | undefined
+          if (cwd && window.api.git?.sessionSnapshot) {
+            try {
+              const anchor = await window.api.git.sessionSnapshot({ cwd })
+              headSha = anchor.headSha ?? undefined
+            } catch {
+              headSha = undefined
+            }
+          }
           beginAgentSession(sessionId, {
             kind: agentKind,
             launchMode: nextLaunchMode,
             ...(projectIdAtMount ? { projectId: projectIdAtMount } : {}),
-            ...(accountId ? { accountId } : {})
+            ...(accountId ? { accountId } : {}),
+            ...(cwd && cwd !== (project?.folderPath ?? '') ? { worktreePath: cwd } : {}),
+            ...(headSha ? { headSha } : {})
+          })
+        } else {
+          resumeAgentSession(sessionId, {
+            kind: agentKind,
+            ...(projectIdAtMount ? { projectId: projectIdAtMount } : {}),
+            ...(accountId ? { accountId } : {}),
+            ...(cwd && cwd !== (project?.folderPath ?? '') ? { worktreePath: cwd } : {})
           })
         }
       }
@@ -497,8 +549,19 @@ export function TerminalView({
         : null
 
       if (!panelStillExists || currentFolderPath !== folderPathAtMount) {
-        if (cli) endAgentSession(sessionId, null)
-        void window.api.pty.kill({ sessionId })
+        const isolatedPath = workspaceAtCleanup?.panels.find((panel) => panel.id === sessionId)?.worktreePath
+        const finish = async (): Promise<void> => {
+          if (cli) await finalizeAgentSession(sessionId, null, 'closed')
+          await window.api.pty.kill({ sessionId })
+          if (isolatedPath && folderPathAtMount && window.api.git?.removeWorktree) {
+            await window.api.git.removeWorktree({
+              projectRoot: folderPathAtMount,
+              worktreePath: isolatedPath
+            })
+            useWorkspaceStore.getState().setPanelWorktree(sessionId, null)
+          }
+        }
+        void finish()
       }
       if (!panelStillExists) removeSession(sessionId)
     }

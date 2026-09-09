@@ -11,6 +11,9 @@ import {
   type DeveloperIntelligenceStats,
   type DeveloperMemory,
   type DeveloperMetrics,
+  type AgentSessionDetail,
+  type AgentSessionListPage,
+  type AgentSessionListRequest,
   type MemoryContextPackage,
   type MemoryContextRequest,
   type MemoryDraft,
@@ -36,6 +39,8 @@ import { scanProjectLanguages } from './project-scan'
 import { redactSecrets } from './redaction'
 import { DeveloperIntelligenceStore } from './store'
 import { extractMemoryCandidates, rankMemoriesForContext } from './memory-extract'
+import { pairAgentSessions, parseSessionRecordId, toSessionSummary, uniqueContext } from './session-timeline'
+import { snapshotAgentGit } from '../git/session-snapshot'
 
 /**
  * Developer Intelligence service. Owns the store, applies privacy settings and retention,
@@ -94,10 +99,40 @@ export function applyRetention(): { events: number; prompts: number } {
   }
 }
 
+let closedOrphanSessions = false
+
+function closeOrphanedAgentSessions(): void {
+  if (closedOrphanSessions) return
+  closedOrphanSessions = true
+  const current = getStore()
+  if (!current) return
+  const now = Date.now()
+  for (const pair of loadPairedSessions()) {
+    if (pair.end) continue
+    current.insertEvent({
+      id: randomUUID(),
+      type: 'agent.session.ended',
+      occurredAt: now,
+      sessionId: pair.sessionId,
+      ...(pair.start.projectId ? { projectId: pair.start.projectId } : {}),
+      ...(pair.start.provider ? { provider: pair.start.provider } : {}),
+      ...(pair.start.accountId ? { accountId: pair.start.accountId } : {}),
+      payload: {
+        kind: pair.start.payload.kind,
+        durationMs: Math.max(0, now - pair.startedAt),
+        promptCount: 0,
+        exitCode: null,
+        closeReason: 'closed'
+      }
+    })
+  }
+}
+
 export function initDeveloperIntelligence(): void {
   try {
     if (!getStore()) return
     applyRetention()
+    closeOrphanedAgentSessions()
   } catch (error) {
     console.error('Developer Intelligence init failed:', error)
   }
@@ -231,6 +266,76 @@ export function deletePrompts(ids: string[] | 'all'): { removed: number } {
     return { removed }
   }
   return { removed: current.deletePrompts(ids) }
+}
+
+function loadPairedSessions() {
+  const current = getStore()
+  if (!current) return []
+  const events = current.listEvents({
+    types: ['agent.session.started', 'agent.session.ended'],
+    limit: 2000,
+    order: 'desc'
+  })
+  return pairAgentSessions(events)
+}
+
+export function listAgentSessions(request: AgentSessionListRequest = {}): AgentSessionListPage {
+  const pairs = loadPairedSessions().filter(
+    (pair) => !request.projectId || pair.start.projectId === request.projectId
+  )
+  const total = pairs.length
+  const offset = Math.max(0, Math.floor(request.offset ?? 0))
+  const limit = Math.min(80, Math.max(1, Math.floor(request.limit ?? 40)))
+  return {
+    total,
+    items: pairs.slice(offset, offset + limit).map((pair) => toSessionSummary(pair))
+  }
+}
+
+export async function getAgentSession(id: string): Promise<AgentSessionDetail | null> {
+  const parsed = parseSessionRecordId(id)
+  if (!parsed) return null
+  const pair = loadPairedSessions().find(
+    (item) => item.sessionId === parsed.sessionId && item.startedAt === parsed.startedAt
+  )
+  if (!pair) return null
+
+  const current = getStore()
+  const settings = getDeveloperIntelligenceSettings()
+  const promptPage = current
+    ? current.listPrompts({
+        sessionId: pair.sessionId,
+        from: pair.startedAt,
+        ...(pair.endedAt ? { to: pair.endedAt + 2000 } : {}),
+        limit: 100,
+        offset: 0
+      })
+    : { items: [], total: 0 }
+
+  let changedFiles = pair.end?.payload.changedFiles ?? []
+  let commits = pair.end?.payload.commits ?? []
+  const worktreePath = pair.start.payload.worktreePath
+  if (pair.end === undefined && worktreePath) {
+    const live = await snapshotAgentGit(worktreePath, pair.start.payload.headSha)
+    changedFiles = live.changedFiles
+    commits = live.commits
+  }
+
+  const summary = toSessionSummary(pair)
+  const injectedContext = uniqueContext(pair.end?.payload.injectedContext ?? [])
+
+  return {
+    ...summary,
+    promptCount: pair.end ? summary.promptCount : Math.max(summary.promptCount, promptPage.total),
+    fileCount: changedFiles.length,
+    commitCount: commits.length,
+    exitCode: pair.end?.payload.exitCode ?? null,
+    injectedContext,
+    changedFiles,
+    commits,
+    prompts: [...promptPage.items].sort((a, b) => a.createdAt - b.createdAt),
+    promptTextAvailable: settings.savePromptHistory
+  }
 }
 
 export async function getMetrics(request: MetricsRequest): Promise<DeveloperMetrics> {
