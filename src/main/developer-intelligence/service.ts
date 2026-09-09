@@ -505,6 +505,24 @@ export function getMemoryContext(request: MemoryContextRequest): MemoryContextPa
   return rankMemoriesForContext(current ? current.listMemories() : [], request, settings.includeMemoryInPrompts)
 }
 
+function listKnownProjects(): Array<{ id: string; name: string; folderPath: string | null }> {
+  const db = getPersistenceDatabase()
+  if (!db) return []
+  try {
+    const result = db.exec('SELECT id, name, folder_path FROM projects ORDER BY sort_order ASC')
+    const rows = result[0]?.values ?? []
+    return rows.flatMap((row) => {
+      const id = typeof row[0] === 'string' ? row[0] : ''
+      const name = typeof row[1] === 'string' ? row[1] : ''
+      if (!id || !name) return []
+      const folderPath = typeof row[2] === 'string' && row[2].length > 0 ? row[2] : null
+      return [{ id, name, folderPath }]
+    })
+  } catch {
+    return []
+  }
+}
+
 function scheduleLocalAnalysis(): void {
   const settings = getDeveloperIntelligenceSettings()
   if (!settings.keepActivityHistory) return
@@ -521,6 +539,6 @@ function scheduleLocalAnalysis(): void {
   if (analysisTimer) return
   analysisTimer = setTimeout(() => {
     analysisTimer = null
-    void analyzeMemories({ range: '30d', projects: [] }).catch(() => undefined)
+    void analyzeMemories({ range: '30d', projects: listKnownProjects() }).catch(() => undefined)
   }, 2500)
 }

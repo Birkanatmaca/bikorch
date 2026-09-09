@@ -20,7 +20,6 @@ import {
 export type ProfileSection =
   | 'overview'
   | 'insights'
-  | 'accounts'
   | 'costs'
   | 'prompts'
   | 'memory'

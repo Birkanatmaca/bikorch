@@ -11,14 +11,13 @@ import {
   formatMeasured,
   formatMoney,
   monthlySubscriptionLabel,
-  monthlySubscriptionTotals,
-  UNAVAILABLE
+  monthlySubscriptionTotals
 } from './profile-format'
-import { AvailabilityChip, DistributionBars, SectionCard } from './ProfilePrimitives'
+import { DistributionBars, SectionCard } from './ProfilePrimitives'
 
 function formatRenewalDate(timestamp: number | undefined): string {
-  if (!timestamp) return 'Renewal unavailable'
-  return `Renews ${new Date(timestamp).toLocaleDateString([], { dateStyle: 'medium' })}`
+  if (!timestamp) return ''
+  return new Date(timestamp).toLocaleDateString([], { dateStyle: 'medium' })
 }
 
 function SubscriptionForm({
@@ -74,7 +73,6 @@ function SubscriptionForm({
           <div className="profile-panel-icon"><ReceiptText className="h-3.5 w-3.5" /></div>
           <div className="min-w-0 flex-1">
             <h3>{subscription ? 'Edit subscription' : 'Add subscription'}</h3>
-            <p>Keep provider billing separate from measured CLI usage.</p>
           </div>
           <button
             type="button"
@@ -204,10 +202,8 @@ function SubscriptionRow({
           <span className="profile-subscription-source">{subscription.source}</span>
         </div>
         <p className="truncate text-[9px] text-text-muted">
-          {subscription.provider}{account ? ` · ${account.name}` : ' · No linked account'}
-        </p>
-        <p className="truncate font-mono text-[8px] text-text-muted">
-          {formatRenewalDate(subscription.renewalDate)}
+          {subscription.provider}{account ? ` · ${account.name}` : ''}
+          {subscription.renewalDate ? ` · ${formatRenewalDate(subscription.renewalDate)}` : ''}
         </p>
       </div>
       <div className="profile-subscription-price">
@@ -259,40 +255,21 @@ export function AiCosts(): React.JSX.Element {
 
   return (
     <>
-      <SectionCard title="Monthly AI cost" description="Two separate sources — never merged internally">
+      <SectionCard title="Costs">
         <div className="profile-cost-grid">
           <div>
             <span>Subscriptions</span>
             <strong>{monthlySubscriptionLabel(subscriptions)}</strong>
           </div>
-          <div className="profile-cost-unavailable">
-            <span>API usage</span>
+          <div>
+            <span>API</span>
             <strong>{formatMeasured(apiSpend, (value) => `$${value.toFixed(2)}`)}</strong>
           </div>
-          <div className="profile-cost-unavailable">
-            <span>Total</span>
-            <strong>{UNAVAILABLE}</strong>
-          </div>
-          <div>
-            <span>Subscription records</span>
-            <strong>{subscriptions.length || UNAVAILABLE}</strong>
-          </div>
         </div>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          <AvailabilityChip availability={subscriptions.length > 0 ? 'measured' : 'unavailable'} />
-          <span className="profile-basis">subscriptions (manual)</span>
-          <AvailabilityChip availability={apiSpend.availability} />
-          <span className="profile-basis">metered API</span>
-        </div>
-        <p className="profile-cost-note">
-          Metered API cost and per-model token breakdowns appear only when an official billing or
-          usage source is connected. Nothing is estimated from terminal output.
-        </p>
       </SectionCard>
 
       <SectionCard
-        title="Subscriptions"
-        description="Manual billing records per provider or account"
+        title="Plans"
         className="mt-2.5"
         action={
           <button
@@ -306,9 +283,7 @@ export function AiCosts(): React.JSX.Element {
         }
       >
         {subscriptions.length === 0 ? (
-          <div className="profile-empty-state">
-            Add a plan price to track recurring AI subscriptions without guessing provider billing data.
-          </div>
+          <div className="profile-empty-state">None</div>
         ) : (
           <div className="profile-subscription-list">
             {subscriptions.map((subscription) => (
@@ -328,7 +303,7 @@ export function AiCosts(): React.JSX.Element {
         )}
         {providerBreakdown.length > 1 && (
           <>
-            <h4 className="profile-subheading">By provider (monthly equivalent)</h4>
+            <h4 className="profile-subheading">By provider</h4>
             <DistributionBars entries={providerBreakdown} />
           </>
         )}

@@ -12,6 +12,7 @@ import type {
   PromptRecord,
   WorkCategory
 } from '@shared/contracts/developer-intelligence'
+import { TASK_PRIORITIES, TASK_PRIORITY_LABELS, type TaskPriority } from '@shared/contracts/tasks'
 
 export interface ProjectCensus {
   projectId: string
@@ -139,6 +140,21 @@ function round1(value: number): number {
 function deltaPercent(current: number, previous: number): number | null {
   if (previous <= 0) return null
   return round1(((current - previous) / previous) * 100)
+}
+
+function toPriorityDistribution(events: DeveloperEvent[]): DistributionEntry[] {
+  const counts: Record<TaskPriority, number> = { high: 0, medium: 0, low: 0 }
+  for (const event of events) {
+    if (event.type !== 'task.completed') continue
+    counts[event.payload.priority] += 1
+  }
+  const total = counts.high + counts.medium + counts.low
+  if (total <= 0) return []
+  return TASK_PRIORITIES.filter((priority) => counts[priority] > 0).map((priority) => ({
+    label: TASK_PRIORITY_LABELS[priority],
+    weight: counts[priority],
+    percent: round1((counts[priority] / total) * 100)
+  }))
 }
 
 function toDistribution(counts: Map<string, number>, limit = 8): DistributionEntry[] {
@@ -524,6 +540,7 @@ export function computeMetrics(input: MetricsInput): DeveloperMetrics {
         ? measured(round1((sessionsWithCommit / sessionEnds.length) * 100))
         : unavailable(),
     tasksCompletedDuringSessions,
+    taskPriorityDistribution: toPriorityDistribution(tasksCompleted),
     commonAgentSequence,
     providerDistribution: toDistribution(providerSource),
     projectDistribution: toDistribution(
@@ -632,6 +649,14 @@ export function deriveInterpretations(input: {
     out.push({
       text: `Sessions often move from ${agentTitle(first)} to ${agentTitle(second)}.`,
       basis: 'most frequent back-to-back pair of agent sessions'
+    })
+  }
+
+  const topTaskPriority = input.workflow.taskPriorityDistribution[0]
+  if (topTaskPriority && topTaskPriority.percent >= 50 && input.overview.tasksCompleted >= 2) {
+    out.push({
+      text: `${topTaskPriority.label} priority accounts for ${Math.round(topTaskPriority.percent)}% of completed tasks.`,
+      basis: 'priority set on each completed task'
     })
   }
 

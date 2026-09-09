@@ -1,13 +1,11 @@
 import { useEffect } from 'react'
 import {
-  BarChart3,
   Brain,
   CircleDollarSign,
   LayoutDashboard,
   MessageSquareText,
   ShieldCheck,
   Sparkles,
-  UsersRound,
   type LucideIcon
 } from 'lucide-react'
 import type { MetricsRangeKey } from '@shared/contracts/developer-intelligence'
@@ -19,7 +17,6 @@ import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { cn } from '@renderer/lib/utils'
 import { ProfileOverview } from './ProfileOverview'
 import { DeveloperInsights } from './DeveloperInsights'
-import { AiAccountsSection } from './AiAccountsSection'
 import { AiCosts } from './AiCosts'
 import { PromptHistory } from './PromptHistory'
 import { MemoryManager } from './MemoryManager'
@@ -28,7 +25,6 @@ import { PrivacySettings } from './PrivacySettings'
 const SECTIONS: Array<{ id: ProfileSection; label: string; icon: LucideIcon }> = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'insights', label: 'Insights', icon: Sparkles },
-  { id: 'accounts', label: 'Accounts', icon: UsersRound },
   { id: 'costs', label: 'Costs', icon: CircleDollarSign },
   { id: 'prompts', label: 'Prompts', icon: MessageSquareText },
   { id: 'memory', label: 'Memory', icon: Brain },
@@ -37,21 +33,11 @@ const SECTIONS: Array<{ id: ProfileSection; label: string; icon: LucideIcon }> =
 
 const RANGE_OPTIONS: Array<{ value: MetricsRangeKey; label: string }> = [
   { value: 'today', label: 'Today' },
-  { value: '7d', label: '7 days' },
-  { value: '30d', label: '30 days' },
-  { value: 'month', label: 'This month' },
-  { value: 'all', label: 'All time' }
+  { value: '7d', label: '7d' },
+  { value: '30d', label: '30d' },
+  { value: 'month', label: 'Month' },
+  { value: 'all', label: 'All' }
 ]
-
-const SECTION_SUBTITLES: Record<ProfileSection, string> = {
-  overview: 'Activity measured locally from this workspace',
-  insights: 'Language, activity and workflow patterns',
-  accounts: 'Per-account status and measured limits',
-  costs: 'Subscriptions kept separate from metered API usage',
-  prompts: 'Searchable prompt history you control',
-  memory: 'Semantic preferences, reviewable and editable',
-  privacy: 'What is stored, for how long, and how to remove it'
-}
 
 const METRICS_REFRESH_DEBOUNCE_MS = 1200
 
@@ -61,15 +47,20 @@ interface ProfilePanelProps {
 }
 
 export function ProfilePanel({ visible = true }: ProfilePanelProps): React.JSX.Element {
-  const section = useDeveloperIntelligenceStore((state) => state.section)
+  const rawSection = useDeveloperIntelligenceStore((state) => state.section)
   const setSection = useDeveloperIntelligenceStore((state) => state.setSection)
   const range = useDeveloperIntelligenceStore((state) => state.range)
   const setRange = useDeveloperIntelligenceStore((state) => state.setRange)
   const activityVersion = useDeveloperIntelligenceStore((state) => state.activityVersion)
   const settingsLoaded = useDeveloperIntelligenceStore((state) => state.settingsLoaded)
   const projects = useWorkspaceStore((state) => state.projects)
+  const section = SECTIONS.some((item) => item.id === rawSection) ? rawSection : 'overview'
 
   const showsMetrics = visible && (section === 'overview' || section === 'insights')
+
+  useEffect(() => {
+    if (rawSection !== section) setSection(section)
+  }, [rawSection, section, setSection])
 
   useEffect(() => {
     if (!visible) return
@@ -90,12 +81,8 @@ export function ProfilePanel({ visible = true }: ProfilePanelProps): React.JSX.E
   return (
     <div className="profile-panel relative flex h-full min-h-0 flex-col bg-app-bg">
       <header className="profile-panel-header shrink-0">
-        <div className="flex min-w-0 items-start gap-2">
-          <div className="profile-panel-icon"><BarChart3 className="h-4 w-4" /></div>
-          <div className="min-w-0 flex-1">
-            <h2 className="truncate text-xs font-semibold text-text-primary">Developer Profile</h2>
-            <p className="mt-0.5 truncate text-[10px] text-text-muted">{SECTION_SUBTITLES[section]}</p>
-          </div>
+        <div className="flex min-w-0 items-center gap-2">
+          <h2 className="min-w-0 flex-1 truncate text-xs font-medium text-text-primary">Profile</h2>
           {showsMetrics && (
             <select
               value={range}
@@ -128,7 +115,6 @@ export function ProfilePanel({ visible = true }: ProfilePanelProps): React.JSX.E
       <div className="profile-scroll min-h-0 flex-1 overflow-auto p-2.5">
         {section === 'overview' && <ProfileOverview />}
         {section === 'insights' && <DeveloperInsights />}
-        {section === 'accounts' && <AiAccountsSection />}
         {section === 'costs' && <AiCosts />}
         {section === 'prompts' && <PromptHistory />}
         {section === 'memory' && <MemoryManager />}

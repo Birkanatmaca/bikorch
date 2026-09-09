@@ -151,6 +151,9 @@ describe('extractMemoryCandidates', () => {
     expect(byKey['language-primary']?.content).toMatch(/TypeScript/)
     expect(byKey['project-language:proj-1']?.scope).toBe('project')
     expect(byKey['project-language:proj-1']?.content).toMatch(/Bikorch/)
+    expect(byKey['project-stack:proj-1']?.content).toMatch(/React/)
+    expect(byKey['project-stack:proj-1']?.content).toMatch(/Electron/)
+    expect(byKey['project-kind:proj-1']?.content).toMatch(/Electron app/)
     expect(byKey['frameworks-core']?.content).toMatch(/React/)
     expect(byKey['category-primary']?.content).toMatch(/debugging/)
     expect(byKey['agent-primary']?.content).toMatch(/Claude Code/)
@@ -196,7 +199,7 @@ describe('rankMemoriesForContext', () => {
     expect(pack.injectionEnabled).toBe(true)
   })
 
-  it('requires query overlap when a query is provided', () => {
+  it('boosts query overlap without dropping other memories', () => {
     const pack = rankMemoriesForContext(
       [
         memory({ id: 'ts', content: 'Prefers TypeScript strict mode', category: 'Languages' }),
@@ -205,8 +208,32 @@ describe('rankMemoriesForContext', () => {
       { query: 'typescript' },
       false
     )
-    expect(pack.memories.map((item) => item.id)).toEqual(['ts'])
+    expect(pack.memories.map((item) => item.id)).toEqual(['ts', 'go'])
     expect(pack.injectionEnabled).toBe(false)
     expect(pack.tokenEstimate).toBeGreaterThan(0)
+  })
+
+  it('keeps only global memories when no project is in the request', () => {
+    const pack = rankMemoriesForContext(
+      [
+        memory({ id: 'project', content: 'Project specific', scope: 'project', projectId: 'p1' }),
+        memory({ id: 'global', content: 'Avoids any', category: 'Coding style' })
+      ],
+      {},
+      true
+    )
+    expect(pack.memories.map((item) => item.id)).toEqual(['global'])
+  })
+
+  it('ranks user-authored memories above similar AI memories', () => {
+    const pack = rankMemoriesForContext(
+      [
+        memory({ id: 'ai', content: 'Prefers tabs', category: 'Coding style', source: 'ai', confidence: 0.7 }),
+        memory({ id: 'you', content: 'Prefers spaces', category: 'Coding style', source: 'user', confidence: 0.7 })
+      ],
+      {},
+      true
+    )
+    expect(pack.memories.map((item) => item.id)).toEqual(['you', 'ai'])
   })
 })

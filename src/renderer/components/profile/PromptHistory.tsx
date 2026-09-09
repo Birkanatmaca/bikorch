@@ -136,10 +136,7 @@ export function PromptHistory(): React.JSX.Element {
       {!settings.savePromptHistory && (
         <div className="profile-notice profile-notice-warning">
           <ShieldAlert className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          <span className="min-w-0 flex-1">
-            Prompt text is not being saved. Prompt counts still work; enable retention to search your
-            prompts here.
-          </span>
+            <span className="min-w-0 flex-1">Prompt text is off</span>
           <button
             type="button"
             className={buttonStyles({ variant: 'secondary', size: 'sm' })}
@@ -150,18 +147,14 @@ export function PromptHistory(): React.JSX.Element {
         </div>
       )}
 
-      <SectionCard
-        title="Prompt history"
-        description={`${prompts.total} stored · secrets redacted before saving`}
-        chip={<span className="profile-measurement-chip">Local</span>}
-      >
+      <SectionCard title="Prompts">
         <div className="profile-filter-grid">
           <label className="profile-search">
             <Search className="h-3 w-3" aria-hidden />
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search prompt text…"
+              placeholder="Search"
               aria-label="Search prompts"
             />
           </label>
@@ -262,11 +255,7 @@ export function PromptHistory(): React.JSX.Element {
 
         {prompts.items.length === 0 ? (
           <div className="profile-empty-state">
-            {loading
-              ? 'Loading prompts…'
-              : settings.savePromptHistory
-                ? 'No prompts match these filters yet. Prompts you send to a CLI agent will show up here.'
-                : 'No stored prompts.'}
+            {loading ? 'Loading…' : 'None'}
           </div>
         ) : (
           <div className="profile-prompt-list">

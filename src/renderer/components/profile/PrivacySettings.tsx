@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Download, ShieldCheck, Trash2 } from 'lucide-react'
+import { Download, Trash2 } from 'lucide-react'
 import { RETENTION_OPTIONS } from '@shared/contracts/developer-intelligence'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import { buttonStyles } from '@renderer/components/ui/Button'
@@ -47,49 +47,43 @@ export function PrivacySettings(): React.JSX.Element {
 
   return (
     <>
-      <SectionCard title="Developer Intelligence" description="Everything here is opt-in and stored only on this computer">
+      <SectionCard title="Privacy">
         <div className="profile-toggle-list">
           <Toggle
-            label="Keep local activity history"
-            description="Sessions, commits, tasks, project opens, prompt counts and heuristic categories. Prompt text is controlled separately below."
+            label="Activity history"
             checked={settings.keepActivityHistory}
             onChange={(value) => void updateSettings({ keepActivityHistory: value })}
           />
           <Toggle
-            label="Save prompt history"
-            description="Store redacted prompt text so you can search it. Off by default."
+            label="Prompt text"
             checked={settings.savePromptHistory}
             disabled={!settings.keepActivityHistory}
             onChange={(value) => void updateSettings({ savePromptHistory: value })}
           />
           <Toggle
-            label="Analyze prompts with AI"
-            description="Reserved for sending redacted prompt batches to an external model. No provider is configured; local extraction never leaves this computer and does not use this toggle."
+            label="Analyze with AI"
             checked={settings.analyzePromptsWithAi}
             onChange={(value) => void updateSettings({ analyzePromptsWithAi: value })}
           />
           <Toggle
-            label="Use project file context for metrics"
-            description="Scan open project folders locally to weight the language distribution."
+            label="Project files"
             checked={settings.useProjectFileContext}
             onChange={(value) => void updateSettings({ useProjectFileContext: value })}
           />
           <Toggle
-            label="Use Git activity for metrics"
-            description="Record commits and changed-file languages made from the Changes panel."
+            label="Git activity"
             checked={settings.useGitActivity}
             onChange={(value) => void updateSettings({ useGitActivity: value })}
           />
           <Toggle
-            label="Include memory in future prompts"
-            description="Let enabled memories be packed as a context preview. Terminals do not auto-inject yet."
+            label="Memory in prompts"
             checked={settings.includeMemoryInPrompts}
             onChange={(value) => void updateSettings({ includeMemoryInPrompts: value })}
           />
         </div>
       </SectionCard>
 
-      <SectionCard title="Retention" description="History older than this is removed automatically" className="mt-2.5">
+      <SectionCard title="Retention" className="mt-2.5">
         <label className="profile-inline-field">
           <span>Keep history for</span>
           <select
@@ -111,10 +105,9 @@ export function PrivacySettings(): React.JSX.Element {
             { label: 'Last local analysis', value: stats ? formatDateTime(stats.lastAnalysisAt) : '…' }
           ]}
         />
-        <p className="profile-basis">Memories are not subject to retention; delete them explicitly below.</p>
       </SectionCard>
 
-      <SectionCard title="Your data" description="Export or remove what Bikorch has recorded" className="mt-2.5">
+      <SectionCard title="Data" className="mt-2.5">
         <div className="profile-action-list">
           <button
             type="button"
@@ -162,8 +155,7 @@ export function PrivacySettings(): React.JSX.Element {
         </div>
         <div className="profile-danger-zone">
           <div className="min-w-0 flex-1">
-            <strong>Reset profile</strong>
-            <p>Removes all history, prompts and memories and restores default privacy settings.</p>
+            <strong>Reset</strong>
           </div>
           <button
             type="button"
@@ -178,14 +170,6 @@ export function PrivacySettings(): React.JSX.Element {
         </div>
         {message && <p className="profile-basis mt-2">{message}</p>}
       </SectionCard>
-
-      <div className="profile-privacy-note">
-        <ShieldCheck className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        <span>
-          Prompts are redacted for API keys, tokens, passwords and connection strings before they are
-          stored. Raw prompts never go to logs, telemetry or crash reports.
-        </span>
-      </div>
     </>
   )
 }

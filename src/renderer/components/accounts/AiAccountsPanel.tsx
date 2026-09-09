@@ -13,7 +13,7 @@ import {
   AI_ACCOUNT_LABELS,
   type AiAccount
 } from '@shared/contracts/accounts'
-import type { CliUsageInfo, CliUsageKind } from '@shared/contracts/usage'
+import type { CliUsageInfo, CliUsageKind, CliUsageWindow } from '@shared/contracts/usage'
 import type { SubscriptionRecord } from '@shared/contracts/persistence'
 import { getCliLogo } from '@renderer/lib/cli-logos'
 import {
@@ -86,34 +86,39 @@ function usageColor(remaining: number): string {
 
 function UsageMeter({
   remaining,
-  label
+  label,
+  name,
+  display = 'remaining'
 }: {
   remaining: number | null
   label?: string
+  name?: string
+  display?: 'remaining' | 'used'
 }): React.JSX.Element {
-  const value = remaining === null ? null : Math.max(0, Math.min(100, remaining))
-  const color = value === null ? '#3a414c' : usageColor(value)
+  const left = remaining === null ? null : Math.max(0, Math.min(100, remaining))
+  const shown = left === null ? null : display === 'used' ? 100 - left : left
+  const color = left === null ? '#3a414c' : usageColor(left)
 
   return (
     <div className="account-meter" title={label}>
+      {name ? <span className="account-meter-name">{name}</span> : null}
       <div className="account-meter-track">
         <div
           className="account-meter-fill"
           style={{
-            width: `${value ?? 0}%`,
+            width: `${shown ?? 0}%`,
             background: color
           }}
         />
       </div>
-      <span className="account-meter-value" style={{ color: value === null ? undefined : color }}>
-        {value === null ? '—' : Math.round(value)}
+      <span className="account-meter-value" style={{ color: shown === null ? undefined : color }}>
+        {shown === null ? '—' : Math.round(shown)}
       </span>
     </div>
   )
 }
 
-function formatUsageDetail(provider: CliUsageInfo | undefined): string | undefined {
-  const window = provider?.primary
+function formatUsageDetail(window: CliUsageWindow | undefined): string | undefined {
   if (!window) return undefined
   if (window.resetLabel) return window.resetLabel
   if (!window.resetsAt) return undefined
@@ -123,6 +128,19 @@ function formatUsageDetail(provider: CliUsageInfo | undefined): string | undefin
   if (minutes < 60) return `${minutes}m`
   const hours = Math.floor(minutes / 60)
   return `${hours}h`
+}
+
+function meterFromWindow(
+  window: CliUsageWindow,
+  showUsed = false
+): { remaining: number; label: string; name: string; display: 'remaining' | 'used' } {
+  const used = Math.round(window.usedPercent)
+  return {
+    remaining: 100 - window.usedPercent,
+    name: window.label || 'Limit',
+    display: showUsed ? 'used' : 'remaining',
+    label: [window.label, `${used}% used`, formatUsageDetail(window)].filter(Boolean).join(' · ')
+  }
 }
 
 function formatSubscriptionMoney(subscription: SubscriptionRecord): string {
@@ -284,25 +302,21 @@ function AccountCard({
     account.email.trim().toLowerCase() === provider.accountEmail.trim().toLowerCase()
   const liveUsage = account.profileReady && provider?.status === 'available' && usageBelongsToAccount &&
     (account.kind !== 'cursor' || provider.identityVerified === true)
-  const meters: { remaining: number; label: string }[] = []
+  const meters: { remaining: number; label: string; name?: string; display?: 'remaining' | 'used' }[] = []
+  const showUsed = account.kind === 'cursor'
   if (liveUsage && provider?.primary) {
-    meters.push({
-      remaining: 100 - provider.primary.usedPercent,
-      label: [provider.primary.label, formatUsageDetail(provider)].filter(Boolean).join(' · ')
-    })
+    meters.push(meterFromWindow(provider.primary, showUsed))
   } else if (liveUsage) {
     for (const item of (provider?.breakdown ?? []).filter((entry) => typeof entry.usedPercent === 'number').slice(0, 2)) {
       meters.push({
         remaining: 100 - (item.usedPercent ?? 0),
+        name: item.label ?? 'Limit',
         label: item.label ?? 'Limit'
       })
     }
   }
   if (liveUsage && provider?.secondary) {
-    meters.push({
-      remaining: 100 - provider.secondary.usedPercent,
-      label: provider.secondary.label ?? 'Limit'
-    })
+    meters.push(meterFromWindow(provider.secondary, showUsed))
   }
   const displayLine = [account.email || undefined, account.plan || provider?.planType || undefined]
     .filter(Boolean)
@@ -340,7 +354,13 @@ function AccountCard({
       <div className="account-card-usage">
         {meters.length > 0 ? (
           meters.map((meter, index) => (
-            <UsageMeter key={`${meter.label}-${index}`} remaining={meter.remaining} label={meter.label} />
+            <UsageMeter
+              key={`${meter.name ?? meter.label}-${index}`}
+              remaining={meter.remaining}
+              label={meter.label}
+              name={meter.name}
+              display={meter.display}
+            />
           ))
         ) : (
           <UsageMeter remaining={null} label={isChecking ? 'Checking…' : account.profileReady ? provider?.detail || 'No usage yet' : 'Login required'} />

@@ -410,6 +410,8 @@ export interface DeveloperMetrics {
     promptsPerSession: MeasuredNumber
     sessionsEndingInCommit: MeasuredNumber
     tasksCompletedDuringSessions: number
+    /** Completed tasks in this range, grouped by the priority set on each task. */
+    taskPriorityDistribution: DistributionEntry[]
     /** Most common ordered pair of agents used back to back, e.g. ['claude', 'codex']. */
     commonAgentSequence: string[] | null
     providerDistribution: DistributionEntry[]

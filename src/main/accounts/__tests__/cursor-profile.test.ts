@@ -41,7 +41,14 @@ beforeEach(() => {
     const subject = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString()).sub
     const method = url.split('/').at(-1)
     const body = method === 'GetMe' ? { authId: subject, email: `${subject}@example.com`, firstName: subject }
-      : method === 'GetCurrentPeriodUsage' ? { billingCycleStart: '1788157706000', billingCycleEnd: '1790749706000', planUsage: { totalPercentUsed: Number(subject.replace(/\D/g, '')) || 7 } }
+      : method === 'GetCurrentPeriodUsage' ? (() => {
+        const used = Number(subject.replace(/\D/g, '')) || 7
+        return {
+          billingCycleStart: '1788157706000',
+          billingCycleEnd: '1790749706000',
+          planUsage: { totalPercentUsed: used, autoPercentUsed: used, apiPercentUsed: used + 3 }
+        }
+      })()
         : method === 'GetPlanInfo' ? { planInfo: { planName: `Plan ${subject}` } } : { noUsageBasedAllowed: true }
     return new Response(JSON.stringify(body), { status: 200 })
   }))
@@ -142,7 +149,10 @@ describe('isolated Cursor accounts', () => {
     results.forEach((result, i) => {
       expect(result.accountId).toBe(ids[i])
       expect(result.accountEmail).toBe(`${ids[i]}@example.com`)
+      expect(result.primary?.label).toBe('Cursor Models')
       expect(result.primary?.usedPercent).toBe(i + 1)
+      expect(result.secondary?.label).toBe('Other Models')
+      expect(result.secondary?.usedPercent).toBe(i + 4)
       expect(result.identityVerified).toBe(true)
       expect(readFileSync(cursorProfilePaths(ids[i]).auth)).toEqual(before[i])
     })
@@ -196,5 +206,21 @@ describe('isolated Cursor accounts', () => {
   it('uses explicit quota percentages rather than incorrectly counting bonus spend', () => {
     const result = parseCursorDashboardUsage({ planUsage: { totalSpend: 48404, limit: 2000, includedSpend: 2000, totalPercentUsed: 97.78 } }, {}, {})
     expect(result.primary?.usedPercent).toBe(97.78)
+    expect(result.secondary).toBeUndefined()
+  })
+
+  it('keeps Cursor Models and Other Models as separate per-account quotas', () => {
+    const first = parseCursorDashboardUsage(
+      { planUsage: { autoPercentUsed: 11, apiPercentUsed: 0, totalPercentUsed: 8 } }, {}, {}
+    )
+    const second = parseCursorDashboardUsage(
+      { planUsage: { autoPercentUsed: 40.2, apiPercentUsed: 22, totalPercentUsed: 30 } }, {}, {}
+    )
+    expect(first.primary).toMatchObject({ label: 'Cursor Models', usedPercent: 11 })
+    expect(first.secondary).toMatchObject({ label: 'Other Models', usedPercent: 0 })
+    expect(second.primary).toMatchObject({ label: 'Cursor Models', usedPercent: 40.2 })
+    expect(second.secondary).toMatchObject({ label: 'Other Models', usedPercent: 22 })
+    expect(first.primary?.usedPercent).not.toBe(second.primary?.usedPercent)
+    expect(first.secondary?.usedPercent).not.toBe(second.secondary?.usedPercent)
   })
 })

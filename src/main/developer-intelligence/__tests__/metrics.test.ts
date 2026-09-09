@@ -196,6 +196,10 @@ describe('computeMetrics', () => {
     expect(metrics.workflow.sessionsEndingInCommit).toEqual({ value: 25, availability: 'measured' })
     expect(metrics.workflow.tasksCompletedDuringSessions).toBe(1)
     expect(metrics.overview.tasksCompleted).toBe(2)
+    expect(metrics.workflow.taskPriorityDistribution).toEqual([
+      { label: 'High', weight: 1, percent: 50 },
+      { label: 'Low', weight: 1, percent: 50 }
+    ])
     expect(metrics.workflow.commonAgentSequence).toEqual(['claude', 'codex'])
 
     const categories = Object.fromEntries(metrics.workCategories.entries.map((entry) => [entry.label, entry.percent]))

@@ -103,8 +103,37 @@ const STYLE_RULES: StyleRule[] = [
     category: 'Workflow',
     content: 'Prefers writing tests alongside or before implementation.',
     pattern: /write tests first|\btdd\b|test-driven|add tests before|tests alongside/i
+  },
+  {
+    key: 'style-functional-react',
+    category: 'Coding style',
+    content: 'Prefers functional React components over class components.',
+    pattern: /functional (?:react )?components|hooks instead of classes|no class components/i
+  },
+  {
+    key: 'style-named-exports',
+    category: 'Coding style',
+    content: 'Prefers named exports over default exports.',
+    pattern: /named exports|no default exports|avoid default export/i
+  },
+  {
+    key: 'style-match-existing',
+    category: 'Coding style',
+    content: 'Match existing file conventions rather than introducing new patterns.',
+    pattern: /match existing|follow (?:the )?existing (?:style|conventions|patterns)|don'?t (?:introduce|invent) new patterns/i
+  },
+  {
+    key: 'style-focused-diffs',
+    category: 'Workflow',
+    content: 'Wants focused diffs without unrelated drive-by changes.',
+    pattern: /no drive-by|don'?t refactor unrelated|focused (?:diff|pr|change)|only change what(?: is|'s)? (?:asked|needed)/i
   }
 ]
+
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? ''
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+}
 
 export interface ExtractMemoriesInput {
   metrics: DeveloperMetrics
@@ -176,6 +205,38 @@ export function extractMemoryCandidates(input: ExtractMemoriesInput): MemoryCand
     )
   }
 
+  for (const census of projectCensus) {
+    if (census.frameworks.length === 0) continue
+    const names = census.frameworks.slice(0, 3)
+    const projectName = projectNames[census.projectId]
+    out.push(
+      candidate({
+        key: `project-stack:${census.projectId}`,
+        scope: 'project',
+        projectId: census.projectId,
+        category: 'Tooling',
+        content: projectName
+          ? `${projectName} uses ${joinNames(names)}.`
+          : `This project uses ${joinNames(names)}.`,
+        confidence: names.length >= 2 ? 0.74 : 0.6,
+        evidenceCount: names.length
+      })
+    )
+    if (census.frameworks.includes('Electron')) {
+      out.push(
+        candidate({
+          key: `project-kind:${census.projectId}`,
+          scope: 'project',
+          projectId: census.projectId,
+          category: 'Architecture',
+          content: projectName ? `${projectName} is an Electron app.` : 'This project is an Electron app.',
+          confidence: 0.8,
+          evidenceCount: 1
+        })
+      )
+    }
+  }
+
   const strongFrameworks = metrics.frameworks.filter((framework) => framework.evidenceCount >= 3)
   if (strongFrameworks.length > 0) {
     const names = strongFrameworks.slice(0, 3).map((framework) => framework.name)
@@ -185,8 +246,7 @@ export function extractMemoryCandidates(input: ExtractMemoriesInput): MemoryCand
         key: 'frameworks-core',
         scope: 'global',
         category: 'Tooling',
-        content:
-          names.length === 1 ? `Works with ${names[0]}.` : `Works with ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}.`,
+        content: `Works with ${joinNames(names)}.`,
         confidence: strongFrameworks.some((framework) => framework.confidence === 'high') ? 0.8 : 0.6,
         evidenceCount: evidence
       })
@@ -297,10 +357,11 @@ export function rankMemoriesForContext(
 
   for (const memory of memories) {
     if (!memory.enabled) continue
-    if (memory.scope === 'project' && request.projectId && memory.projectId !== request.projectId) continue
+    if (memory.scope === 'project' && (!request.projectId || memory.projectId !== request.projectId)) continue
 
     let score = memory.scope === 'project' && memory.projectId === request.projectId ? 40 : 15
     score += memory.confidence * 10
+    if (memory.source === 'user') score += 12
     const ageDays = (Date.now() - memory.lastSeenAt) / (24 * 60 * 60 * 1000)
     if (ageDays <= 14) score += 10
     else if (ageDays <= 60) score += 5
@@ -309,8 +370,7 @@ export function rankMemoriesForContext(
       const haystack = new Set(tokenize(`${memory.category} ${memory.content}`))
       let overlap = 0
       for (const token of queryTokens) if (haystack.has(token)) overlap += 1
-      if (overlap === 0) continue
-      score += overlap * 8
+      score += overlap > 0 ? overlap * 12 : -6
     }
 
     scored.push({
