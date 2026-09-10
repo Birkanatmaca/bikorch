@@ -91,6 +91,7 @@ export interface GitEnsureWorktreeRequest {
 export interface GitEnsureWorktreeResponse {
   ok: boolean
   worktreePath?: string
+  branch?: string
   error?: string
 }
 
@@ -110,6 +111,80 @@ export interface GitSessionSnapshot {
   commits: Array<{ shortHash: string; subject: string }>
 }
 
+export type WorkspaceIsolation = 'isolated' | 'shared'
+
+export interface IsolationLaneInput {
+  panelId: string
+  kind: AgentWorktreeKind
+  title: string
+  worktreePath: string
+}
+
+export interface IsolationLane {
+  panelId: string
+  kind: AgentWorktreeKind
+  title: string
+  worktreePath: string
+  branch: string
+  files: string[]
+}
+
+export interface IsolationOverlap {
+  path: string
+  panelIds: string[]
+  labels: string[]
+}
+
+export interface IsolationConflictFile {
+  path: string
+  absolutePath: string
+  base?: string
+  main?: string
+  agent?: string
+}
+
+export interface IsolationFoldSession {
+  id: string
+  panelId: string
+  kind: AgentWorktreeKind
+  title: string
+  branch: string
+  agentWorktreePath: string
+  integrationPath?: string
+  integrationBranch?: string
+  status: 'empty' | 'clean' | 'conflict'
+  files: string[]
+  conflicts: IsolationConflictFile[]
+}
+
+export interface IsolationInspectRequest {
+  projectRoot: string
+  lanes: IsolationLaneInput[]
+}
+
+export interface IsolationInspectResponse {
+  lanes: IsolationLane[]
+  overlaps: IsolationOverlap[]
+  fold: IsolationFoldSession | null
+}
+
+export interface IsolationFoldRequest {
+  projectRoot: string
+  panelId: string
+  kind: AgentWorktreeKind
+  title: string
+  worktreePath: string
+}
+
+export interface IsolationProjectRequest {
+  projectRoot: string
+}
+
+export interface IsolationDiffRequest {
+  projectRoot: string
+  filePath: string
+}
+
 export const GIT_IPC = {
   DISCOVER: 'git:discover',
   STATUS: 'git:status',
@@ -123,7 +198,12 @@ export const GIT_IPC = {
   COMMIT: 'git:commit',
   ENSURE_WORKTREE: 'git:ensure-worktree',
   REMOVE_WORKTREE: 'git:remove-worktree',
-  SESSION_SNAPSHOT: 'git:session-snapshot'
+  SESSION_SNAPSHOT: 'git:session-snapshot',
+  ISOLATION_INSPECT: 'git:isolation-inspect',
+  ISOLATION_FOLD: 'git:isolation-fold',
+  ISOLATION_ACCEPT: 'git:isolation-accept',
+  ISOLATION_ABORT: 'git:isolation-abort',
+  ISOLATION_DIFF: 'git:isolation-diff'
 } as const
 
 export const GIT_STATUS_LABELS: Record<GitChangeStatus, string> = {

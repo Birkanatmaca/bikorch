@@ -16,6 +16,8 @@ interface ActiveDiff {
   index: number
   mode: ReviewMode
   absolutePath?: string
+  source?: 'fold'
+  foldFiles?: string[]
 }
 
 interface EditorStore {
@@ -36,6 +38,7 @@ interface EditorStore {
           index: number
           mode?: ReviewMode
           absolutePath?: string
+          source?: 'fold'
         } | null
       >
     }
@@ -49,6 +52,7 @@ interface EditorStore {
     change: GitChange,
     changes: GitChange[]
   ) => Promise<void>
+  openFoldReview: (projectId: string, projectRoot: string, files: string[], filePath?: string) => Promise<void>
   openFile: (projectId: string, workspaceRoot: string, absolutePath: string) => Promise<void>
   navigateDiff: (projectId: string, projectRoot: string, direction: 'prev' | 'next') => Promise<void>
   refreshDiff: (projectId: string, projectRoot: string) => Promise<void>
@@ -80,6 +84,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         normalizedActive[projectId] = null
         continue
       }
+      if (active.source === 'fold') {
+        normalizedActive[projectId] = null
+        continue
+      }
       normalizedActive[projectId] = {
         filePath: active.filePath,
         status: active.status,
@@ -100,7 +108,20 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   getPersistedState: () => {
     const { selectedFileByProject, activeDiffByProject } = get()
-    return { selectedFileByProject, activeDiffByProject }
+    const persistedActive: typeof activeDiffByProject = {}
+    for (const [projectId, active] of Object.entries(activeDiffByProject)) {
+      persistedActive[projectId] =
+        !active || active.source === 'fold'
+          ? null
+          : {
+              filePath: active.filePath,
+              status: active.status,
+              index: active.index,
+              mode: active.mode,
+              absolutePath: active.absolutePath
+            }
+    }
+    return { selectedFileByProject, activeDiffByProject: persistedActive }
   },
 
   setSelectedFile: (projectId, filePath) => {
@@ -167,6 +188,45 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       }))
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load diff'
+      set((state) => ({
+        diffLoadingByProject: { ...state.diffLoadingByProject, [projectId]: false },
+        diffErrorByProject: { ...state.diffErrorByProject, [projectId]: message }
+      }))
+    }
+  },
+
+  openFoldReview: async (projectId, projectRoot, files, filePath) => {
+    if (files.length === 0 || !window.api.git?.isolationDiff) return
+    const target = filePath && files.includes(filePath) ? filePath : files[0]
+    const index = Math.max(0, files.indexOf(target))
+
+    get().ensureDiffPanel()
+    set((state) => ({
+      activeDiffByProject: {
+        ...state.activeDiffByProject,
+        [projectId]: {
+          filePath: target,
+          status: 'M',
+          index,
+          mode: 'diff',
+          source: 'fold',
+          foldFiles: files
+        }
+      },
+      diffContentByProject: { ...state.diffContentByProject, [projectId]: null },
+      diffLoadingByProject: { ...state.diffLoadingByProject, [projectId]: true },
+      diffErrorByProject: { ...state.diffErrorByProject, [projectId]: null },
+      selectedFileByProject: { ...state.selectedFileByProject, [projectId]: target }
+    }))
+
+    try {
+      const diff = await window.api.git.isolationDiff({ projectRoot, filePath: target })
+      set((state) => ({
+        diffContentByProject: { ...state.diffContentByProject, [projectId]: diff },
+        diffLoadingByProject: { ...state.diffLoadingByProject, [projectId]: false }
+      }))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load fold diff'
       set((state) => ({
         diffLoadingByProject: { ...state.diffLoadingByProject, [projectId]: false },
         diffErrorByProject: { ...state.diffErrorByProject, [projectId]: message }
@@ -262,6 +322,19 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const activeDiff = get().activeDiffByProject[projectId]
     if (!activeDiff || activeDiff.mode !== 'diff') return
 
+    if (activeDiff.source === 'fold') {
+      const files = activeDiff.foldFiles ?? []
+      if (files.length === 0) return
+      const nextIndex =
+        direction === 'next'
+          ? (activeDiff.index + 1) % files.length
+          : (activeDiff.index - 1 + files.length) % files.length
+      const nextPath = files[nextIndex]
+      if (!nextPath) return
+      await get().openFoldReview(projectId, projectRoot, files, nextPath)
+      return
+    }
+
     const gitChanges = selectGitChanges(useGitStore.getState().stateByProject, projectId)
     if (gitChanges.length === 0) return
 
@@ -287,6 +360,14 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         workspace.projects.find((p) => p.id === projectId)?.folderPath ?? projectRoot
       if (!absolutePath || !folder) return
       await get().openFile(projectId, folder, absolutePath)
+      return
+    }
+
+    if (activeDiff.source === 'fold') {
+      const folder =
+        useWorkspaceStore.getState().projects.find((p) => p.id === projectId)?.folderPath ?? projectRoot
+      const files = activeDiff.foldFiles ?? [activeDiff.filePath]
+      await get().openFoldReview(projectId, folder, files, activeDiff.filePath)
       return
     }
 

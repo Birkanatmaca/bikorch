@@ -34,8 +34,19 @@ export interface SearchFilesResponse {
   entries: FileEntry[]
 }
 
+export interface WriteFileRequest {
+  projectRoot: string
+  filePath: string
+  content: string
+}
+
+export interface WriteFileResponse {
+  path: string
+}
+
 export const FILESYSTEM_IPC = {
   READ_DIRECTORY: 'fs:readDirectory',
   READ_FILE: 'fs:readFile',
+  WRITE_FILE: 'fs:writeFile',
   SEARCH: 'fs:search'
 } as const

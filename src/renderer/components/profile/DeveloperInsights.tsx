@@ -9,6 +9,14 @@ import {
 } from './profile-format'
 import { DistributionBars, KeyValueList, SectionCard } from './ProfilePrimitives'
 
+function languageBasis(basis: string[]): string | undefined {
+  if (basis.length === 0) return undefined
+  if (basis.some((item) => item.startsWith('Git'))) return 'From Git changes in this range'
+  if (basis.some((item) => item.startsWith('Code'))) return 'From code in prompts'
+  if (basis.some((item) => item.startsWith('Project'))) return 'From files in open projects'
+  return undefined
+}
+
 export function DeveloperInsights(): React.JSX.Element {
   const metrics = useDeveloperIntelligenceStore((state) => state.metrics)
   const loading = useDeveloperIntelligenceStore((state) => state.metricsLoading)
@@ -21,7 +29,7 @@ export function DeveloperInsights(): React.JSX.Element {
 
   return (
     <>
-      <SectionCard title="Languages">
+      <SectionCard title="Languages" description={languageBasis(languages.basis)}>
         <DistributionBars entries={languages.entries} labelFor={languageLabel} emptyLabel="—" />
       </SectionCard>
 

@@ -3,9 +3,10 @@ import {
   type ReadDirectoryRequest,
   type ReadFileRequest,
   type SearchFilesRequest,
+  type WriteFileRequest,
   FILESYSTEM_IPC
 } from '@shared/contracts/filesystem'
-import { listDirectory, readProjectFile, searchProjectFiles } from '../filesystem'
+import { listDirectory, readProjectFile, searchProjectFiles, writeProjectFile } from '../filesystem'
 
 function validateReadDirectory(payload: unknown): payload is ReadDirectoryRequest {
   if (!payload || typeof payload !== 'object') return false
@@ -25,6 +26,16 @@ function validateReadFile(payload: unknown): payload is ReadFileRequest {
   return typeof req.projectRoot === 'string' && typeof req.filePath === 'string'
 }
 
+function validateWriteFile(payload: unknown): payload is WriteFileRequest {
+  if (!payload || typeof payload !== 'object') return false
+  const req = payload as WriteFileRequest
+  return (
+    typeof req.projectRoot === 'string' &&
+    typeof req.filePath === 'string' &&
+    typeof req.content === 'string'
+  )
+}
+
 export function registerFilesystemHandlers(): void {
   ipcMain.handle(FILESYSTEM_IPC.READ_DIRECTORY, async (_event, payload: unknown) => {
     if (!validateReadDirectory(payload)) {
@@ -42,6 +53,15 @@ export function registerFilesystemHandlers(): void {
 
     const content = await readProjectFile(payload.projectRoot, payload.filePath)
     return { content, path: payload.filePath }
+  })
+
+  ipcMain.handle(FILESYSTEM_IPC.WRITE_FILE, async (_event, payload: unknown) => {
+    if (!validateWriteFile(payload)) {
+      throw new Error('Invalid write file request')
+    }
+
+    const path = await writeProjectFile(payload.projectRoot, payload.filePath, payload.content)
+    return { path }
   })
 
   ipcMain.handle(FILESYSTEM_IPC.SEARCH, async (_event, payload: unknown) => {

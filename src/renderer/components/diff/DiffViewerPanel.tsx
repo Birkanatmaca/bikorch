@@ -48,15 +48,17 @@ export function DiffViewerPanel(): React.JSX.Element {
   const repoRoot = selectedRoot ?? projectRoot
   const isFileMode = activeDiff?.mode === 'file'
   const isDiffMode = activeDiff?.mode === 'diff'
+  const isFoldReview = activeDiff?.source === 'fold'
 
   useEffect(() => {
-    if (!projectId || !repoRoot || !isDiffMode || !lastFetchedAt) return
+    if (!projectId || !repoRoot || !isDiffMode || !lastFetchedAt || isFoldReview) return
     void refreshDiff(projectId, repoRoot)
   }, [
     activeDiff?.filePath,
     activeDiff?.mode,
     activeDiff?.status,
     isDiffMode,
+    isFoldReview,
     lastFetchedAt,
     projectId,
     refreshDiff,

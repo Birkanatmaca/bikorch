@@ -78,7 +78,7 @@ export function classifyWorkCategory(text: string): WorkCategory | undefined {
     if (hits > 0) scores.set(rule.category, hits * rule.weight)
   }
 
-  if (scores.size === 0) return 'Feature development'
+  if (scores.size === 0) return undefined
 
   let best: WorkCategory = 'Feature development'
   let bestScore = -1
@@ -161,8 +161,8 @@ export function languageCensusFromFiles(files: string[]): Record<string, number>
   const census: Record<string, number> = {}
   for (const file of files) {
     const language = detectLanguage(file)
-    const key = language === 'plaintext' ? 'unknown' : language
-    census[key] = (census[key] ?? 0) + 1
+    if (NON_CODE_LANGUAGES.has(language) || language === 'plaintext') continue
+    census[language] = (census[language] ?? 0) + 1
   }
   return census
 }
@@ -182,7 +182,7 @@ export const FRAMEWORK_RULES: FrameworkRule[] = [
   { name: 'Electron', packages: ['electron', 'electron-vite', 'electron-builder'], prompt: /\belectron\b|ipcmain|ipcrenderer|contextbridge/i },
   { name: 'Next.js', packages: ['next'], files: [/^next\.config\.(?:js|mjs|ts)$/], prompt: /\bnext\.?js\b|app router|getserversideprops/i },
   { name: 'NestJS', packages: ['@nestjs/core', '@nestjs/common'], prompt: /\bnest(?:js)?\b|@injectable|@controller/i },
-  { name: 'Node.js', packages: ['express', 'fastify', 'koa', 'hono'], files: [/^package\.json$/], prompt: /\bnode(?:\.js)?\b|\bnpm\b|\bexpress\b|\bfastify\b/i },
+  { name: 'Node.js', packages: ['express', 'fastify', 'koa', 'hono'], prompt: /\bnode(?:\.js)?\b|\bnpm\b|\bexpress\b|\bfastify\b/i },
   { name: 'Vue', packages: ['vue', 'nuxt'], prompt: /\bvue\b|\bnuxt\b/i },
   { name: 'Svelte', packages: ['svelte', '@sveltejs/kit'], prompt: /\bsvelte(?:kit)?\b/i },
   { name: 'Tailwind CSS', packages: ['tailwindcss'], prompt: /\btailwind\b/i },

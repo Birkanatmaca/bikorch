@@ -6,6 +6,8 @@ import {
   type ReadFileResponse,
   type SearchFilesRequest,
   type SearchFilesResponse,
+  type WriteFileRequest,
+  type WriteFileResponse,
   FILESYSTEM_IPC
 } from '@shared/contracts/filesystem'
 import {
@@ -24,6 +26,12 @@ import {
   type GitRemoveWorktreeRequest,
   type GitSessionSnapshot,
   type GitSessionSnapshotRequest,
+  type IsolationDiffRequest,
+  type IsolationFoldRequest,
+  type IsolationFoldSession,
+  type IsolationInspectRequest,
+  type IsolationInspectResponse,
+  type IsolationProjectRequest,
   GIT_IPC
 } from '@shared/contracts/git'
 import {
@@ -207,6 +215,7 @@ export interface PtyApi {
 export interface FilesystemApi {
   readDirectory: (request: ReadDirectoryRequest) => Promise<ReadDirectoryResponse>
   readFile: (request: ReadFileRequest) => Promise<ReadFileResponse>
+  writeFile: (request: WriteFileRequest) => Promise<WriteFileResponse>
   search: (request: SearchFilesRequest) => Promise<SearchFilesResponse>
 }
 
@@ -224,6 +233,11 @@ export interface GitApi {
   ensureWorktree: (request: GitEnsureWorktreeRequest) => Promise<GitEnsureWorktreeResponse>
   removeWorktree: (request: GitRemoveWorktreeRequest) => Promise<{ ok: true } | { ok: false; error: string }>
   sessionSnapshot: (request: GitSessionSnapshotRequest) => Promise<GitSessionSnapshot>
+  inspectIsolation: (request: IsolationInspectRequest) => Promise<IsolationInspectResponse>
+  foldIsolation: (request: IsolationFoldRequest) => Promise<IsolationFoldSession>
+  acceptIsolation: (request: IsolationProjectRequest) => Promise<{ ok: true } | { ok: false; error: string }>
+  abortIsolation: (request: IsolationProjectRequest) => Promise<{ ok: true }>
+  isolationDiff: (request: IsolationDiffRequest) => Promise<GitDiffResponse>
 }
 
 export interface PersistenceApi {
@@ -321,6 +335,7 @@ const cliApi: CliApi = {
 const fsApi: FilesystemApi = {
   readDirectory: (request) => ipcRenderer.invoke(FILESYSTEM_IPC.READ_DIRECTORY, request),
   readFile: (request) => ipcRenderer.invoke(FILESYSTEM_IPC.READ_FILE, request),
+  writeFile: (request) => ipcRenderer.invoke(FILESYSTEM_IPC.WRITE_FILE, request),
   search: (request) => ipcRenderer.invoke(FILESYSTEM_IPC.SEARCH, request)
 }
 
@@ -337,7 +352,12 @@ const gitApi: GitApi = {
   commit: (request) => ipcRenderer.invoke(GIT_IPC.COMMIT, request),
   ensureWorktree: (request) => ipcRenderer.invoke(GIT_IPC.ENSURE_WORKTREE, request),
   removeWorktree: (request) => ipcRenderer.invoke(GIT_IPC.REMOVE_WORKTREE, request),
-  sessionSnapshot: (request) => ipcRenderer.invoke(GIT_IPC.SESSION_SNAPSHOT, request)
+  sessionSnapshot: (request) => ipcRenderer.invoke(GIT_IPC.SESSION_SNAPSHOT, request),
+  inspectIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_INSPECT, request),
+  foldIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_FOLD, request),
+  acceptIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_ACCEPT, request),
+  abortIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_ABORT, request),
+  isolationDiff: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_DIFF, request)
 }
 
 const persistenceApi: PersistenceApi = {

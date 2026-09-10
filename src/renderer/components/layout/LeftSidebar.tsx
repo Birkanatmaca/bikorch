@@ -1,4 +1,4 @@
-import { BarChart3, Music2, PanelLeftClose, UsersRound } from 'lucide-react'
+import { PanelLeftClose } from 'lucide-react'
 import { AiAccountsPanel } from '@renderer/components/accounts/AiAccountsPanel'
 import { FileExplorerPanel } from '@renderer/components/file-explorer/FileExplorerPanel'
 import { GitChangesPanel } from '@renderer/components/git/GitChangesPanel'
@@ -6,7 +6,6 @@ import { TasksPanel } from '@renderer/components/tasks/TasksPanel'
 import { ProfilePanel } from '@renderer/components/profile/ProfilePanel'
 import { MusicPanel } from '@renderer/components/music/MusicPanel'
 import { cn } from '@renderer/lib/utils'
-import { PanelIcon } from '@renderer/components/ui/PanelIcon'
 import { Button } from '@renderer/components/ui/Button'
 
 interface LeftSidebarProps {
@@ -31,25 +30,10 @@ export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Eleme
           : isMusic
             ? 'Music'
             : 'Files'
-  const type = isChanges ? 'git-changes' : isTasks ? 'tasks' : 'file-explorer'
-
   return (
     <div className="workstation-sidebar panel-shell relative flex h-full flex-col overflow-hidden">
-      <header className="panel-header sidebar-header flex shrink-0 items-center gap-2 border-b px-3 app-no-drag">
-        <span className="font-mono text-xs text-text-muted">
-          {isAccounts ? (
-            <UsersRound className="h-3.5 w-3.5" />
-          ) : isProfile ? (
-            <BarChart3 className="h-3.5 w-3.5" />
-          ) : isMusic ? (
-            <Music2 className="h-3.5 w-3.5" />
-          ) : (
-            <PanelIcon type={type} />
-          )}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-xs font-medium text-text-primary">
-          {title}
-        </span>
+      <header className="sidebar-header app-no-drag">
+        <span className="sidebar-header-title">{title}</span>
         <Button
           type="button"
           variant="ghost"

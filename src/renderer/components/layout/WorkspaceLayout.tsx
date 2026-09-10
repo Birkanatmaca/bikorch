@@ -11,6 +11,7 @@ import { PanelShell } from '@renderer/components/panels/PanelShell'
 import { SidebarActivityBar } from '@renderer/components/layout/SidebarActivityBar'
 import { LeftSidebar } from '@renderer/components/layout/LeftSidebar'
 import { useGitStatusBar } from '@renderer/stores/git-store'
+import { selectIsolationState, useIsolationStore } from '@renderer/stores/isolation-store'
 import { WorkspaceCenterEmpty } from '@renderer/components/workspace/WorkspaceCenterEmpty'
 import { OrchestratorZone } from '@renderer/components/workspace/OrchestratorZone'
 import { cn } from '@renderer/lib/utils'
@@ -209,6 +210,9 @@ export function WorkspaceLayout(): React.JSX.Element {
   const selectLeftSidebar = useWorkspaceStore((s) => s.selectLeftSidebar)
   const ensureProjectWorkspace = useWorkspaceStore((s) => s.ensureProjectWorkspace)
   const { changesCount } = useGitStatusBar(activeProjectId)
+  const isolation = useIsolationStore((s) => selectIsolationState(s.byProject, activeProjectId))
+  const overlapCount = isolation.overlaps.length
+  const isolationConflict = isolation.fold?.status === 'conflict'
 
   useEffect(() => {
     if (activeProjectId) {
@@ -441,6 +445,8 @@ export function WorkspaceLayout(): React.JSX.Element {
         isOpen={!leftCollapsed}
         view={layout.leftSidebarView ?? 'files'}
         changesCount={changesCount}
+        overlapCount={overlapCount}
+        conflict={isolationConflict}
         onSelectFiles={() => selectLeftSidebar(activeProjectId, 'files')}
         onSelectChanges={() => selectLeftSidebar(activeProjectId, 'changes')}
         onSelectAccounts={() => selectLeftSidebar(activeProjectId, 'accounts')}

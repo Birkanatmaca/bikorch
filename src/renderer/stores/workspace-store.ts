@@ -35,6 +35,7 @@ import {
 } from '@shared/workspace-grid'
 import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
+import type { WorkspaceIsolation } from '@shared/contracts/git'
 import { useAiAccountsStore } from './ai-accounts-store'
 import { endAgentSession, finalizeAgentSession, recordDeveloperEvent } from '@renderer/lib/developer-events'
 
@@ -164,6 +165,7 @@ interface WorkspaceStore extends WorkspaceSnapshot {
   ) => void
   clearPanelLaunchMode: (panelId: string) => void
   setPanelWorktree: (panelId: string, worktreePath: string | null) => void
+  setPanelIsolation: (panelId: string, isolation: WorkspaceIsolation) => void
   workspaceScale: number
   setWorkspaceScale: (scale: number) => void
   nudgeWorkspaceScale: (deltaSteps: number) => void
@@ -412,7 +414,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       title: titleOverride?.trim() || getNextPanelTitle(type, workspace.panels),
       zone: targetZone,
       ...(launchMode === 'login' ? { launchMode: 'login' as const } : {}),
-      ...(panelAccountId ? { accountId: panelAccountId } : {})
+      ...(panelAccountId ? { accountId: panelAccountId } : {}),
+      ...(AGENT_WORKTREE_TYPES.has(type) ? { workspaceIsolation: 'isolated' as const } : {})
     }
 
     const panels = [...workspace.panels, newPanel]
@@ -924,6 +927,26 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           const { worktreePath: _removed, ...rest } = panel
           return rest
         })
+      }
+    }
+    if (changed) set({ workspaces: nextWorkspaces })
+  },
+
+  setPanelIsolation: (panelId, isolation) => {
+    const { workspaces } = get()
+    let changed = false
+    const nextWorkspaces: Record<string, ProjectWorkspaceState> = {}
+    for (const [projectId, workspace] of Object.entries(workspaces)) {
+      if (!workspace.panels.some((panel) => panel.id === panelId)) {
+        nextWorkspaces[projectId] = workspace
+        continue
+      }
+      changed = true
+      nextWorkspaces[projectId] = {
+        ...workspace,
+        panels: workspace.panels.map((panel) =>
+          panel.id === panelId ? { ...panel, workspaceIsolation: isolation } : panel
+        )
       }
     }
     if (changed) set({ workspaces: nextWorkspaces })

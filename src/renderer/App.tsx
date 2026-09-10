@@ -3,6 +3,7 @@ import { AppWindowEdge } from '@renderer/components/layout/AppWindowEdge'
 import { AppHeader } from '@renderer/components/layout/AppHeader'
 import { StatusBar } from '@renderer/components/layout/StatusBar'
 import { WorkspaceLayout } from '@renderer/components/layout/WorkspaceLayout'
+import { IdeOverlay } from '@renderer/components/ide/IdeOverlay'
 import { WelcomeScreen } from '@renderer/components/welcome/WelcomeScreen'
 import { CommandPalette } from '@renderer/components/command/CommandPalette'
 import { ErrorBoundary } from '@renderer/components/ui/ErrorBoundary'
@@ -116,6 +117,7 @@ export default function App(): React.JSX.Element {
             >
               <WorkspaceLayout />
             </div>
+            <IdeOverlay />
           </div>
         ) : (
           <WelcomeScreen />

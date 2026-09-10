@@ -1,7 +1,6 @@
 import { useEffect } from 'react'
 import {
   Brain,
-  CircleDollarSign,
   History,
   LayoutDashboard,
   MessageSquareText,
@@ -18,7 +17,6 @@ import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { cn } from '@renderer/lib/utils'
 import { ProfileOverview } from './ProfileOverview'
 import { DeveloperInsights } from './DeveloperInsights'
-import { AiCosts } from './AiCosts'
 import { PromptHistory } from './PromptHistory'
 import { SessionTimeline } from './SessionTimeline'
 import { MemoryManager } from './MemoryManager'
@@ -27,7 +25,6 @@ import { PrivacySettings } from './PrivacySettings'
 const SECTIONS: Array<{ id: ProfileSection; label: string; icon: LucideIcon }> = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'insights', label: 'Insights', icon: Sparkles },
-  { id: 'costs', label: 'Costs', icon: CircleDollarSign },
   { id: 'prompts', label: 'Prompts', icon: MessageSquareText },
   { id: 'sessions', label: 'Sessions', icon: History },
   { id: 'memory', label: 'Memory', icon: Brain },
@@ -118,7 +115,6 @@ export function ProfilePanel({ visible = true }: ProfilePanelProps): React.JSX.E
       <div className="profile-scroll min-h-0 flex-1 overflow-auto p-2.5">
         {section === 'overview' && <ProfileOverview />}
         {section === 'insights' && <DeveloperInsights />}
-        {section === 'costs' && <AiCosts />}
         {section === 'prompts' && <PromptHistory />}
         {section === 'sessions' && <SessionTimeline />}
         {section === 'memory' && <MemoryManager />}

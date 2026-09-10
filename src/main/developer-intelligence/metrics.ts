@@ -346,16 +346,32 @@ export function computeMetrics(input: MetricsInput): DeveloperMetrics {
     }
   }
 
-  const languages = combineLanguageSources([
-    { label: 'Git changed files', weight: 0.5, counts: gitLanguages, sampleCount: gitFileCount },
-    { label: 'Project files', weight: 0.3, counts: projectLanguages, sampleCount: projectFileCount },
-    {
-      label: 'Code blocks and file names in prompts',
-      weight: 0.2,
-      counts: promptLanguages,
-      sampleCount: promptsWithHints
-    }
-  ])
+  const gitSource: LanguageSource = {
+    label: 'Git changed files',
+    weight: 1,
+    counts: gitLanguages,
+    sampleCount: gitFileCount
+  }
+  const promptSource: LanguageSource = {
+    label: 'Code blocks and file names in prompts',
+    weight: 0.35,
+    counts: promptLanguages,
+    sampleCount: promptsWithHints
+  }
+  const projectSource: LanguageSource = {
+    label: 'Project files',
+    weight: 1,
+    counts: projectLanguages,
+    sampleCount: projectFileCount
+  }
+  // Activity first: repo inventory is only a fallback when nothing was actually edited.
+  const languages = combineLanguageSources(
+    gitFileCount > 0
+      ? [gitSource, promptSource]
+      : promptsWithHints > 0
+        ? [promptSource]
+        : [projectSource]
+  )
 
   // --- Frameworks ----------------------------------------------------------
   const frameworkEvidence = new Map<string, { count: number; sources: Set<string> }>()

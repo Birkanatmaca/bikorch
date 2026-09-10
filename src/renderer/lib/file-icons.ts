@@ -13,7 +13,37 @@ import {
 
 export type FileIconSpec = {
   icon: LucideIcon
-  className: string
+  kind: string
+}
+
+export function getFileIconSpec(fileName: string): FileIconSpec {
+  const base = fileName.toLowerCase()
+  const ext = base.includes('.') ? (base.split('.').pop() ?? '') : base
+
+  if (['ts', 'tsx'].includes(ext)) return { icon: FileCode2, kind: 'ts' }
+  if (['js', 'jsx', 'mjs', 'cjs'].includes(ext)) return { icon: FileCode2, kind: 'js' }
+  if (['json', 'jsonc'].includes(ext)) return { icon: FileJson, kind: 'json' }
+  if (['md', 'markdown', 'txt', 'log'].includes(ext)) return { icon: FileText, kind: 'doc' }
+  if (['css', 'scss', 'less'].includes(ext)) return { icon: FileType, kind: 'css' }
+  if (['html', 'htm', 'vue', 'svelte'].includes(ext)) return { icon: FileCode2, kind: 'html' }
+  if (['yml', 'yaml', 'toml', 'ini', 'env', 'properties'].includes(ext) || base.startsWith('.env')) {
+    return { icon: Settings2, kind: 'config' }
+  }
+  if (['py'].includes(ext)) return { icon: FileCode2, kind: 'py' }
+  if (['rs'].includes(ext)) return { icon: FileCode2, kind: 'rs' }
+  if (['go'].includes(ext)) return { icon: FileCode2, kind: 'go' }
+  if (['java', 'kt', 'kts'].includes(ext)) return { icon: FileCode2, kind: 'jvm' }
+  if (['swift'].includes(ext)) return { icon: FileCode2, kind: 'swift' }
+  if (['dart'].includes(ext)) return { icon: FileCode2, kind: 'dart' }
+  if (['php'].includes(ext)) return { icon: FileCode2, kind: 'php' }
+  if (['rb'].includes(ext)) return { icon: FileCode2, kind: 'rb' }
+  if (['c', 'h', 'cpp', 'cc', 'cxx', 'hpp', 'cs'].includes(ext)) return { icon: FileCode2, kind: 'c' }
+  if (['sh', 'bash', 'zsh', 'ps1', 'bat', 'cmd'].includes(ext)) return { icon: Terminal, kind: 'shell' }
+  if (['sql'].includes(ext)) return { icon: Braces, kind: 'sql' }
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico'].includes(ext)) return { icon: Image, kind: 'image' }
+  if (['xml', 'graphql'].includes(ext)) return { icon: Braces, kind: 'data' }
+
+  return { icon: File, kind: 'file' }
 }
 
 export function detectLanguage(filePath: string): string {
@@ -76,40 +106,4 @@ export function detectLanguage(filePath: string): string {
     properties: 'ini'
   }
   return map[ext] ?? 'plaintext'
-}
-
-export function getFileIconSpec(fileName: string): FileIconSpec {
-  const base = fileName.toLowerCase()
-  const ext = base.includes('.') ? (base.split('.').pop() ?? '') : base
-
-  if (['ts', 'tsx'].includes(ext)) return { icon: FileCode2, className: 'text-[#3178c6]' }
-  if (['js', 'jsx', 'mjs', 'cjs'].includes(ext)) return { icon: FileCode2, className: 'text-[#f7df1e]' }
-  if (['json', 'jsonc'].includes(ext)) return { icon: FileJson, className: 'text-[#cbcb41]' }
-  if (['md', 'markdown', 'txt', 'log'].includes(ext)) return { icon: FileText, className: 'text-text-secondary' }
-  if (['css', 'scss', 'less'].includes(ext)) return { icon: FileType, className: 'text-[#c586c0]' }
-  if (['html', 'htm', 'vue', 'svelte'].includes(ext)) return { icon: FileCode2, className: 'text-[#e34c26]' }
-  if (['yml', 'yaml', 'toml', 'ini', 'env', 'properties'].includes(ext) || base.startsWith('.env')) {
-    return { icon: Settings2, className: 'text-warning' }
-  }
-  if (['py'].includes(ext)) return { icon: FileCode2, className: 'text-[#3572a5]' }
-  if (['rs'].includes(ext)) return { icon: FileCode2, className: 'text-[#dea584]' }
-  if (['go'].includes(ext)) return { icon: FileCode2, className: 'text-[#00add8]' }
-  if (['java', 'kt', 'kts'].includes(ext)) return { icon: FileCode2, className: 'text-[#b07219]' }
-  if (['swift'].includes(ext)) return { icon: FileCode2, className: 'text-[#f05138]' }
-  if (['dart'].includes(ext)) return { icon: FileCode2, className: 'text-[#00b4ab]' }
-  if (['php'].includes(ext)) return { icon: FileCode2, className: 'text-[#4f5d95]' }
-  if (['rb'].includes(ext)) return { icon: FileCode2, className: 'text-[#701516]' }
-  if (['c', 'h', 'cpp', 'cc', 'cxx', 'hpp', 'cs'].includes(ext)) {
-    return { icon: FileCode2, className: 'text-info' }
-  }
-  if (['sh', 'bash', 'zsh', 'ps1', 'bat', 'cmd'].includes(ext)) {
-    return { icon: Terminal, className: 'text-success' }
-  }
-  if (['sql'].includes(ext)) return { icon: Braces, className: 'text-[#e38c00]' }
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico'].includes(ext)) {
-    return { icon: Image, className: 'text-[#a074c4]' }
-  }
-  if (['xml', 'graphql'].includes(ext)) return { icon: Braces, className: 'text-info' }
-
-  return { icon: File, className: 'text-text-muted' }
 }

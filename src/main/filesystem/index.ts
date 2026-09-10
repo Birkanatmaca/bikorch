@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from 'fs/promises'
+import { readdir, readFile, stat, writeFile } from 'fs/promises'
 import { join, relative } from 'path'
 import type { FileEntry } from '@shared/contracts/filesystem'
 import { assertPathWithinRoot } from './path-guard'
@@ -57,6 +57,26 @@ export async function readProjectFile(projectRoot: string, filePath: string): Pr
   }
 
   return readFile(resolvedFile, 'utf-8')
+}
+
+export async function writeProjectFile(
+  projectRoot: string,
+  filePath: string,
+  content: string
+): Promise<string> {
+  if (Buffer.byteLength(content, 'utf8') > MAX_FILE_SIZE) {
+    throw new Error('File is too large to write')
+  }
+
+  const resolvedFile = assertPathWithinRoot(projectRoot, filePath)
+  const fileStat = await stat(resolvedFile)
+
+  if (!fileStat.isFile()) {
+    throw new Error('Path is not a file')
+  }
+
+  await writeFile(resolvedFile, content, 'utf-8')
+  return resolvedFile
 }
 
 const MAX_SEARCH_RESULTS = 80

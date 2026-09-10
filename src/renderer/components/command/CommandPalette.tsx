@@ -159,7 +159,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
         id: 'show-profile',
         label: 'Show Profile',
         group: 'Workspace',
-        keywords: 'developer intelligence insights usage costs account statistics',
+        keywords: 'developer intelligence insights account statistics',
         action: () => {
           if (projectId) selectLeftSidebar(projectId, 'profile')
           onClose()

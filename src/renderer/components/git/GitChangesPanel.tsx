@@ -1,8 +1,9 @@
 import { buttonStyles } from '@renderer/components/ui/Button'
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { GitChange, GitRepoInfo } from '@shared/contracts/git'
 import { useActiveProject } from '@renderer/hooks/use-active-project'
 import { useEditorStore } from '@renderer/stores/editor-store'
+import { useIdeStore } from '@renderer/stores/ide-store'
 import {
   selectGitBundle,
   selectGitChanges,
@@ -10,8 +11,10 @@ import {
   useGitStore,
   type GitState
 } from '@renderer/stores/git-store'
+import { useIsolationStore } from '@renderer/stores/isolation-store'
 import { EmptyState } from '@renderer/components/ui/EmptyState'
 import { cn } from '@renderer/lib/utils'
+import { AgentIsolationBlock } from './AgentIsolation'
 import { GitBranch, History, Loader2, Minus, Plus, RefreshCw, Save, Undo2 } from 'lucide-react'
 
 const statusColor: Record<GitChange['status'], string> = {
@@ -43,6 +46,7 @@ export function GitChangesPanel({
   const bundle = useGitStore((s) => selectGitBundle(s.stateByProject, projectId))
   const gitState = useGitStore((s) => selectGitState(s.stateByProject, projectId))
   const refresh = useGitStore((s) => s.refresh)
+  const inspectIsolation = useIsolationStore((s) => s.inspect)
   const selectRepo = useGitStore((s) => s.selectRepo)
   const checkoutBranch = useGitStore((s) => s.checkoutBranch)
   const discardChange = useGitStore((s) => s.discardChange)
@@ -52,6 +56,7 @@ export function GitChangesPanel({
   const unstageAll = useGitStore((s) => s.unstageAll)
   const commitChanges = useGitStore((s) => s.commitChanges)
   const openDiff = useEditorStore((s) => s.openDiff)
+  const openInIde = useIdeStore((s) => s.openFile)
   const clearDiff = useEditorStore((s) => s.clearDiff)
   const [discardingPath, setDiscardingPath] = useState<string | null>(null)
   const [mutatingPath, setMutatingPath] = useState<string | null>(null)
@@ -69,7 +74,8 @@ export function GitChangesPanel({
   useEffect(() => {
     if (!projectId || !projectRoot) return
     void refresh(projectId, projectRoot)
-  }, [projectId, projectRoot, refresh])
+    void inspectIsolation(projectId, projectRoot)
+  }, [projectId, projectRoot, refresh, inspectIsolation])
 
   useEffect(() => {
     setCommitMessage('')
@@ -78,12 +84,21 @@ export function GitChangesPanel({
   const handleRefresh = (): void => {
     if (projectId && projectRoot) {
       void refresh(projectId, projectRoot)
+      void inspectIsolation(projectId, projectRoot)
     }
   }
 
   const handleOpenDiff = (change: GitChange): void => {
     if (!projectId || !bundle.selectedRoot) return
     void openDiff(projectId, bundle.selectedRoot, change, gitState.changes)
+  }
+
+  const handleOpenFile = (change: GitChange): void => {
+    if (!projectId || !projectRoot || !bundle.selectedRoot) return
+    const root = bundle.selectedRoot.replace(/[/\\]+$/, '')
+    const sep = root.includes('\\') ? '\\' : '/'
+    const absolute = `${root}${sep}${change.path.replace(/[/\\]/g, sep)}`
+    void openInIde(projectId, projectRoot, absolute)
   }
 
   const handleDiscard = async (change: GitChange): Promise<void> => {
@@ -256,6 +271,8 @@ export function GitChangesPanel({
           <p className="mb-2 rounded-md bg-error/10 px-2 py-1 text-xs text-error">{bundle.error}</p>
         )}
 
+        {projectId && <AgentIsolationBlock projectId={projectId} projectRoot={projectRoot} />}
+
         {gitState.changes.length === 0 && !bundle.loading && (
           <EmptyState
             icon={GitBranch}
@@ -281,6 +298,7 @@ export function GitChangesPanel({
               actionLabel="Unstage"
               actionIcon="unstage"
               onOpenDiff={handleOpenDiff}
+              onOpenFile={handleOpenFile}
               onStage={handleStageChange}
               onDiscard={(change) => void handleDiscard(change)}
             />
@@ -294,6 +312,7 @@ export function GitChangesPanel({
               actionLabel="Stage"
               actionIcon="stage"
               onOpenDiff={handleOpenDiff}
+              onOpenFile={handleOpenFile}
               onStage={handleStageChange}
               onDiscard={(change) => void handleDiscard(change)}
             />
@@ -329,6 +348,7 @@ function ChangeSection({
   actionLabel,
   actionIcon,
   onOpenDiff,
+  onOpenFile,
   onStage,
   onDiscard
 }: {
@@ -341,6 +361,7 @@ function ChangeSection({
   actionLabel: string
   actionIcon: 'stage' | 'unstage'
   onOpenDiff: (change: GitChange) => void
+  onOpenFile: (change: GitChange) => void
   onStage: (change: GitChange) => void
   onDiscard: (change: GitChange) => void
 }): React.JSX.Element {
@@ -368,6 +389,7 @@ function ChangeSection({
               actionLabel={actionLabel}
               actionIcon={actionIcon}
               onOpenDiff={onOpenDiff}
+              onOpenFile={onOpenFile}
               onStage={onStage}
               onDiscard={onDiscard}
             />
@@ -387,6 +409,7 @@ function ChangeRow({
   actionLabel,
   actionIcon,
   onOpenDiff,
+  onOpenFile,
   onStage,
   onDiscard
 }: {
@@ -398,9 +421,12 @@ function ChangeRow({
   actionLabel: string
   actionIcon: 'stage' | 'unstage'
   onOpenDiff: (change: GitChange) => void
+  onOpenFile: (change: GitChange) => void
   onStage: (change: GitChange) => void
   onDiscard: (change: GitChange) => void
 }): React.JSX.Element {
+  const clickTimer = useRef<number | null>(null)
+
   return (
     <div
       className={cn(
@@ -410,7 +436,15 @@ function ChangeRow({
     >
       <button
         type="button"
-        onClick={() => onOpenDiff(change)}
+        onClick={() => {
+          if (clickTimer.current) window.clearTimeout(clickTimer.current)
+          clickTimer.current = window.setTimeout(() => onOpenDiff(change), 220)
+        }}
+        onDoubleClick={() => {
+          if (clickTimer.current) window.clearTimeout(clickTimer.current)
+          clickTimer.current = null
+          onOpenFile(change)
+        }}
         className={cn(
           'flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left text-xs',
           active ? 'text-text-primary' : 'hover:text-text-primary'

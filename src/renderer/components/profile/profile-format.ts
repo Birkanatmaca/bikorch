@@ -160,6 +160,8 @@ export const LANGUAGE_LABELS: Record<string, string> = {
   scss: 'SCSS',
   less: 'Less',
   html: 'HTML',
+  vue: 'Vue',
+  svelte: 'Svelte',
   graphql: 'GraphQL',
   dockerfile: 'Dockerfile',
   groovy: 'Groovy',

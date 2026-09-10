@@ -10,9 +10,15 @@ import {
   type GitRemoveWorktreeRequest,
   type GitSessionSnapshotRequest,
   type GitStatusRequest,
+  type IsolationDiffRequest,
+  type IsolationFoldRequest,
+  type IsolationInspectRequest,
+  type IsolationLaneInput,
+  type IsolationProjectRequest,
   GIT_IPC
 } from '@shared/contracts/git'
 import { isAgentWorktreeKind } from '../git/worktree-paths'
+import { abortFold, acceptFold, foldFileDiff, inspectIsolation, prepareFold } from '../git/isolation'
 import { ensureAgentWorktree, removeAgentWorktree } from '../git/worktrees'
 import { snapshotAgentGit } from '../git/session-snapshot'
 import {
@@ -121,6 +127,72 @@ function validateRemoveWorktreeRequest(payload: unknown): payload is GitRemoveWo
   )
 }
 
+function validateIsolationProjectRequest(payload: unknown): payload is IsolationProjectRequest {
+  if (!payload || typeof payload !== 'object') return false
+  const req = payload as IsolationProjectRequest
+  return typeof req.projectRoot === 'string' && req.projectRoot.length > 0
+}
+
+function validateIsolationLane(value: unknown): value is IsolationLaneInput {
+  if (!value || typeof value !== 'object') return false
+  const lane = value as IsolationLaneInput
+  return (
+    typeof lane.panelId === 'string' &&
+    lane.panelId.length >= 8 &&
+    lane.panelId.length <= 80 &&
+    isAgentWorktreeKind(lane.kind) &&
+    typeof lane.title === 'string' &&
+    lane.title.length > 0 &&
+    lane.title.length <= 200 &&
+    typeof lane.worktreePath === 'string' &&
+    lane.worktreePath.length > 0 &&
+    lane.worktreePath.length <= 1000
+  )
+}
+
+function validateIsolationInspectRequest(payload: unknown): payload is IsolationInspectRequest {
+  if (!payload || typeof payload !== 'object') return false
+  const req = payload as IsolationInspectRequest
+  return (
+    typeof req.projectRoot === 'string' &&
+    req.projectRoot.length > 0 &&
+    Array.isArray(req.lanes) &&
+    req.lanes.length <= 24 &&
+    req.lanes.every(validateIsolationLane)
+  )
+}
+
+function validateIsolationFoldRequest(payload: unknown): payload is IsolationFoldRequest {
+  if (!payload || typeof payload !== 'object') return false
+  const req = payload as IsolationFoldRequest
+  return (
+    typeof req.projectRoot === 'string' &&
+    req.projectRoot.length > 0 &&
+    typeof req.panelId === 'string' &&
+    req.panelId.length >= 8 &&
+    req.panelId.length <= 80 &&
+    isAgentWorktreeKind(req.kind) &&
+    typeof req.title === 'string' &&
+    req.title.length > 0 &&
+    req.title.length <= 200 &&
+    typeof req.worktreePath === 'string' &&
+    req.worktreePath.length > 0 &&
+    req.worktreePath.length <= 1000
+  )
+}
+
+function validateIsolationDiffRequest(payload: unknown): payload is IsolationDiffRequest {
+  if (!payload || typeof payload !== 'object') return false
+  const req = payload as IsolationDiffRequest
+  return (
+    typeof req.projectRoot === 'string' &&
+    req.projectRoot.length > 0 &&
+    typeof req.filePath === 'string' &&
+    req.filePath.length > 0 &&
+    req.filePath.length <= 1000
+  )
+}
+
 export function registerGitHandlers(): void {
   ipcMain.handle(GIT_IPC.DISCOVER, async (_event, payload: unknown) => {
     if (!validateDiscoverRequest(payload)) {
@@ -217,5 +289,40 @@ export function registerGitHandlers(): void {
     const sinceSha =
       typeof req.sinceSha === 'string' && /^[a-fA-F0-9]{7,64}$/.test(req.sinceSha) ? req.sinceSha : undefined
     return snapshotAgentGit(req.cwd, sinceSha)
+  })
+
+  ipcMain.handle(GIT_IPC.ISOLATION_INSPECT, async (_event, payload: unknown) => {
+    if (!validateIsolationInspectRequest(payload)) {
+      throw new Error('Invalid isolation inspect request')
+    }
+    return inspectIsolation(payload)
+  })
+
+  ipcMain.handle(GIT_IPC.ISOLATION_FOLD, async (_event, payload: unknown) => {
+    if (!validateIsolationFoldRequest(payload)) {
+      throw new Error('Invalid isolation fold request')
+    }
+    return prepareFold(payload)
+  })
+
+  ipcMain.handle(GIT_IPC.ISOLATION_ACCEPT, async (_event, payload: unknown) => {
+    if (!validateIsolationProjectRequest(payload)) {
+      throw new Error('Invalid isolation accept request')
+    }
+    return acceptFold(payload)
+  })
+
+  ipcMain.handle(GIT_IPC.ISOLATION_ABORT, async (_event, payload: unknown) => {
+    if (!validateIsolationProjectRequest(payload)) {
+      throw new Error('Invalid isolation abort request')
+    }
+    return abortFold(payload)
+  })
+
+  ipcMain.handle(GIT_IPC.ISOLATION_DIFF, async (_event, payload: unknown) => {
+    if (!validateIsolationDiffRequest(payload)) {
+      throw new Error('Invalid isolation diff request')
+    }
+    return foldFileDiff(payload)
   })
 }

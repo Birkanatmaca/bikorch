@@ -241,7 +241,6 @@ function OrchestratorWindow({
               onMoveStart(e)
             }}
           />
-          {showChrome && phase === 'busy' && <div className="cli-busy-wash" aria-hidden />}
         </div>
       )}
       <ResizeHandles onStart={onResizeStart} />

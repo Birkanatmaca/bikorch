@@ -7,6 +7,7 @@ import { AGENT_WORKTREE_KINDS } from '@shared/contracts/git'
 import type { PtyCreateResponse, PtyEvent, PtyKind, PtyLaunchMode } from '@shared/contracts/pty'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
+import { useIsolationStore } from '@renderer/stores/isolation-store'
 import {
   AI_ACCOUNTS_REFRESH_EVENT,
   AI_ACCOUNT_AUTHENTICATED_EVENT,
@@ -393,11 +394,23 @@ export function TerminalView({
       }
 
       let cwd = project?.folderPath ?? ''
+      const panelAtLaunch = Object.values(useWorkspaceStore.getState().workspaces)
+        .flatMap((workspace) => workspace.panels)
+        .find((panel) => panel.id === sessionId)
+      const sharedTree = panelAtLaunch?.workspaceIsolation === 'shared'
       const isolate =
+        !sharedTree &&
         nextLaunchMode !== 'login' &&
         (AGENT_WORKTREE_KINDS as readonly string[]).includes(kind) &&
         Boolean(cwd) &&
         Boolean(window.api.git?.ensureWorktree)
+      if (sharedTree && cwd && panelAtLaunch?.worktreePath && window.api.git?.removeWorktree) {
+        await window.api.git.removeWorktree({
+          projectRoot: cwd,
+          worktreePath: panelAtLaunch.worktreePath
+        })
+        useWorkspaceStore.getState().setPanelWorktree(sessionId, null)
+      }
       if (isolate && cwd) {
         const isolated = await window.api.git.ensureWorktree({
           projectRoot: cwd,
@@ -414,6 +427,11 @@ export function TerminalView({
           term.writeln(`\x1b[33m[Bikorch] Could not isolate this agent: ${isolated.error}\x1b[0m`)
           term.writeln('\x1b[33m[Bikorch] Falling back to the main project folder.\x1b[0m')
         }
+      }
+      const projectIdNow = useWorkspaceStore.getState().activeProjectId
+      const folderNow = project?.folderPath
+      if (projectIdNow && folderNow) {
+        void useIsolationStore.getState().inspect(projectIdNow, folderNow)
       }
       const result: PtyCreateResponse = await window.api.pty.create({
         sessionId,

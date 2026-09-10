@@ -17,6 +17,16 @@ export function sanitizeWorktreeSlot(kind: string, panelId: string): string {
   return `${safeKind}-${safeId}`
 }
 
+export function agentBranchName(kind: string, panelId: string): string {
+  return `bikorch/${sanitizeWorktreeSlot(kind, panelId)}`
+}
+
+export function integrationBranchName(panelId: string): string {
+  const safeId = panelId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)
+  if (safeId.length < 8) throw new Error('Invalid worktree slot')
+  return `bikorch/integrate-${safeId}`
+}
+
 export function buildAgentWorktreePath(
   baseDir: string,
   repoRoot: string,
@@ -24,6 +34,12 @@ export function buildAgentWorktreePath(
   panelId: string
 ): string {
   return join(resolve(baseDir), 'agent-worktrees', hashRepoRoot(repoRoot), sanitizeWorktreeSlot(kind, panelId))
+}
+
+export function buildIntegrationWorktreePath(baseDir: string, repoRoot: string, panelId: string): string {
+  const safeId = panelId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)
+  if (safeId.length < 8) throw new Error('Invalid worktree slot')
+  return join(resolve(baseDir), 'agent-worktrees', hashRepoRoot(repoRoot), `integrate-${safeId}`)
 }
 
 export function isManagedWorktreePath(baseDir: string, worktreePath: string): boolean {

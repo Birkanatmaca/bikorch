@@ -111,7 +111,7 @@ describe('computeMetrics', () => {
     expect(metrics.overview.promptsDeltaPercent).toBeNull()
   })
 
-  it('weights git files above project files above prompt hints for languages', () => {
+  it('uses git activity for languages and ignores unused project files', () => {
     const events: DeveloperEvent[] = [
       event({
         type: 'git.commit',
@@ -128,14 +128,23 @@ describe('computeMetrics', () => {
     )
     const byLabel = Object.fromEntries(metrics.languages.entries.map((entry) => [entry.label, entry.percent]))
     expect(byLabel['typescript']).toBeGreaterThan(byLabel['go'])
-    expect(byLabel['typescript']).toBeGreaterThan(byLabel['python'])
+    expect(byLabel['python']).toBeUndefined()
     expect(metrics.languages.basis).toEqual([
       'Git changed files (4)',
-      'Project files (10)',
       'Code blocks and file names in prompts (1)'
     ])
     const total = metrics.languages.entries.reduce((sum, entry) => sum + entry.percent, 0)
     expect(Math.round(total)).toBe(100)
+  })
+
+  it('falls back to project files only when there is no git or prompt language evidence', () => {
+    const metrics = computeMetrics(
+      baseInput([], {
+        projectCensus: [{ projectId: 'p1', fileCount: 10, byLanguage: { typescript: 8, python: 2 }, frameworks: [] }]
+      })
+    )
+    expect(metrics.languages.entries[0]).toMatchObject({ label: 'typescript', percent: 80 })
+    expect(metrics.languages.basis).toEqual(['Project files (10)'])
   })
 
   it('respects privacy settings for git and project sources', () => {

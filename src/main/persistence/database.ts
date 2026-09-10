@@ -287,6 +287,9 @@ function parsePanels(raw: unknown): PanelDefinition[] {
         panel.worktreePath.length > 0 &&
         panel.worktreePath.length <= 1000
           ? { worktreePath: panel.worktreePath }
+          : {}),
+        ...(panel.workspaceIsolation === 'shared' || panel.workspaceIsolation === 'isolated'
+          ? { workspaceIsolation: panel.workspaceIsolation }
           : {})
       })
     }

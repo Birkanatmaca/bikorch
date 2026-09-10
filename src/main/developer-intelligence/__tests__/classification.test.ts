@@ -32,9 +32,9 @@ describe('classifyWorkCategory', () => {
     expect(classifyWorkCategory('Review this pull request for code smells')).toBe('Code review')
   })
 
-  it('falls back to feature development', () => {
+  it('classifies feature work and leaves unmatched text unclassified', () => {
     expect(classifyWorkCategory('Add a dark mode toggle to the settings page')).toBe('Feature development')
-    expect(classifyWorkCategory('lorem ipsum dolor sit amet')).toBe('Feature development')
+    expect(classifyWorkCategory('lorem ipsum dolor sit amet')).toBeUndefined()
   })
 
   it('understands turkish keywords', () => {
@@ -58,11 +58,10 @@ describe('detectLanguageHints', () => {
 })
 
 describe('languageCensusFromFiles', () => {
-  it('counts files by detected language and buckets unknowns', () => {
-    expect(languageCensusFromFiles(['a.ts', 'b.tsx', 'c.go', 'LICENSE'])).toEqual({
+  it('counts files by detected language and skips non-code files', () => {
+    expect(languageCensusFromFiles(['a.ts', 'b.tsx', 'c.go', 'LICENSE', 'package.json'])).toEqual({
       typescript: 2,
-      go: 1,
-      unknown: 1
+      go: 1
     })
   })
 })

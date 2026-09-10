@@ -1,7 +1,7 @@
 import type { PtySessionStatus } from '@shared/contracts/pty'
 import type { PanelType } from '@shared/types'
 
-export type CliChromePhase = 'off' | 'starting' | 'running' | 'waiting' | 'busy'
+export type CliChromePhase = 'off' | 'idle' | 'busy'
 
 export function getCliChromePhase(
   type: PanelType,
@@ -17,21 +17,16 @@ export function getCliChromePhase(
   if (!isPty) return 'off'
 
   if (status === 'stopped' || status === 'error') return 'off'
-  if (status === 'busy') return isCli ? 'busy' : 'running'
-  if (status === 'waiting') return isCli ? 'waiting' : 'running'
-  if (status === 'starting') return 'starting'
-  if (isCli) return 'waiting'
-  return 'running'
+  if (status === 'busy') return 'busy'
+  return 'idle'
 }
 
 export function cliFrameClass(phase: CliChromePhase): string {
   switch (phase) {
     case 'busy':
       return 'cli-busy-frame'
-    case 'waiting':
-    case 'starting':
-    case 'running':
-      return 'cli-live-frame'
+    case 'idle':
+      return 'cli-idle-frame'
     default:
       return ''
   }

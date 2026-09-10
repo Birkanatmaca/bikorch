@@ -3,18 +3,12 @@ import type { FileEntry } from '@shared/contracts/filesystem'
 import type { GitChangeStatus } from '@shared/contracts/git'
 import { useActiveProject } from '@renderer/hooks/use-active-project'
 import { useEditorStore } from '@renderer/stores/editor-store'
+import { useIdeStore } from '@renderer/stores/ide-store'
 import { pathHasGitChanges, useGitStore } from '@renderer/stores/git-store'
 import { getFileIconSpec } from '@renderer/lib/file-icons'
 import { cn } from '@renderer/lib/utils'
 import { EmptyState } from '@renderer/components/ui/EmptyState'
-import {
-  ChevronDown,
-  ChevronRight,
-  Folder,
-  FolderOpen,
-  Search,
-  X
-} from 'lucide-react'
+import { ChevronDown, ChevronRight, Folder, FolderOpen, RefreshCw, Search, X } from 'lucide-react'
 
 interface DirectoryNodeProps {
   entry: FileEntry
@@ -24,14 +18,8 @@ interface DirectoryNodeProps {
   onToggle: (path: string) => void
   selectedFile: string | null
   onSelectFile: (path: string) => void
+  onOpenFile: (path: string) => void
   getGitStatus: (path: string, isDirectory: boolean) => GitChangeStatus | null
-}
-
-const gitStatusColor: Record<GitChangeStatus, string> = {
-  M: 'text-warning',
-  A: 'text-success',
-  D: 'text-error',
-  U: 'text-info'
 }
 
 function toRelative(projectRoot: string, absolutePath: string): string {
@@ -39,6 +27,16 @@ function toRelative(projectRoot: string, absolutePath: string): string {
     .replace(projectRoot, '')
     .replace(/^[/\\]/, '')
     .replace(/\\/g, '/')
+}
+
+function folderName(projectRoot: string): string {
+  return projectRoot.split(/[/\\]/).filter(Boolean).pop() ?? projectRoot
+}
+
+function parentDir(relativePath: string): string {
+  const parts = relativePath.split('/')
+  if (parts.length < 2) return ''
+  return parts.slice(0, -1).join('/')
 }
 
 function DirectoryNode({
@@ -49,6 +47,7 @@ function DirectoryNode({
   onToggle,
   selectedFile,
   onSelectFile,
+  onOpenFile,
   getGitStatus
 }: DirectoryNodeProps): React.JSX.Element {
   const [children, setChildren] = useState<FileEntry[]>([])
@@ -76,48 +75,28 @@ function DirectoryNode({
     }
   }, [isExpanded, children.length, loading, loadChildren])
 
-  const paddingLeft = 8 + depth * 14
-
   if (entry.type === 'directory') {
     const folderStatus = getGitStatus(entry.path, true)
     return (
-      <div>
+      <div className="file-tree-node">
         <button
           type="button"
           onClick={() => onToggle(entry.path)}
-          className={cn(
-            'flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left text-xs transition-colors hover:bg-hover',
-            folderStatus
-              ? cn(gitStatusColor[folderStatus], 'hover:opacity-90')
-              : 'text-text-secondary hover:text-text-primary'
-          )}
-          style={{ paddingLeft }}
+          className={cn('file-tree-row is-folder', folderStatus && `is-git-${folderStatus}`)}
+          style={{ '--tree-depth': depth } as React.CSSProperties}
         >
-          {isExpanded ? (
-            <ChevronDown className="h-3 w-3 shrink-0 text-text-muted" />
-          ) : (
-            <ChevronRight className="h-3 w-3 shrink-0 text-text-muted" />
-          )}
-          {isExpanded ? (
-            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-info" />
-          ) : (
-            <Folder className="h-3.5 w-3.5 shrink-0 text-info" />
-          )}
-          <span className="truncate font-medium">{entry.name}</span>
-          {folderStatus && (
-            <span className={cn('ml-auto font-mono text-[10px] font-semibold', gitStatusColor[folderStatus])}>
-              •
-            </span>
-          )}
+          <span className="file-tree-twist">
+            {isExpanded ? <ChevronDown /> : <ChevronRight />}
+          </span>
+          {isExpanded ? <FolderOpen className="file-tree-ic is-folder" /> : <Folder className="file-tree-ic is-folder" />}
+          <span className="file-tree-name">{entry.name}</span>
+          {folderStatus && <span className="file-tree-git">{folderStatus}</span>}
         </button>
         {isExpanded && (
-          <div>
+          <div className="file-tree-branch">
             {loading && (
-              <p
-                className="py-1 text-[10px] text-text-muted"
-                style={{ paddingLeft: paddingLeft + 20 }}
-              >
-                Loading...
+              <p className="file-tree-hint" style={{ '--tree-depth': depth + 1 } as React.CSSProperties}>
+                Loading…
               </p>
             )}
             {children.map((child) => (
@@ -130,6 +109,7 @@ function DirectoryNode({
                 onToggle={onToggle}
                 selectedFile={selectedFile}
                 onSelectFile={onSelectFile}
+                onOpenFile={onOpenFile}
                 getGitStatus={getGitStatus}
               />
             ))}
@@ -149,25 +129,19 @@ function DirectoryNode({
     <button
       type="button"
       onClick={() => onSelectFile(entry.path)}
+      onDoubleClick={() => onOpenFile(entry.path)}
       className={cn(
-        'flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left text-xs transition-colors hover:bg-hover',
-        isSelected && 'bg-primary/10',
-        gitStatus
-          ? cn(gitStatusColor[gitStatus], 'font-medium')
-          : isSelected
-            ? 'text-text-primary'
-            : 'text-text-secondary hover:text-text-primary'
+        'file-tree-row is-file',
+        isSelected && 'is-selected',
+        gitStatus && `is-git-${gitStatus}`
       )}
-      style={{ paddingLeft: paddingLeft + 16 }}
+      style={{ '--tree-depth': depth } as React.CSSProperties}
       title={gitStatus ? `${relativePath} (${gitStatus})` : relativePath}
     >
-      <Icon className={cn('h-3.5 w-3.5 shrink-0', icon.className)} />
-      <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-      {gitStatus && (
-        <span className={cn('font-mono text-[10px] font-semibold', gitStatusColor[gitStatus])}>
-          {gitStatus}
-        </span>
-      )}
+      <span className="file-tree-twist" aria-hidden />
+      <Icon className={cn('file-tree-ic', `is-${icon.kind}`)} />
+      <span className="file-tree-name">{entry.name}</span>
+      {gitStatus && <span className="file-tree-git">{gitStatus}</span>}
     </button>
   )
 }
@@ -185,7 +159,8 @@ export function FileExplorerPanel(): React.JSX.Element {
   const selectedFile = useEditorStore((s) =>
     projectId ? s.selectedFileByProject[projectId] ?? null : null
   )
-  const openFile = useEditorStore((s) => s.openFile)
+  const setSelectedFile = useEditorStore((s) => s.setSelectedFile)
+  const openInIde = useIdeStore((s) => s.openFile)
   const refreshGit = useGitStore((s) => s.refresh)
   const gitStateByProject = useGitStore((s) => s.stateByProject)
 
@@ -258,18 +233,22 @@ export function FileExplorerPanel(): React.JSX.Element {
   const handleToggle = (path: string): void => {
     setExpandedPaths((prev) => {
       const next = new Set(prev)
-      if (next.has(path)) {
-        next.delete(path)
-      } else {
-        next.add(path)
-      }
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
       return next
     })
   }
 
   const handleSelectFile = (path: string): void => {
     if (!projectId || !projectRoot) return
-    void openFile(projectId, projectRoot, path)
+    const relative = toRelative(projectRoot, path)
+    setSelectedFile(projectId, relative || path)
+  }
+
+  const handleOpenFile = (path: string): void => {
+    if (!projectId || !projectRoot) return
+    handleSelectFile(path)
+    void openInIde(projectId, projectRoot, path)
   }
 
   const getGitStatus = useCallback(
@@ -294,92 +273,72 @@ export function FileExplorerPanel(): React.JSX.Element {
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="border-b border-border px-2 py-2">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-text-muted" />
+    <div className="file-tree">
+      <div className="file-tree-toolbar">
+        <label className="file-tree-search">
+          <Search />
           <input
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search files..."
-            className="w-full rounded-md border border-border bg-app-bg py-1.5 pl-7 pr-7 text-[11px] text-text-primary outline-none placeholder:text-text-muted focus:border-primary/50"
+            placeholder="Search"
+            aria-label="Search files"
           />
           {query && (
-            <button
-              type="button"
-              onClick={() => setQuery('')}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-text-muted hover:bg-hover hover:text-text-primary"
-              title="Clear search"
-            >
-              <X className="h-3 w-3" />
+            <button type="button" onClick={() => setQuery('')} aria-label="Clear search">
+              <X />
             </button>
           )}
-        </div>
-        <div className="mt-1.5 flex items-center justify-between gap-2 px-0.5">
-          <p className="truncate font-mono text-[9px] uppercase tracking-wider text-text-muted">
-            {isSearching ? 'Search results' : projectRoot}
-          </p>
+        </label>
+        <div className="file-tree-meta">
+          <span title={projectRoot}>{isSearching ? 'Results' : folderName(projectRoot)}</span>
           {!isSearching && (
-            <button
-              type="button"
-              onClick={() => void loadRoot()}
-              className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-text-muted transition-colors hover:bg-hover hover:text-text-primary"
-            >
-              Refresh
+            <button type="button" onClick={() => void loadRoot()} title="Refresh" aria-label="Refresh files">
+              <RefreshCw />
             </button>
           )}
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-1">
+      <div className="file-tree-list">
         {isSearching ? (
           <>
-            {searching && <p className="p-2 text-xs text-text-muted">Searching...</p>}
+            {searching && <p className="file-tree-hint">Searching…</p>}
             {!searching && searchItems.length === 0 && (
-              <p className="p-2 text-xs text-text-muted">No files match “{query.trim()}”</p>
+              <p className="file-tree-hint">No files match “{query.trim()}”</p>
             )}
             {searchItems.map((entry) => {
               const relativePath = toRelative(projectRoot, entry.path)
               const gitStatus = getGitStatus(entry.path, false)
               const icon = getFileIconSpec(entry.name)
               const Icon = icon.icon
-              const isSelected =
-                selectedFile === relativePath || selectedFile === entry.path
+              const isSelected = selectedFile === relativePath || selectedFile === entry.path
+              const dir = parentDir(relativePath)
               return (
                 <button
                   key={entry.path}
                   type="button"
                   onClick={() => handleSelectFile(entry.path)}
+                  onDoubleClick={() => handleOpenFile(entry.path)}
                   className={cn(
-                    'flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-hover',
-                    isSelected && 'bg-primary/10',
-                    gitStatus
-                      ? cn(gitStatusColor[gitStatus], 'font-medium')
-                      : 'text-text-secondary hover:text-text-primary'
+                    'file-tree-row is-file is-search',
+                    isSelected && 'is-selected',
+                    gitStatus && `is-git-${gitStatus}`
                   )}
                   title={relativePath}
                 >
-                  <Icon className={cn('h-3.5 w-3.5 shrink-0', icon.className)} />
-                  <span className="min-w-0 flex-1 truncate">{relativePath}</span>
-                  {gitStatus && (
-                    <span
-                      className={cn(
-                        'font-mono text-[10px] font-semibold',
-                        gitStatusColor[gitStatus]
-                      )}
-                    >
-                      {gitStatus}
-                    </span>
-                  )}
+                  <Icon className={cn('file-tree-ic', `is-${icon.kind}`)} />
+                  <span className="file-tree-name">{entry.name}</span>
+                  {dir && <span className="file-tree-dir">{dir}</span>}
+                  {gitStatus && <span className="file-tree-git">{gitStatus}</span>}
                 </button>
               )
             })}
           </>
         ) : (
           <>
-            {loading && <p className="p-2 text-xs text-text-muted">Loading...</p>}
-            {error && <p className="p-2 text-xs text-error">{error}</p>}
+            {loading && <p className="file-tree-hint">Loading…</p>}
+            {error && <p className="file-tree-hint is-error">{error}</p>}
             {!loading &&
               rootEntries.map((entry) => (
                 <DirectoryNode
@@ -391,6 +350,7 @@ export function FileExplorerPanel(): React.JSX.Element {
                   onToggle={handleToggle}
                   selectedFile={selectedFile}
                   onSelectFile={handleSelectFile}
+                  onOpenFile={handleOpenFile}
                   getGitStatus={getGitStatus}
                 />
               ))}

@@ -1,5 +1,6 @@
 import { createPortal } from 'react-dom'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { AGENT_WORKTREE_KINDS } from '@shared/contracts/git'
 import { type PanelType } from '@shared/types'
 import type { PtyLaunchMode, PtySessionStatus } from '@shared/contracts/pty'
 import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS, type AiAccount } from '@shared/contracts/accounts'
@@ -288,6 +289,16 @@ export function PanelShell({
   const accounts = useAiAccountsStore((state) => state.accounts)
   const activeAccountByKind = useAiAccountsStore((state) => state.activeAccountByKind)
   const renamePanel = useWorkspaceStore((state) => state.renamePanel)
+  const setPanelIsolation = useWorkspaceStore((state) => state.setPanelIsolation)
+  const isolationMode = useWorkspaceStore((state) => {
+    for (const workspace of Object.values(state.workspaces)) {
+      const panel = workspace.panels.find((candidate) => candidate.id === id)
+      if (panel) return panel.workspaceIsolation === 'shared' ? 'shared' : 'isolated'
+    }
+    return 'isolated'
+  })
+  const canIsolate = (AGENT_WORKTREE_KINDS as readonly string[]).includes(type)
+  const terminalRunning = Boolean(status && status !== 'stopped' && status !== 'error')
   const account = accountKind
     ? accountId
       ? accounts.find((candidate) => candidate.id === accountId) ?? null
@@ -334,7 +345,12 @@ export function PanelShell({
         data-active={windowActive}
         data-panel-kind={type}
       >
-        {showChrome && phase === 'busy' && <div className="cli-busy-wash" aria-hidden />}
+        {phase === 'busy' && (
+          <>
+            <div className="cli-busy-aura" aria-hidden />
+            <div className="cli-busy-beam" aria-hidden />
+          </>
+        )}
         {showHeader && (
         <header
           className={cn(
@@ -414,6 +430,26 @@ export function PanelShell({
             </div>
           )}
           <div className="panel-header-actions flex shrink-0 items-center gap-1">
+            {canIsolate && (
+              <button
+                type="button"
+                className={cn('iso-mode-chip', isolationMode === 'shared' ? 'is-shared' : 'is-isolated')}
+                aria-pressed={isolationMode === 'isolated'}
+                title={
+                  terminalRunning
+                    ? 'Applies on next launch'
+                    : isolationMode === 'isolated'
+                      ? 'Using an isolated copy'
+                      : 'Editing the main project tree'
+                }
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() => {
+                  setPanelIsolation(id, isolationMode === 'isolated' ? 'shared' : 'isolated')
+                }}
+              >
+                {isolationMode === 'shared' ? 'Shared' : 'Isolated'}
+              </button>
+            )}
             {accountKind && (
               <Button
                 ref={accountButtonRef}

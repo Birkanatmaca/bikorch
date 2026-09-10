@@ -36,7 +36,7 @@ describe('agent worktrees', () => {
     await Promise.all(trash.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
   })
 
-  it('adds a detached worktree and removes it', async () => {
+  it('adds a named-branch worktree and removes it', async () => {
     const repo = await mkdtemp(join(tmpdir(), 'bikorch-repo-'))
     const baseDir = await mkdtemp(join(tmpdir(), 'bikorch-wt-'))
     trash.push(repo, baseDir)
@@ -61,8 +61,9 @@ describe('agent worktrees', () => {
     const listedNorm = listed.replace(/\\/g, '/').toLowerCase()
     const createdNorm = created.worktreePath.replace(/\\/g, '/').toLowerCase()
     expect(listedNorm.includes('claude-a1b2c3d4')).toBe(true)
-    expect(listedNorm.includes(createdNorm) || listed.includes('detached')).toBe(true)
-    expect(listed).toMatch(/detached/i)
+    expect(listedNorm.includes(createdNorm)).toBe(true)
+    expect(created.branch).toBe('bikorch/claude-a1b2c3d4')
+    expect(listed).toMatch(/bikorch\/claude-a1b2c3d4/)
 
     const removed = await removeAgentWorktree({
       projectRoot: repo,

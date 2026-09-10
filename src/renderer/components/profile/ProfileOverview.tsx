@@ -7,14 +7,12 @@ import {
   TerminalSquare
 } from 'lucide-react'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
-import { useSubscriptionStore } from '@renderer/stores/subscription-store'
 import {
   formatCount,
   formatDateTime,
   formatDelta,
   formatDuration,
   formatMeasured,
-  monthlySubscriptionLabel,
   providerLabel,
   UNAVAILABLE
 } from './profile-format'
@@ -25,7 +23,6 @@ export function ProfileOverview(): React.JSX.Element {
   const loading = useDeveloperIntelligenceStore((state) => state.metricsLoading)
   const error = useDeveloperIntelligenceStore((state) => state.metricsError)
   const settings = useDeveloperIntelligenceStore((state) => state.settings)
-  const subscriptions = useSubscriptionStore((state) => state.subscriptions)
 
   if (!metrics && loading) {
     return <div className="profile-empty-state">Loading…</div>
@@ -112,25 +109,6 @@ export function ProfileOverview(): React.JSX.Element {
           </div>
         </SectionCard>
       )}
-
-      <SectionCard title="Spend" className="mt-2.5">
-        <div className="profile-cost-grid">
-          <div>
-            <span>Subscriptions</span>
-            <strong>{monthlySubscriptionLabel(subscriptions)}</strong>
-          </div>
-          <div>
-            <span>API</span>
-            <strong>{formatMeasured(overview.apiSpendUsd, (value) => `$${value.toFixed(2)}`)}</strong>
-          </div>
-          <div>
-            <span>Limit used</span>
-            <strong>
-              {formatMeasured(overview.averagePrimaryLimitUsed, (value) => `${Math.round(value)}%`)}
-            </strong>
-          </div>
-        </div>
-      </SectionCard>
     </>
   )
 }

@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useActiveProject } from '@renderer/hooks/use-active-project'
 import { useGitStatusBar, useGitStore } from '@renderer/stores/git-store'
+import { useIsolationStore } from '@renderer/stores/isolation-store'
 import { GitBranch, FolderOpen, Command, LayoutGrid, Minus, Plus } from 'lucide-react'
 import { isMacOS } from '@renderer/lib/electron-api'
 import { COMMAND_PALETTE_EVENT } from '@renderer/lib/app-events'
@@ -17,6 +18,7 @@ import {
 export function StatusBar(): React.JSX.Element {
   const { projectId, projectName, projectRoot } = useActiveProject()
   const refresh = useGitStore((s) => s.refresh)
+  const inspectIsolation = useIsolationStore((s) => s.inspect)
   const gitStatus = useGitStatusBar(projectId)
   const workspaceScale = useWorkspaceStore((s) => s.workspaceScale)
   const setWorkspaceScale = useWorkspaceStore((s) => s.setWorkspaceScale)
@@ -31,7 +33,8 @@ export function StatusBar(): React.JSX.Element {
   useEffect(() => {
     if (!projectId || !projectRoot) return
     void refresh(projectId, projectRoot)
-  }, [projectId, projectRoot, refresh])
+    void inspectIsolation(projectId, projectRoot)
+  }, [projectId, projectRoot, refresh, inspectIsolation])
 
   useEffect(() => {
     if (!projectId || !projectRoot) return
@@ -39,6 +42,7 @@ export function StatusBar(): React.JSX.Element {
     const refreshQuietly = (): void => {
       if (document.visibilityState === 'visible') {
         void refresh(projectId, projectRoot, { quiet: true })
+        void inspectIsolation(projectId, projectRoot)
       }
     }
 
@@ -48,7 +52,7 @@ export function StatusBar(): React.JSX.Element {
       window.clearInterval(timer)
       document.removeEventListener('visibilitychange', refreshQuietly)
     }
-  }, [projectId, projectRoot, refresh])
+  }, [projectId, projectRoot, refresh, inspectIsolation])
 
   return (
     <footer className="app-status-bar glass-surface flex h-6 shrink-0 items-center justify-between border-t px-3 font-mono text-[10px] text-text-muted">

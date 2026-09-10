@@ -106,7 +106,6 @@ function TiledWindow({
             event.dataTransfer.effectAllowed = 'move'
           }}
         />
-        {showChrome && phase === 'busy' && <div className="cli-busy-wash" aria-hidden />}
       </div>
     </div>
   )

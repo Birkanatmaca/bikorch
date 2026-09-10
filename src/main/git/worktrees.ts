@@ -3,7 +3,7 @@ import { app } from 'electron'
 import { access, mkdir, rm } from 'fs/promises'
 import { dirname } from 'path'
 import type { AgentWorktreeKind } from '@shared/contracts/git'
-import { buildAgentWorktreePath, isManagedWorktreePath } from './worktree-paths'
+import { agentBranchName, buildAgentWorktreePath, isManagedWorktreePath } from './worktree-paths'
 
 function runGit(cwd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -62,18 +62,21 @@ export async function ensureAgentWorktree(input: {
   kind: AgentWorktreeKind
   panelId: string
   baseDir?: string
-}): Promise<{ ok: true; worktreePath: string | null } | { ok: false; error: string }> {
+}): Promise<
+  { ok: true; worktreePath: string | null; branch?: string } | { ok: false; error: string }
+> {
   const repoRoot = await resolveRepoRoot(input.projectRoot)
   if (!repoRoot) return { ok: true, worktreePath: null }
 
   const baseDir = input.baseDir ?? worktreeBaseDir()
   const worktreePath = buildAgentWorktreePath(baseDir, repoRoot, input.kind, input.panelId)
+  const branch = agentBranchName(input.kind, input.panelId)
 
   try {
     const listed = listWorktreePaths(await runGit(repoRoot, ['worktree', 'list', '--porcelain']))
     const alreadyLinked = listed.some((path) => path.toLowerCase() === worktreePath.toLowerCase())
     if (alreadyLinked && (await exists(worktreePath))) {
-      return { ok: true, worktreePath }
+      return { ok: true, worktreePath, branch }
     }
 
     if (await exists(worktreePath)) {
@@ -84,8 +87,13 @@ export async function ensureAgentWorktree(input: {
     }
 
     await mkdir(dirname(worktreePath), { recursive: true })
-    await runGit(repoRoot, ['worktree', 'add', '--detach', worktreePath])
-    return { ok: true, worktreePath }
+    const branches = await runGit(repoRoot, ['branch', '--list', branch])
+    if (branches.trim().length > 0) {
+      await runGit(repoRoot, ['worktree', 'add', worktreePath, branch])
+    } else {
+      await runGit(repoRoot, ['worktree', 'add', '-b', branch, worktreePath])
+    }
+    return { ok: true, worktreePath, branch }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : 'Could not isolate this agent' }
   }

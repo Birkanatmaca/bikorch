@@ -21,8 +21,10 @@ export interface PanelDefinition {
   zone: PanelZone
   launchMode?: 'normal' | 'login'
   accountId?: string
-  /** Isolated git worktree for this agent. Detached HEAD, not a new named branch. */
+  /** Isolated git worktree for this agent on a local `bikorch/<kind>-<id>` branch. */
   worktreePath?: string
+  /** Isolated (own worktree) is the default. Shared uses the main project tree. */
+  workspaceIsolation?: 'isolated' | 'shared'
 }
 
 export type PanelZone = 'left' | 'center' | 'right' | 'bottom'
