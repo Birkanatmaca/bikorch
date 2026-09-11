@@ -1,9 +1,12 @@
-import { CheckSquare2, CircleUser, FolderTree, GitBranch, Music2, SquareTerminal } from 'lucide-react'
+import { CheckSquare2, CircleUser, FolderTree, GitBranch, Music2, SquareTerminal, Timer } from 'lucide-react'
 import { TASK_PRIORITIES, TASK_PRIORITY_LABELS, type ProjectTask } from '@shared/contracts/tasks'
 import { useActiveProject } from '@renderer/hooks/use-active-project'
 import { cn } from '@renderer/lib/utils'
 import { useMusicStore } from '@renderer/stores/music-store'
 import { useTasksStore } from '@renderer/stores/tasks-store'
+import { useTimerStore } from '@renderer/stores/timer-store'
+import { displayMs, formatTimerClock } from '@shared/contracts/timer'
+import type { LeftSidebarView } from '@shared/types'
 
 const NO_TASKS: ProjectTask[] = []
 
@@ -13,7 +16,7 @@ function formatNodeCount(count: number): string {
 
 interface SidebarActivityBarProps {
   isOpen: boolean
-  view: 'files' | 'changes' | 'accounts' | 'tasks' | 'profile' | 'music'
+  view: LeftSidebarView
   changesCount: number
   overlapCount?: number
   conflict?: boolean
@@ -23,6 +26,7 @@ interface SidebarActivityBarProps {
   onSelectTasks: () => void
   onSelectProfile: () => void
   onSelectMusic: () => void
+  onSelectTimer: () => void
 }
 
 export function SidebarActivityBar({
@@ -36,7 +40,8 @@ export function SidebarActivityBar({
   onSelectAccounts,
   onSelectTasks,
   onSelectProfile,
-  onSelectMusic
+  onSelectMusic,
+  onSelectTimer
 }: SidebarActivityBarProps): React.JSX.Element {
   const filesActive = isOpen && view === 'files'
   const changesActive = isOpen && view === 'changes'
@@ -44,7 +49,12 @@ export function SidebarActivityBar({
   const tasksActive = isOpen && view === 'tasks'
   const profileActive = isOpen && view === 'profile'
   const musicActive = isOpen && view === 'music'
+  const timerActive = isOpen && view === 'timer'
   const musicPlaying = useMusicStore((state) => state.status === 'playing')
+  const timerSession = useTimerStore((state) => state.session)
+  const timerNow = useTimerStore((state) => state.nowMs)
+  const timerRunning = timerSession.status === 'running'
+  const timerClock = formatTimerClock(displayMs(timerSession, timerNow))
   const badge = changesCount > 99 ? '99+' : String(changesCount)
   const overlapBadge = overlapCount > 9 ? '9+' : String(overlapCount)
   const gitAlert = conflict || overlapCount > 0
@@ -185,6 +195,37 @@ export function SidebarActivityBar({
             )}
           </span>
         ) : null}
+      </button>
+      <button
+        type="button"
+        onClick={onSelectTimer}
+        aria-pressed={timerActive}
+        title={
+          timerSession.status !== 'idle'
+            ? `${timerActive ? 'Hide' : 'Show'} timer · ${timerClock}`
+            : timerActive
+              ? 'Hide timer'
+              : 'Show timer'
+        }
+        aria-label={
+          timerSession.status !== 'idle'
+            ? `${timerActive ? 'Hide' : 'Show'} timer, ${timerClock}${timerRunning ? ', running' : ', paused'}`
+            : timerActive
+              ? 'Hide timer'
+              : 'Show timer'
+        }
+        className={cn(
+          'glass-icon-btn relative h-9 w-9',
+          timerActive && 'glass-icon-btn-active',
+          timerRunning && 'is-timing'
+        )}
+      >
+        <Timer className="h-4 w-4" />
+        {timerSession.status !== 'idle' && (
+          <span className={cn('rail-timer-badge', timerRunning && 'is-live')} aria-hidden>
+            {timerClock}
+          </span>
+        )}
       </button>
     </aside>
   )

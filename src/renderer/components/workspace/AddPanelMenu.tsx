@@ -17,7 +17,9 @@ const PANEL_MENU_LABELS: Partial<Record<PanelType, string>> = {
   codex: 'Codex',
   chatgpt: 'ChatGPT',
   'claude-chat': 'Claude Chat',
-  player: 'Player'
+  player: 'Player',
+  timer: 'Timer',
+  browser: 'Browser'
 }
 
 const ADDABLE_PANEL_TYPES: PanelType[] = [
@@ -33,7 +35,9 @@ const ADDABLE_PANEL_TYPES: PanelType[] = [
   'git-changes',
   'diff',
   'logs',
-  'player'
+  'player',
+  'timer',
+  'browser'
 ]
 
 export { ADD_PANEL_MENU_EVENT } from '@renderer/lib/app-events'
@@ -128,7 +132,7 @@ export function AddPanelMenu(): React.JSX.Element {
           type="button"
           role="menuitem"
           onClick={() => {
-            addPanel(type, 'center')
+            addPanel(type, type === 'chatgpt' || type === 'claude-chat' ? 'right' : 'center')
             closeMenu()
           }}
           className="menu-action flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-text-secondary"

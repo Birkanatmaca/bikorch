@@ -1,4 +1,5 @@
 import {
+  isFloatingWidget,
   type GridSplitDirection,
   type PanelDefinition,
   type TiledSplitSide,
@@ -14,7 +15,7 @@ export function isTiledWorkspace(layout: WorkspaceLayout): boolean {
 
 export function tiledCenterPanelIds(panels: PanelDefinition[]): string[] {
   return panels
-    .filter((panel) => panel.zone === 'center' && panel.type !== 'player')
+    .filter((panel) => panel.zone === 'center' && !isFloatingWidget(panel.type))
     .map((panel) => panel.id)
 }
 

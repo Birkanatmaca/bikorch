@@ -27,7 +27,8 @@ import {
   DEFAULT_LAYOUT,
   createDefaultPanels,
   sanitizeWorkspacePanels,
-  normalizeLayoutForPanels
+  normalizeLayoutForPanels,
+  isLeftSidebarView
 } from '@shared/types'
 import {
   AI_ACCOUNT_KINDS,
@@ -57,7 +58,9 @@ const VALID_PANEL_TYPES = new Set<PanelType>([
   'diff',
   'logs',
   'tasks',
-  'player'
+  'player',
+  'timer',
+  'browser'
 ])
 
 function getDbPath(): string {
@@ -324,18 +327,9 @@ function parseLayout(raw: unknown): WorkspaceLayout {
       typeof layout.leftCollapsed === 'boolean'
         ? layout.leftCollapsed
         : DEFAULT_LAYOUT.leftCollapsed,
-    leftSidebarView:
-      layout.leftSidebarView === 'changes'
-        ? 'changes'
-        : layout.leftSidebarView === 'accounts'
-          ? 'accounts'
-          : layout.leftSidebarView === 'tasks'
-            ? 'tasks'
-            : layout.leftSidebarView === 'profile'
-              ? 'profile'
-              : layout.leftSidebarView === 'music'
-                ? 'music'
-          : 'files',
+    leftSidebarView: isLeftSidebarView(layout.leftSidebarView)
+      ? layout.leftSidebarView
+      : 'files',
     orchestratorDirection:
       layout.orchestratorDirection === 'horizontal' ||
       layout.orchestratorDirection === 'vertical'

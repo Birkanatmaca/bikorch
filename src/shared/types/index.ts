@@ -13,6 +13,8 @@ export type PanelType =
   | 'logs'
   | 'tasks'
   | 'player'
+  | 'timer'
+  | 'browser'
 
 export interface PanelDefinition {
   id: string
@@ -28,6 +30,37 @@ export interface PanelDefinition {
 }
 
 export type PanelZone = 'left' | 'center' | 'right' | 'bottom'
+
+export type LeftSidebarView =
+  | 'files'
+  | 'changes'
+  | 'accounts'
+  | 'tasks'
+  | 'profile'
+  | 'music'
+  | 'timer'
+
+export const LEFT_SIDEBAR_VIEWS: readonly LeftSidebarView[] = [
+  'files',
+  'changes',
+  'accounts',
+  'tasks',
+  'profile',
+  'music',
+  'timer'
+] as const
+
+export function isLeftSidebarView(value: unknown): value is LeftSidebarView {
+  return typeof value === 'string' && (LEFT_SIDEBAR_VIEWS as readonly string[]).includes(value)
+}
+
+export function isFloatingWidget(type: PanelType | undefined): boolean {
+  return type === 'player' || type === 'timer'
+}
+
+export function isWebChatPanel(type: PanelType | undefined): boolean {
+  return type === 'chatgpt' || type === 'claude-chat'
+}
 
 export interface Project {
   id: string
@@ -123,7 +156,7 @@ export interface WorkspaceLayout {
   bottomSize: number
   mainVerticalSize: number
   leftCollapsed?: boolean
-  leftSidebarView?: 'files' | 'changes' | 'accounts' | 'tasks' | 'profile' | 'music'
+  leftSidebarView?: LeftSidebarView
   orchestratorDirection?: OrchestratorDirection
   centerPanelSizes?: Record<string, number>
   /** Free-form terminal windows in the center canvas, percentages 0–100 */
@@ -162,7 +195,9 @@ export const PANEL_TYPE_LABELS: Record<PanelType, string> = {
   diff: 'Code Review',
   logs: 'Logs',
   tasks: 'Tasks',
-  player: 'Player'
+  player: 'Player',
+  timer: 'Timer',
+  browser: 'Browser'
 }
 
 export const DEFAULT_LAYOUT: WorkspaceLayout = {
@@ -245,10 +280,18 @@ export function rebalanceCenterPanelSizes(panelIds: string[]): Record<string, nu
   return sizes
 }
 
-const ORCH_MIN_W = 22
-const ORCH_MIN_H = 24
-const PLAYER_MIN_W = 22
-const PLAYER_MIN_H = 22
+/** Usable on-screen floor. Large canvases convert these to a smaller %. */
+export const ORCHESTRATOR_MIN_PX = { w: 240, h: 140 } as const
+export const PLAYER_MIN_PX = { w: 200, h: 160 } as const
+export const TIMER_MIN_PX = { w: 168, h: 120 } as const
+
+/** Used when the canvas size is unknown (persist / add without a measured layout). */
+const ORCH_MIN_W = 10
+const ORCH_MIN_H = 12
+const PLAYER_MIN_W = 10
+const PLAYER_MIN_H = 12
+const TIMER_MIN_W = 8
+const TIMER_MIN_H = 10
 
 /** First terminal sits inset on the notebook grid (12×10 cells). */
 export const DEFAULT_ORCHESTRATOR_RECT: OrchestratorRect = {
@@ -265,8 +308,66 @@ export const DEFAULT_PLAYER_RECT: OrchestratorRect = {
   h: 34
 }
 
+export const DEFAULT_TIMER_RECT: OrchestratorRect = {
+  x: 68,
+  y: 8,
+  w: 28,
+  h: 28
+}
+
+export const DEFAULT_CHAT_RIGHT_SIZE = 22
+
+export const DEFAULT_CHAT_RECT: OrchestratorRect = {
+  x: 72,
+  y: 6,
+  w: 26,
+  h: 88
+}
+
 export function isFullBleedOrchestratorRect(rect: OrchestratorRect): boolean {
   return rect.x <= 2 && rect.y <= 2 && rect.w >= 94 && rect.h >= 90
+}
+
+export function minPercentFromPixels(
+  minPx: number,
+  canvasPx: number,
+  fallbackPercent: number
+): number {
+  if (!Number.isFinite(fallbackPercent)) return 10
+  if (!Number.isFinite(canvasPx) || canvasPx <= 0) return fallbackPercent
+  const percent = (minPx / canvasPx) * 100
+  if (!Number.isFinite(percent)) return fallbackPercent
+  return Math.min(80, Math.max(2, percent))
+}
+
+export type OrchestratorLimitKind = 'panel' | 'player' | 'timer'
+
+export function limitKindForPanel(type: PanelType | undefined): OrchestratorLimitKind {
+  if (type === 'player') return 'player'
+  if (type === 'timer') return 'timer'
+  return 'panel'
+}
+
+export function orchestratorMinLimits(
+  kind: OrchestratorLimitKind = 'panel',
+  canvas?: { w: number; h: number } | null
+): { minW: number; minH: number } {
+  if (kind === 'timer') {
+    return {
+      minW: minPercentFromPixels(TIMER_MIN_PX.w, canvas?.w ?? 0, TIMER_MIN_W),
+      minH: minPercentFromPixels(TIMER_MIN_PX.h, canvas?.h ?? 0, TIMER_MIN_H)
+    }
+  }
+  if (kind === 'player') {
+    return {
+      minW: minPercentFromPixels(PLAYER_MIN_PX.w, canvas?.w ?? 0, PLAYER_MIN_W),
+      minH: minPercentFromPixels(PLAYER_MIN_PX.h, canvas?.h ?? 0, PLAYER_MIN_H)
+    }
+  }
+  return {
+    minW: minPercentFromPixels(ORCHESTRATOR_MIN_PX.w, canvas?.w ?? 0, ORCH_MIN_W),
+    minH: minPercentFromPixels(ORCHESTRATOR_MIN_PX.h, canvas?.h ?? 0, ORCH_MIN_H)
+  }
 }
 
 export function clampOrchestratorRect(
@@ -284,6 +385,33 @@ export function clampOrchestratorRect(
 
 export function placePlayerRect(): OrchestratorRect {
   return clampOrchestratorRect({ ...DEFAULT_PLAYER_RECT }, { minW: PLAYER_MIN_W, minH: PLAYER_MIN_H })
+}
+
+export function placeTimerRect(): OrchestratorRect {
+  return clampOrchestratorRect({ ...DEFAULT_TIMER_RECT }, { minW: TIMER_MIN_W, minH: TIMER_MIN_H })
+}
+
+export function placeChatRect(): OrchestratorRect {
+  return clampOrchestratorRect({ ...DEFAULT_CHAT_RECT })
+}
+
+export function floatingWidgetRect(type: PanelType): OrchestratorRect {
+  return type === 'timer' ? placeTimerRect() : placePlayerRect()
+}
+
+export function floatingWidgetLimits(
+  type: PanelType | undefined,
+  canvas?: { w: number; h: number } | null
+): { minW: number; minH: number } | undefined {
+  if (!isFloatingWidget(type)) return undefined
+  return orchestratorMinLimits(limitKindForPanel(type), canvas)
+}
+
+export function panelMinLimits(
+  type: PanelType | undefined,
+  canvas?: { w: number; h: number } | null
+): { minW: number; minH: number } {
+  return orchestratorMinLimits(limitKindForPanel(type), canvas)
 }
 
 export function allocateOrchestratorRect(

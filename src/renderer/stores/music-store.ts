@@ -511,7 +511,6 @@ export const useMusicStore = create<MusicState>((set, get) => ({
   playTrack: async (trackId, options) => {
     const bridge = api()
     if (!bridge) return
-    useWorkspaceStore.getState().openPlayerPanel()
     const track = get().tracks.find((item) => item.id === trackId) ?? null
     const check = await bridge.checkTrack(trackId)
     if (!check.ok) {
@@ -591,7 +590,6 @@ export const useMusicStore = create<MusicState>((set, get) => ({
       get().pause()
       return
     }
-    useWorkspaceStore.getState().openPlayerPanel()
     const element = getAudio()
     try {
       prepareAudioElement(element)

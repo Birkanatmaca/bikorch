@@ -19,6 +19,7 @@ import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import { useMusicStore } from '@renderer/stores/music-store'
 import { MusicPlayerHost } from '@renderer/components/music/MusicPlayerHost'
+import { TimerHost } from '@renderer/components/timer/TimerHost'
 import { cn } from '@renderer/lib/utils'
 import { isMacOS, isWindows } from '@renderer/lib/electron-api'
 
@@ -132,6 +133,7 @@ export default function App(): React.JSX.Element {
         )}
         <StatusBar />
         <MusicPlayerHost />
+        <TimerHost />
         <CommandPalette open={open} onClose={closePalette} />
       </div>
     </ErrorBoundary>
