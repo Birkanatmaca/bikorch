@@ -14,7 +14,7 @@ export function focusWorkspacePanel(panelId: string): void {
   window.dispatchEvent(new CustomEvent(FOCUS_PANEL_EVENT, { detail: panelId }))
 }
 
-export function lockTerminalLayout(panelId: string): void {
+export function lockTerminalLayout(panelId: string | null = null): void {
   window.dispatchEvent(
     new CustomEvent(TERMINAL_LAYOUT_LOCK_EVENT, { detail: { panelId, locked: true } })
   )

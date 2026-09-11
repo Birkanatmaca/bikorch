@@ -19,7 +19,7 @@ import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { cn } from '@renderer/lib/utils'
 import { cliFrameClass, getCliChromePhase } from '@renderer/lib/cli-chrome'
 import { isMacOS } from '@renderer/lib/electron-api'
-import { focusTerminal } from '@renderer/lib/app-events'
+import { focusTerminal, lockTerminalLayout, unlockTerminalLayout } from '@renderer/lib/app-events'
 
 const LIVE_PANEL_TYPES: PanelType[] = [
   'terminal',
@@ -137,6 +137,7 @@ function GridBranch({
 }): React.JSX.Element | null {
   const updateTiledSplitSizes = useWorkspaceStore((s) => s.updateTiledSplitSizes)
   const sizesRef = useRef<[number, number]>(node.type === 'split' ? node.sizes : [50, 50])
+  const splitDraggingRef = useRef(false)
 
   if (node.type === 'leaf') {
     const panel = panelsById.get(node.panelId)
@@ -185,7 +186,17 @@ function GridBranch({
       <PanelResizeHandle
         className="tiled-split-handle app-no-drag"
         onDragging={(dragging) => {
-          if (dragging) return
+          if (dragging) {
+            if (!splitDraggingRef.current) {
+              splitDraggingRef.current = true
+              lockTerminalLayout()
+            }
+            return
+          }
+          if (splitDraggingRef.current) {
+            splitDraggingRef.current = false
+            unlockTerminalLayout()
+          }
           updateTiledSplitSizes(path, sizesRef.current)
         }}
       />

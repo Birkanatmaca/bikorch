@@ -14,6 +14,7 @@ import { useGitStatusBar } from '@renderer/stores/git-store'
 import { selectIsolationState, useIsolationStore } from '@renderer/stores/isolation-store'
 import { WorkspaceCenterEmpty } from '@renderer/components/workspace/WorkspaceCenterEmpty'
 import { OrchestratorZone } from '@renderer/components/workspace/OrchestratorZone'
+import { lockTerminalLayout, unlockTerminalLayout } from '@renderer/lib/app-events'
 import { cn } from '@renderer/lib/utils'
 
 const DRAG_TYPE = 'application/x-panel-id'
@@ -298,6 +299,16 @@ export function WorkspaceLayout(): React.JSX.Element {
     [activeProjectId, updateLayout]
   )
 
+  const handleLayoutDragging = useCallback((dragging: boolean) => {
+    if (dragging) {
+      lockTerminalLayout()
+      setLayoutResizing(true)
+      return
+    }
+    setLayoutResizing(false)
+    unlockTerminalLayout()
+  }, [])
+
   const beginOverlayResize = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (!activeProjectId) return
@@ -307,6 +318,8 @@ export function WorkspaceLayout(): React.JSX.Element {
       const handle = event.currentTarget
       if (!parent) return
       handle.setPointerCapture(event.pointerId)
+      lockTerminalLayout()
+      setLayoutResizing(true)
 
       const onMove = (moveEvent: PointerEvent): void => {
         const rect = parent.getBoundingClientRect()
@@ -325,14 +338,17 @@ export function WorkspaceLayout(): React.JSX.Element {
         handle.removeEventListener('pointerup', onUp)
         handle.removeEventListener('pointercancel', onUp)
         const next = overlayDragWidthRef.current
+        if (next != null) {
+          const wide = ['accounts', 'profile'].includes(
+            useWorkspaceStore.getState().workspaces[activeProjectId]?.layout.leftSidebarView ??
+              'files'
+          )
+          updateLayout(activeProjectId, { leftSize: clampLeftSize(next, wide) })
+        }
         overlayDragWidthRef.current = null
         setOverlayDragWidth(null)
-        if (next == null) return
-        const wide = ['accounts', 'profile'].includes(
-          useWorkspaceStore.getState().workspaces[activeProjectId]?.layout.leftSidebarView ??
-            'files'
-        )
-        updateLayout(activeProjectId, { leftSize: clampLeftSize(next, wide) })
+        setLayoutResizing(false)
+        unlockTerminalLayout()
       }
 
       handle.addEventListener('pointermove', onMove)
@@ -408,7 +424,7 @@ export function WorkspaceLayout(): React.JSX.Element {
 
       {hasRight && (
         <>
-          <PanelResizeHandle className="app-no-drag" onDragging={setLayoutResizing} />
+          <PanelResizeHandle className="app-no-drag" onDragging={handleLayoutDragging} />
           <Panel
             id="diff-sidebar"
             order={2}
@@ -440,7 +456,7 @@ export function WorkspaceLayout(): React.JSX.Element {
   )
 
   return (
-    <div className="workspace-frame flex min-h-0 flex-1">
+    <div className={cn('workspace-frame flex min-h-0 flex-1', layoutResizing && 'is-layout-resizing')}>
       <SidebarActivityBar
         isOpen={!leftCollapsed}
         view={layout.leftSidebarView ?? 'files'}
@@ -497,7 +513,7 @@ export function WorkspaceLayout(): React.JSX.Element {
           </Panel>
           <PanelResizeHandle
             className="app-no-drag"
-            onDragging={setLayoutResizing}
+            onDragging={handleLayoutDragging}
           />
           <Panel defaultSize={layout.bottomSize} minSize={10} maxSize={60}>
             <ZoneDropArea
