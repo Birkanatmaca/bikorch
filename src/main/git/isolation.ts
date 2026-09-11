@@ -12,7 +12,11 @@ import type {
   IsolationOverlap
 } from '@shared/contracts/git'
 import { detectLanguage } from '@shared/lib/languages'
-import { buildConflictResolvePrompt, extractConflictHunks } from '@shared/lib/isolation-prompt'
+import {
+  buildConflictResolvePrompt,
+  extractConflictHunks,
+  hasConflictMarkers
+} from '@shared/lib/isolation-prompt'
 import {
   agentBranchName,
   buildIntegrationWorktreePath,
@@ -125,6 +129,41 @@ async function listUnmerged(cwd: string): Promise<string[]> {
   return uniqueSorted(lines(raw))
 }
 
+async function stageResolvedConflicts(cwd: string): Promise<void> {
+  const unmerged = await listUnmerged(cwd)
+  for (const file of unmerged) {
+    const text = await readWorkingText(join(cwd, file))
+    if (hasConflictMarkers(text)) continue
+    await runGit(cwd, ['add', '--', file]).catch(() => undefined)
+  }
+}
+
+async function refreshFoldSession(session: IsolationFoldSession): Promise<IsolationFoldSession> {
+  if (!session.integrationPath) return session
+  await stageResolvedConflicts(session.integrationPath)
+  const unmerged = await listUnmerged(session.integrationPath)
+  if (unmerged.length === 0) {
+    if (session.status === 'conflict') {
+      session.status = 'clean'
+      session.conflicts = []
+    }
+    return session
+  }
+  session.status = 'conflict'
+  session.files = unmerged
+  session.conflicts = []
+  for (const file of unmerged) {
+    session.conflicts.push({
+      path: file,
+      absolutePath: join(session.integrationPath, file),
+      base: await showStage(session.integrationPath, 1, file),
+      main: await showStage(session.integrationPath, 2, file),
+      agent: await showStage(session.integrationPath, 3, file)
+    })
+  }
+  return session
+}
+
 async function showStage(cwd: string, stage: 1 | 2 | 3, file: string): Promise<string | undefined> {
   const text = await runGit(cwd, ['show', `:${stage}:${file}`]).catch(() => '')
   return text.length > 0 ? clip(text) : undefined
@@ -186,10 +225,13 @@ export async function inspectIsolation(
     })
   }
 
+  const fold = foldByRepo.get(repoRoot) ?? null
+  if (fold) await refreshFoldSession(fold)
+
   return {
     lanes,
     overlaps: overlapsFromLanes(lanes),
-    fold: foldByRepo.get(repoRoot) ?? null
+    fold
   }
 }
 
@@ -305,9 +347,11 @@ export async function acceptFold(input: {
     return { ok: false, error: 'Nothing to accept' }
   }
 
-  if (session.status === 'conflict') {
+  if (session.status === 'conflict' || (await mergeHeadPresent(session.integrationPath))) {
+    await stageResolvedConflicts(session.integrationPath)
     const still = await listUnmerged(session.integrationPath)
     if (still.length > 0) {
+      await refreshFoldSession(session)
       return { ok: false, error: `${still.length} conflicted file${still.length === 1 ? '' : 's'} remain` }
     }
     if (await mergeHeadPresent(session.integrationPath)) {

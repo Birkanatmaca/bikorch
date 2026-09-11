@@ -1,5 +1,9 @@
 import type { IsolationConflictFile } from '@shared/contracts/git'
 
+export function hasConflictMarkers(text: string): boolean {
+  return /^(<<<<<<< |>>>>>>> )/m.test(text)
+}
+
 const FALLBACK_SIDE_CHARS = 1_200
 const MAX_HUNK_CHARS = 4_000
 

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { buildConflictResolvePrompt, extractConflictHunks } from '../isolation-prompt'
+import { buildConflictResolvePrompt, extractConflictHunks, hasConflictMarkers } from '../isolation-prompt'
+
+describe('hasConflictMarkers', () => {
+  it('detects git conflict markers and ignores decorative rules', () => {
+    expect(hasConflictMarkers('<<<<<<< HEAD\nconst n = 1\n=======\nconst n = 2\n>>>>>>> agent\n')).toBe(true)
+    expect(hasConflictMarkers('const n = 2\n')).toBe(false)
+    expect(hasConflictMarkers('=================================\n')).toBe(false)
+  })
+})
 
 describe('extractConflictHunks', () => {
   it('keeps only marker blocks plus a little context', () => {
