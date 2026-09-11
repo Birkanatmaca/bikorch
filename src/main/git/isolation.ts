@@ -12,7 +12,7 @@ import type {
   IsolationOverlap
 } from '@shared/contracts/git'
 import { detectLanguage } from '@shared/lib/languages'
-import { buildConflictResolvePrompt } from '@shared/lib/isolation-prompt'
+import { buildConflictResolvePrompt, extractConflictHunks } from '@shared/lib/isolation-prompt'
 import {
   agentBranchName,
   buildIntegrationWorktreePath,
@@ -20,7 +20,8 @@ import {
   isManagedWorktreePath
 } from './worktree-paths'
 
-const MAX_SNIPPET = 8_000
+const MAX_SNIPPET = 1_500
+const MAX_WORKING_BYTES = 2 * 1024 * 1024
 const foldByRepo = new Map<string, IsolationFoldSession>()
 
 function runGit(cwd: string, args: string[]): Promise<string> {
@@ -127,6 +128,16 @@ async function listUnmerged(cwd: string): Promise<string[]> {
 async function showStage(cwd: string, stage: 1 | 2 | 3, file: string): Promise<string | undefined> {
   const text = await runGit(cwd, ['show', `:${stage}:${file}`]).catch(() => '')
   return text.length > 0 ? clip(text) : undefined
+}
+
+async function readWorkingText(absolutePath: string): Promise<string> {
+  try {
+    const buffer = await readFile(absolutePath)
+    if (buffer.includes(0) || buffer.byteLength > MAX_WORKING_BYTES) return ''
+    return buffer.toString('utf8')
+  } catch {
+    return ''
+  }
 }
 
 async function mergeHeadPresent(cwd: string): Promise<boolean> {
@@ -245,13 +256,20 @@ export async function prepareFold(input: {
   if (status === 'conflict') {
     const unmerged = await listUnmerged(integrationPath)
     for (const file of unmerged) {
-      conflicts.push({
+      const absolutePath = join(integrationPath, file)
+      const hunks = extractConflictHunks(await readWorkingText(absolutePath))
+      const conflict: IsolationConflictFile = {
         path: file,
-        absolutePath: join(integrationPath, file),
-        base: await showStage(integrationPath, 1, file),
-        main: await showStage(integrationPath, 2, file),
-        agent: await showStage(integrationPath, 3, file)
-      })
+        absolutePath
+      }
+      if (hunks) {
+        conflict.hunks = hunks
+      } else {
+        conflict.base = await showStage(integrationPath, 1, file)
+        conflict.main = await showStage(integrationPath, 2, file)
+        conflict.agent = await showStage(integrationPath, 3, file)
+      }
+      conflicts.push(conflict)
     }
   }
 

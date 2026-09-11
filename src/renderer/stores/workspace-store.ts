@@ -166,6 +166,7 @@ interface WorkspaceStore extends WorkspaceSnapshot {
   splitTiledPanel: (panelId: string, side: TiledSplitSide) => string
   updateTiledSplitSizes: (path: number[], sizes: [number, number]) => void
   toggleSidebar: (projectId: string) => void
+  collapseLeftSidebar: (projectId: string) => void
   selectLeftSidebar: (
     projectId: string,
     view: LeftSidebarView
@@ -902,6 +903,26 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       panels
     )
 
+    set({
+      workspaces: {
+        ...get().workspaces,
+        [projectId]: {
+          ...workspace,
+          panels,
+          layout
+        }
+      }
+    })
+  },
+
+  collapseLeftSidebar: (projectId) => {
+    const workspace = get().workspaces[projectId]
+    if (!workspace || workspace.layout.leftCollapsed) return
+    const panels = sanitizeWorkspacePanels(workspace.panels)
+    const layout = normalizeLayoutForPanels(
+      { ...workspace.layout, leftCollapsed: true },
+      panels
+    )
     set({
       workspaces: {
         ...get().workspaces,

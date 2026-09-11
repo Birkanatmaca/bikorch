@@ -1,6 +1,14 @@
+export interface WindowChromeState {
+  maximized: boolean
+  fullScreen: boolean
+}
+
 export const WINDOW_IPC = {
   MINIMIZE: 'window:minimize',
   MAXIMIZE: 'window:maximize',
   CLOSE: 'window:close',
-  IS_MAXIMIZED: 'window:isMaximized'
+  IS_MAXIMIZED: 'window:isMaximized',
+  IS_FULL_SCREEN: 'window:isFullScreen',
+  GET_STATE: 'window:getState',
+  STATE_CHANGED: 'window:state-changed'
 } as const

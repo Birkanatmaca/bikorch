@@ -138,6 +138,7 @@ export interface IsolationOverlap {
 export interface IsolationConflictFile {
   path: string
   absolutePath: string
+  hunks?: string
   base?: string
   main?: string
   agent?: string

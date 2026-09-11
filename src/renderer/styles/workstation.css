@@ -200,6 +200,20 @@ input:not(.xterm-helper-textarea), select, textarea:not(.xterm-helper-textarea) 
   .menubar-full { display: none; }
 }
 .platform-macos .app-header-actions { padding-right: 4px; }
+.platform-macos .app-header.is-fullscreen {
+  padding-left: 10px;
+}
+.platform-macos .app-header.is-fullscreen .app-header-leading {
+  padding-left: 0;
+}
+.app-header-brand {
+  gap: 5px;
+}
+.app-header-wordmark {
+  height: 32px;
+  max-width: 96px;
+  margin-block: -7px;
+}
 .windows-titlebar-controls { align-self: stretch; margin-left: 6px; }
 .windows-titlebar-control { height: 42px; }
 .windows-titlebar-control-close:hover { background: #c42b3c; }

@@ -4,6 +4,7 @@ import { ChatMenu } from './ChatMenu'
 import { AppLogo } from '../brand/AppLogo'
 import { MenuBar } from './MenuBar'
 import { TitleBarControls } from './TitleBarControls'
+import { useWindowChrome } from '@renderer/hooks/use-window-chrome'
 import { cn } from '@renderer/lib/utils'
 import { isMacOS, isWindows } from '@renderer/lib/electron-api'
 
@@ -18,6 +19,7 @@ export function AppHeader({
 }: AppHeaderProps): React.JSX.Element {
   const isWin = isWindows()
   const isMac = isMacOS()
+  const { fullScreen } = useWindowChrome()
 
   return (
     <header
@@ -25,6 +27,7 @@ export function AppHeader({
         'app-header glass-surface flex h-9 shrink-0 items-center border-b',
         (isWin || isMac) && 'app-drag-region',
         isMac && 'app-header-macos',
+        isMac && fullScreen && 'is-fullscreen',
         isWin && 'app-header-windows',
         isWin ? 'pl-0 pr-0' : 'px-2'
       )}
@@ -36,11 +39,11 @@ export function AppHeader({
     >
       <div
         className={cn(
-          'flex shrink-0 items-center app-no-drag',
-          isMac ? 'pl-[76px]' : 'pl-2.5'
+          'app-header-leading flex shrink-0 items-center app-no-drag',
+          isMac && !fullScreen ? 'pl-[76px]' : 'pl-2.5'
         )}
       >
-        <AppLogo size="xs" className="opacity-90" />
+        <AppLogo size="xs" showName className="app-header-brand opacity-90" />
         <div className="mx-1.5 h-4 w-px bg-border" />
         <MenuBar onCommandPalette={onCommandPalette} />
       </div>

@@ -60,7 +60,7 @@ import {
   type GetLogsRequest,
   type LogEvent
 } from '@shared/contracts/logs'
-import { WINDOW_IPC } from '@shared/contracts/window'
+import { WINDOW_IPC, type WindowChromeState } from '@shared/contracts/window'
 import {
   AUTH_PROFILES_IPC,
   type AuthProfileRequest,
@@ -250,6 +250,9 @@ export interface WindowApi {
   maximize: () => Promise<boolean>
   close: () => Promise<void>
   isMaximized: () => Promise<boolean>
+  isFullScreen: () => Promise<boolean>
+  getState: () => Promise<WindowChromeState>
+  onStateChange: (callback: (state: WindowChromeState) => void) => () => void
 }
 
 export interface UsageApi {
@@ -397,7 +400,18 @@ const windowApi: WindowApi = {
   minimize: () => ipcRenderer.invoke(WINDOW_IPC.MINIMIZE),
   maximize: () => ipcRenderer.invoke(WINDOW_IPC.MAXIMIZE),
   close: () => ipcRenderer.invoke(WINDOW_IPC.CLOSE),
-  isMaximized: () => ipcRenderer.invoke(WINDOW_IPC.IS_MAXIMIZED)
+  isMaximized: () => ipcRenderer.invoke(WINDOW_IPC.IS_MAXIMIZED),
+  isFullScreen: () => ipcRenderer.invoke(WINDOW_IPC.IS_FULL_SCREEN),
+  getState: () => ipcRenderer.invoke(WINDOW_IPC.GET_STATE),
+  onStateChange: (callback) => {
+    const listener = (_event: IpcRendererEvent, state: WindowChromeState): void => {
+      callback(state)
+    }
+    ipcRenderer.on(WINDOW_IPC.STATE_CHANGED, listener)
+    return () => {
+      ipcRenderer.removeListener(WINDOW_IPC.STATE_CHANGED, listener)
+    }
+  }
 }
 
 const developerIntelligenceApi: DeveloperIntelligenceApi = {

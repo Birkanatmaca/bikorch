@@ -207,6 +207,7 @@ export function WorkspaceLayout(): React.JSX.Element {
   const removePanel = useWorkspaceStore((s) => s.removePanel)
   const updateLayout = useWorkspaceStore((s) => s.updateLayout)
   const toggleSidebar = useWorkspaceStore((s) => s.toggleSidebar)
+  const collapseLeftSidebar = useWorkspaceStore((s) => s.collapseLeftSidebar)
   const selectLeftSidebar = useWorkspaceStore((s) => s.selectLeftSidebar)
   const ensureProjectWorkspace = useWorkspaceStore((s) => s.ensureProjectWorkspace)
   const { changesCount } = useGitStatusBar(activeProjectId)
@@ -342,6 +343,17 @@ export function WorkspaceLayout(): React.JSX.Element {
     [activeProjectId, updateLayout]
   )
 
+  const handleWorkspacePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!activeProjectId) return
+      const target = event.target
+      if (!(target instanceof HTMLElement)) return
+      if (target.closest('.workspace-sidebar-overlay')) return
+      collapseLeftSidebar(activeProjectId)
+    },
+    [activeProjectId, collapseLeftSidebar]
+  )
+
   const leftCollapsed = workspace?.layout.leftCollapsed ?? false
   const hasLeftPanel = workspace?.panels.some((p) => p.zone === 'left') ?? false
   const leftSidebarView = workspace?.layout.leftSidebarView ?? 'files'
@@ -455,7 +467,11 @@ export function WorkspaceLayout(): React.JSX.Element {
         onSelectMusic={() => selectLeftSidebar(activeProjectId, 'music')}
         onSelectTimer={() => selectLeftSidebar(activeProjectId, 'timer')}
       />
-      <div ref={workspaceMainRef} className="workspace-main relative flex min-h-0 min-w-0 flex-1 flex-col">
+      <div
+        ref={workspaceMainRef}
+        className="workspace-main relative flex min-h-0 min-w-0 flex-1 flex-col"
+        onPointerDownCapture={handleWorkspacePointerDown}
+      >
         {showLeftSidebar && (
           <div
             className="workspace-sidebar-overlay"

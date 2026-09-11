@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { AgentWorktreeKind, IsolationLane } from '@shared/contracts/git'
 import { AGENT_WORKTREE_KINDS } from '@shared/contracts/git'
 import { buildConflictResolvePrompt } from '@shared/lib/isolation-prompt'
+import { submitCliPrompt } from '@renderer/lib/submit-cli-prompt'
 import { PANEL_TYPE_LABELS, type PanelType } from '@shared/types'
 import { focusTerminal, focusWorkspacePanel } from '@renderer/lib/app-events'
 import { cn } from '@renderer/lib/utils'
@@ -108,12 +109,9 @@ export function AgentIsolationBlock({
     })
     setResolving(true)
     try {
-      await window.api.pty.write({
-        sessionId: panelId,
-        data: `\u001b[200~${prompt}\u001b[201~\r`
-      })
       focusWorkspacePanel(panelId)
       focusTerminal(panelId)
+      await submitCliPrompt(panelId, prompt)
     } finally {
       setResolving(false)
     }
