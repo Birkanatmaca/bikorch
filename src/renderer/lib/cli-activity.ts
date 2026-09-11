@@ -57,3 +57,62 @@ export function isPromptSubmit(data: string): boolean {
 export function isInterrupt(data: string): boolean {
   return data === '\u0003'
 }
+
+const OUTPUT_TAIL_LIMIT = 8000
+export const CLI_IDLE_MS = 1800
+
+export class CliActivityTracker {
+  private tail = ''
+  private idleTimer: ReturnType<typeof setTimeout> | null = null
+  private receivedSinceBusy = false
+
+  constructor(
+    private readonly options: {
+      apply: (next: 'waiting' | 'busy') => void
+      getStatus: () => PtySessionStatus | undefined
+      idleMs?: number
+    }
+  ) {}
+
+  feed(chunk: string): void {
+    this.tail = (this.tail + chunk).slice(-OUTPUT_TAIL_LIMIT)
+    const inferred = inferCliActivity(this.tail)
+    const current = this.options.getStatus()
+    if (current === 'busy') this.receivedSinceBusy = true
+
+    if (inferred === 'busy') {
+      this.apply('busy')
+      this.clearIdle()
+      return
+    }
+    if (inferred === 'waiting') {
+      this.apply('waiting')
+      return
+    }
+
+    if (current !== 'busy' || !this.receivedSinceBusy) return
+    this.clearIdle()
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null
+      if (inferCliActivity(this.tail) !== 'busy') this.apply('waiting')
+    }, this.options.idleMs ?? CLI_IDLE_MS)
+  }
+
+  dispose(): void {
+    this.clearIdle()
+  }
+
+  private apply(next: 'waiting' | 'busy'): void {
+    const current = this.options.getStatus()
+    if (current === 'stopped' || current === 'error') return
+    if (next === 'busy') this.receivedSinceBusy = current === 'busy' ? this.receivedSinceBusy : false
+    if (current === next) return
+    this.options.apply(next)
+  }
+
+  private clearIdle(): void {
+    if (this.idleTimer === null) return
+    clearTimeout(this.idleTimer)
+    this.idleTimer = null
+  }
+}

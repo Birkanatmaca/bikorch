@@ -4,12 +4,13 @@ import {
   PanelGroup,
   PanelResizeHandle
 } from 'react-resizable-panels'
-import type {
-  PanelDefinition,
-  PanelType,
-  WorkspaceGridNode
+import {
+  parseCanvasMode,
+  type PanelDefinition,
+  type PanelType,
+  type WorkspaceGridNode
 } from '@shared/types'
-import { buildEqualGrid } from '@shared/workspace-grid'
+import { buildLayoutGrid } from '@shared/workspace-grid'
 import { PanelShell } from '@renderer/components/panels/PanelShell'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
@@ -207,11 +208,14 @@ export function TiledWorkspace({
   onClose,
   onContextMenu
 }: TiledWorkspaceProps): React.JSX.Element {
+  const canvasMode = useWorkspaceStore((state) =>
+    parseCanvasMode(state.getActiveWorkspace()?.layout.canvasMode)
+  )
   const panelsById = useMemo(
     () => new Map(panels.map((panel) => [panel.id, panel])),
     [panels]
   )
-  const tree = grid ?? buildEqualGrid(panels.map((panel) => panel.id))
+  const tree = grid ?? buildLayoutGrid(panels.map((panel) => panel.id), canvasMode)
 
   if (!tree) {
     return <div className="tiled-workspace" />

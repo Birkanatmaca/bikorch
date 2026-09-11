@@ -13,6 +13,8 @@ import { useCommandPalette } from '@renderer/hooks/use-command-palette'
 import { useOpenProject } from '@renderer/hooks/use-open-project'
 import { usePersistenceBootstrap } from '@renderer/hooks/use-persistence-bootstrap'
 import { startUsageSync } from '@renderer/lib/usage-sync'
+import { startPtyActivityWatch } from '@renderer/lib/pty-activity-watch'
+import { ProcessNoticeBar } from '@renderer/components/layout/ProcessNoticeBar'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import { useMusicStore } from '@renderer/stores/music-store'
@@ -92,7 +94,12 @@ export default function App(): React.JSX.Element {
     if (!isReady) return
     void useDeveloperIntelligenceStore.getState().loadSettings()
     void useMusicStore.getState().bootstrap()
-    return startUsageSync()
+    const stopUsage = startUsageSync()
+    const stopPtyWatch = startPtyActivityWatch()
+    return () => {
+      stopUsage()
+      stopPtyWatch()
+    }
   }, [isReady])
 
   if (!isReady) {
@@ -109,6 +116,7 @@ export default function App(): React.JSX.Element {
           </div>
         )}
         <AppHeader showWorkspaceControls={projects.length > 0} onCommandPalette={openPalette} />
+        <ProcessNoticeBar />
         {projects.length > 0 ? (
           <div className="workspace-zoom-host">
             <div

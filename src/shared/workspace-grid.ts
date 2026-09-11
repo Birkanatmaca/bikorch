@@ -1,13 +1,15 @@
-import type {
-  GridSplitDirection,
-  PanelDefinition,
-  TiledSplitSide,
-  WorkspaceGridNode,
-  WorkspaceLayout
+import {
+  type GridSplitDirection,
+  type PanelDefinition,
+  type TiledSplitSide,
+  type WorkspaceCanvasMode,
+  type WorkspaceGridNode,
+  type WorkspaceLayout,
+  parseCanvasMode
 } from './types'
 
 export function isTiledWorkspace(layout: WorkspaceLayout): boolean {
-  return layout.canvasMode === 'tiled'
+  return parseCanvasMode(layout.canvasMode) !== 'free'
 }
 
 export function tiledCenterPanelIds(panels: PanelDefinition[]): string[] {
@@ -55,8 +57,13 @@ function joinNodes(nodes: WorkspaceGridNode[], direction: GridSplitDirection): W
 export function buildEqualGrid(panelIds: string[]): WorkspaceGridNode | null {
   if (panelIds.length === 0) return null
   if (panelIds.length === 1) return { type: 'leaf', panelId: panelIds[0] }
+  return buildWrappedGrid(panelIds, columnCountForTiles(panelIds.length))
+}
 
-  const cols = columnCountForTiles(panelIds.length)
+export function buildWrappedGrid(panelIds: string[], columns: number): WorkspaceGridNode | null {
+  if (panelIds.length === 0) return null
+  if (panelIds.length === 1) return { type: 'leaf', panelId: panelIds[0] }
+  const cols = Math.max(1, Math.min(Math.floor(columns) || 1, panelIds.length))
   const rows: WorkspaceGridNode[][] = []
   for (let index = 0; index < panelIds.length; index += cols) {
     const slice = panelIds.slice(index, index + cols)
@@ -64,6 +71,28 @@ export function buildEqualGrid(panelIds: string[]): WorkspaceGridNode | null {
   }
   const rowNodes = rows.map((row) => joinNodes(row, 'vertical'))
   return joinNodes(rowNodes, 'horizontal')
+}
+
+export function buildRowGrid(panelIds: string[], maxRows: number): WorkspaceGridNode | null {
+  if (panelIds.length === 0) return null
+  const rows = Math.max(1, Math.min(Math.floor(maxRows) || 1, panelIds.length))
+  const columns = Math.ceil(panelIds.length / rows)
+  return buildWrappedGrid(panelIds, columns)
+}
+
+export function buildLayoutGrid(
+  panelIds: string[],
+  mode: WorkspaceCanvasMode
+): WorkspaceGridNode | null {
+  const parsed = parseCanvasMode(mode)
+  if (parsed === 'free') return null
+  if (parsed === 'tiled') return buildEqualGrid(panelIds)
+  if (parsed === 'grid-2x2' || parsed === 'cols-2') return buildWrappedGrid(panelIds, 2)
+  if (parsed === 'cols-3') return buildWrappedGrid(panelIds, 3)
+  if (parsed === 'cols-4') return buildWrappedGrid(panelIds, 4)
+  if (parsed === 'rows-2') return buildRowGrid(panelIds, 2)
+  if (parsed === 'rows-3') return buildRowGrid(panelIds, 3)
+  return buildRowGrid(panelIds, 4)
 }
 
 export function removePanelFromGrid(
