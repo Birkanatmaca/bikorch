@@ -10,6 +10,7 @@ import { registerAuthProfileHandlers } from './auth-profiles'
 import { registerLogsHandlers } from './logs'
 import { registerDeveloperIntelligenceHandlers } from './developer-intelligence'
 import { registerMusicHandlers } from './music'
+import { registerAutomationHandlers } from './automation'
 
 export function registerIpcHandlers(): void {
   registerPtyHandlers()
@@ -23,6 +24,7 @@ export function registerIpcHandlers(): void {
   registerLogsHandlers()
   registerDeveloperIntelligenceHandlers()
   registerMusicHandlers()
+  registerAutomationHandlers()
 
   ipcMain.handle('dialog:selectFolder', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)

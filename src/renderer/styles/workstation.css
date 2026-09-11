@@ -251,6 +251,11 @@ kbd {
   height: 100%;
   width: 100%;
 }
+.web-chat-guest {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
 .status-zoom {
   display: flex;
   align-items: center;
@@ -568,6 +573,26 @@ kbd {
 }
 .rail-timer-badge.is-live {
   box-shadow: 0 0 0 1px rgb(139 124 248 / 0.45), 0 0 8px rgb(139 124 248 / 0.35);
+}
+.rail-automation-dot {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-muted, #707986);
+  box-shadow: 0 0 0 2px var(--color-panel-bg);
+  pointer-events: none;
+}
+.rail-automation-dot.is-live {
+  background: var(--color-purple-light);
+  box-shadow: 0 0 0 2px var(--color-panel-bg), 0 0 6px rgb(139 124 248 / 0.55);
+  animation: rail-automation-pulse 1.6s ease-in-out infinite;
+}
+@keyframes rail-automation-pulse {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
 }
 .activity-badge.is-overlap {
   background: #e8b86d;

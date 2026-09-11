@@ -118,6 +118,15 @@ import {
   type DownloadSettings,
   type StartDownloadResult
 } from '@shared/contracts/downloads'
+import {
+  AUTOMATION_IPC,
+  type AutomationDefinition,
+  type AutomationDraft,
+  type AutomationEvent,
+  type AutomationRun,
+  type AutomationSettings,
+  type AutomationStatusSummary
+} from '@shared/contracts/automation'
 
 export interface MusicApi {
   library: {
@@ -301,6 +310,22 @@ export interface DeveloperIntelligenceApi {
   getSession: (id: string) => Promise<AgentSessionDetail | null>
 }
 
+export interface AutomationApi {
+  list: () => Promise<AutomationDefinition[]>
+  get: (id: string) => Promise<AutomationDefinition | null>
+  create: (draft: AutomationDraft) => Promise<AutomationDefinition>
+  update: (id: string, patch: Partial<AutomationDraft>) => Promise<AutomationDefinition>
+  remove: (id: string) => Promise<void>
+  setEnabled: (id: string, enabled: boolean) => Promise<AutomationDefinition>
+  runNow: (id: string) => Promise<AutomationRun>
+  cancelRun: (runId: string) => Promise<void>
+  listRuns: (automationId?: string) => Promise<AutomationRun[]>
+  getSettings: () => Promise<AutomationSettings>
+  updateSettings: (patch: Partial<AutomationSettings>) => Promise<AutomationSettings>
+  getStatus: () => Promise<AutomationStatusSummary>
+  onEvent: (callback: (event: AutomationEvent) => void) => () => void
+}
+
 export interface AppApi {
   platform: NodeJS.Platform
   selectFolder: () => Promise<string | null>
@@ -315,6 +340,7 @@ export interface AppApi {
   window: WindowApi
   developerIntelligence: DeveloperIntelligenceApi
   music: MusicApi
+  automation: AutomationApi
 }
 
 const ptyApi: PtyApi = {
@@ -528,6 +554,30 @@ const musicApi: MusicApi = {
   }
 }
 
+const automationApi: AutomationApi = {
+  list: () => ipcRenderer.invoke(AUTOMATION_IPC.LIST),
+  get: (id) => ipcRenderer.invoke(AUTOMATION_IPC.GET, id),
+  create: (draft) => ipcRenderer.invoke(AUTOMATION_IPC.CREATE, draft),
+  update: (id, patch) => ipcRenderer.invoke(AUTOMATION_IPC.UPDATE, { id, patch }),
+  remove: (id) => ipcRenderer.invoke(AUTOMATION_IPC.REMOVE, id),
+  setEnabled: (id, enabled) => ipcRenderer.invoke(AUTOMATION_IPC.SET_ENABLED, { id, enabled }),
+  runNow: (id) => ipcRenderer.invoke(AUTOMATION_IPC.RUN_NOW, id),
+  cancelRun: (runId) => ipcRenderer.invoke(AUTOMATION_IPC.CANCEL_RUN, runId),
+  listRuns: (automationId) => ipcRenderer.invoke(AUTOMATION_IPC.LIST_RUNS, automationId),
+  getSettings: () => ipcRenderer.invoke(AUTOMATION_IPC.GET_SETTINGS),
+  updateSettings: (patch) => ipcRenderer.invoke(AUTOMATION_IPC.UPDATE_SETTINGS, patch),
+  getStatus: () => ipcRenderer.invoke(AUTOMATION_IPC.GET_STATUS),
+  onEvent: (callback) => {
+    const listener = (_event: IpcRendererEvent, payload: AutomationEvent): void => {
+      callback(payload)
+    }
+    ipcRenderer.on(AUTOMATION_IPC.EVENT, listener)
+    return () => {
+      ipcRenderer.removeListener(AUTOMATION_IPC.EVENT, listener)
+    }
+  }
+}
+
 const api: AppApi = {
   platform: process.platform,
   selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),
@@ -541,7 +591,8 @@ const api: AppApi = {
   authProfiles: authProfilesApi,
   window: windowApi,
   developerIntelligence: developerIntelligenceApi,
-  music: musicApi
+  music: musicApi,
+  automation: automationApi
 }
 
 contextBridge.exposeInMainWorld('api', api)

@@ -5,7 +5,12 @@ import {
   type ImperativePanelGroupHandle
 } from 'react-resizable-panels'
 import { useRef, useCallback, useState, useEffect } from 'react'
-import { type PanelDefinition, type PanelZone, type WorkspaceLayout } from '@shared/types'
+import {
+  type PanelDefinition,
+  type PanelZone,
+  type WorkspaceLayout,
+  WIDE_LEFT_SIDEBAR_VIEWS
+} from '@shared/types'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { PanelShell } from '@renderer/components/panels/PanelShell'
 import { SidebarActivityBar } from '@renderer/components/layout/SidebarActivityBar'
@@ -325,7 +330,7 @@ export function WorkspaceLayout(): React.JSX.Element {
       const onMove = (moveEvent: PointerEvent): void => {
         const rect = parent.getBoundingClientRect()
         if (rect.width <= 0) return
-        const wide = ['accounts', 'profile'].includes(
+        const wide = (WIDE_LEFT_SIDEBAR_VIEWS as readonly string[]).includes(
           useWorkspaceStore.getState().workspaces[activeProjectId]?.layout.leftSidebarView ??
             'files'
         )
@@ -340,7 +345,7 @@ export function WorkspaceLayout(): React.JSX.Element {
         handle.removeEventListener('pointercancel', onUp)
         const next = overlayDragWidthRef.current
         if (next != null) {
-          const wide = ['accounts', 'profile'].includes(
+          const wide = (WIDE_LEFT_SIDEBAR_VIEWS as readonly string[]).includes(
             useWorkspaceStore.getState().workspaces[activeProjectId]?.layout.leftSidebarView ??
               'files'
           )
@@ -373,7 +378,7 @@ export function WorkspaceLayout(): React.JSX.Element {
   const leftCollapsed = workspace?.layout.leftCollapsed ?? false
   const hasLeftPanel = workspace?.panels.some((p) => p.zone === 'left') ?? false
   const leftSidebarView = workspace?.layout.leftSidebarView ?? 'files'
-  const isWideSidebarView = leftSidebarView === 'accounts' || leftSidebarView === 'profile'
+  const isWideSidebarView = (WIDE_LEFT_SIDEBAR_VIEWS as readonly string[]).includes(leftSidebarView)
 
   if (!workspace || !activeProjectId) {
     return (
@@ -480,6 +485,7 @@ export function WorkspaceLayout(): React.JSX.Element {
         onSelectAccounts={() => selectLeftSidebar(activeProjectId, 'accounts')}
         onSelectTasks={() => selectLeftSidebar(activeProjectId, 'tasks')}
         onSelectProfile={() => selectLeftSidebar(activeProjectId, 'profile')}
+        onSelectAutomation={() => selectLeftSidebar(activeProjectId, 'automation')}
         onSelectMusic={() => selectLeftSidebar(activeProjectId, 'music')}
         onSelectTimer={() => selectLeftSidebar(activeProjectId, 'timer')}
       />
