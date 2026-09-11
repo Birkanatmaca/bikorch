@@ -21,6 +21,8 @@ export function getPanelTypeIcon(type: string): string {
     logs: '≡',
     tasks: '☑',
     player: '♫',
+    timer: '◷',
+    browser: '◎',
     usage: '◷'
   }
   return icons[type] ?? '□'

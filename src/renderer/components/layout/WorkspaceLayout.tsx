@@ -453,6 +453,7 @@ export function WorkspaceLayout(): React.JSX.Element {
         onSelectTasks={() => selectLeftSidebar(activeProjectId, 'tasks')}
         onSelectProfile={() => selectLeftSidebar(activeProjectId, 'profile')}
         onSelectMusic={() => selectLeftSidebar(activeProjectId, 'music')}
+        onSelectTimer={() => selectLeftSidebar(activeProjectId, 'timer')}
       />
       <div ref={workspaceMainRef} className="workspace-main relative flex min-h-0 min-w-0 flex-1 flex-col">
         {showLeftSidebar && (

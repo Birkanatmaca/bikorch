@@ -9,6 +9,7 @@ import {
   splitGridPanel,
   swapGridPanels,
   syncGridWithPanelIds,
+  tiledCenterPanelIds,
   updateGridSizes
 } from '../workspace-grid'
 import type { WorkspaceGridNode } from '../types'
@@ -98,5 +99,16 @@ describe('tiled workspace grid', () => {
     const next = updateGridSizes(grid!, [], [40, 60])
     if (next.type !== 'split') throw new Error('expected split')
     expect(next.sizes).toEqual([40, 60])
+  })
+
+  it('keeps player and timer widgets out of the tiled grid', () => {
+    expect(
+      tiledCenterPanelIds([
+        { id: 'term', type: 'terminal', title: 'Terminal', zone: 'center' },
+        { id: 'player', type: 'player', title: 'Player', zone: 'center' },
+        { id: 'timer', type: 'timer', title: 'Timer', zone: 'center' },
+        { id: 'files', type: 'file-explorer', title: 'Files', zone: 'left' }
+      ])
+    ).toEqual(['term'])
   })
 })

@@ -32,6 +32,14 @@ const WorkspacePlayerPanel = lazy(() =>
     default: m.WorkspacePlayerPanel
   }))
 )
+const WorkspaceTimerWidget = lazy(() =>
+  import('@renderer/components/timer/WorkspaceTimerWidget').then((m) => ({
+    default: m.WorkspaceTimerWidget
+  }))
+)
+const BrowserPanel = lazy(() =>
+  import('@renderer/components/browser/BrowserPanel').then((m) => ({ default: m.BrowserPanel }))
+)
 
 interface PanelContentProps {
   panelId: string
@@ -147,6 +155,20 @@ export function PanelContent({ panelId, type, launchMode, accountId }: PanelCont
           <div className="h-full min-h-0 overflow-hidden">
             <WorkspacePlayerPanel />
           </div>
+        </Suspense>
+      )
+    case 'timer':
+      return (
+        <Suspense fallback={<PanelLoading />}>
+          <div className="h-full min-h-0 overflow-hidden">
+            <WorkspaceTimerWidget />
+          </div>
+        </Suspense>
+      )
+    case 'browser':
+      return (
+        <Suspense fallback={<PanelLoading />}>
+          <BrowserPanel panelId={panelId} />
         </Suspense>
       )
     default:

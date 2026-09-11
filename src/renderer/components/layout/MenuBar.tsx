@@ -194,7 +194,9 @@ export function MenuBar({ onCommandPalette, className }: MenuBarProps): React.JS
           { label: 'Codex', action: () => addPanel('codex') },
           { label: 'ChatGPT', action: () => addPanel('chatgpt') },
           { label: 'Claude Chat', action: () => addPanel('claude-chat') },
-          { label: 'Player', action: () => addPanel('player') }
+          { label: 'Player', action: () => addPanel('player') },
+          { label: 'Timer', action: () => addPanel('timer') },
+          { label: 'Browser', action: () => addPanel('browser') }
         ]
       },
       {

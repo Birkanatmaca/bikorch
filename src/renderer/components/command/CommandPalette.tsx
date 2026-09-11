@@ -136,12 +136,42 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
         }
       },
       {
+        id: 'add-timer',
+        label: 'Timer',
+        group: 'Quick',
+        keywords: 'add timer pomodoro focus widget workspace',
+        action: () => {
+          addPanel('timer')
+          onClose()
+        }
+      },
+      {
+        id: 'add-browser',
+        label: 'Browser',
+        group: 'Quick',
+        keywords: 'add browser preview localhost inspect responsive search',
+        action: () => {
+          addPanel('browser')
+          onClose()
+        }
+      },
+      {
         id: 'show-music',
         label: 'Show Music',
         group: 'Workspace',
         keywords: 'music library player sidebar downloads',
         action: () => {
           if (projectId) selectLeftSidebar(projectId, 'music')
+          onClose()
+        }
+      },
+      {
+        id: 'show-timer',
+        label: 'Show Timer',
+        group: 'Workspace',
+        keywords: 'timer pomodoro focus stopwatch sidebar statistics',
+        action: () => {
+          if (projectId) selectLeftSidebar(projectId, 'timer')
           onClose()
         }
       },

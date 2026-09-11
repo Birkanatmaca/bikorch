@@ -11,9 +11,21 @@ import {
   PanelTop,
   Sparkles,
   Terminal,
+  Timer,
+  Globe,
   X
 } from 'lucide-react'
-import { clampOrchestratorRect, DEFAULT_ORCHESTRATOR_RECT, DEFAULT_PLAYER_RECT } from '@shared/types'
+import {
+  clampOrchestratorRect,
+  DEFAULT_CHAT_RECT,
+  DEFAULT_ORCHESTRATOR_RECT,
+  DEFAULT_PLAYER_RECT,
+  DEFAULT_TIMER_RECT,
+  floatingWidgetLimits,
+  isFloatingWidget,
+  isWebChatPanel,
+  panelMinLimits
+} from '@shared/types'
 import type { PanelType } from '@shared/types'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import {
@@ -63,13 +75,17 @@ export function useOrchestratorContextMenu(
       if (!menu) return
       const canvas = getCanvasRect()
       const box = canvas ?? new DOMRect(0, 0, 1, 1)
-      const size =
-        type === 'player'
-          ? { w: DEFAULT_PLAYER_RECT.w, h: DEFAULT_PLAYER_RECT.h }
+      const measured = canvas ? { w: canvas.width, h: canvas.height } : undefined
+      const size = isFloatingWidget(type)
+        ? type === 'timer'
+          ? { w: DEFAULT_TIMER_RECT.w, h: DEFAULT_TIMER_RECT.h }
+          : { w: DEFAULT_PLAYER_RECT.w, h: DEFAULT_PLAYER_RECT.h }
+        : isWebChatPanel(type)
+          ? { w: DEFAULT_CHAT_RECT.w, h: DEFAULT_CHAT_RECT.h }
           : { w: DEFAULT_ORCHESTRATOR_RECT.w, h: DEFAULT_ORCHESTRATOR_RECT.h }
       const rect = clampOrchestratorRect(
         rectFromCanvasClick(box, menu.canvasX, menu.canvasY, size),
-        type === 'player' ? { minW: 22, minH: 22 } : undefined
+        floatingWidgetLimits(type, measured) ?? panelMinLimits(type, measured)
       )
       addPanel(type, 'center', rect)
     },
@@ -134,6 +150,18 @@ export function useOrchestratorContextMenu(
           label: 'Player',
           icon: Music2,
           action: () => addAtCursor('player')
+        },
+        {
+          id: 'add-timer',
+          label: 'Timer',
+          icon: Timer,
+          action: () => addAtCursor('timer')
+        },
+        {
+          id: 'add-browser',
+          label: 'Browser',
+          icon: Globe,
+          action: () => addAtCursor('browser')
         },
         {
           id: 'add-git',

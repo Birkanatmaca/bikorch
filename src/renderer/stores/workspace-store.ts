@@ -14,8 +14,14 @@ import {
   normalizeLayoutForPanels,
   layoutAfterAddCenterPanel,
   clampOrchestratorRect,
-  placePlayerRect,
+  isFloatingWidget,
+  isWebChatPanel,
+  floatingWidgetRect,
+  floatingWidgetLimits,
+  placeChatRect,
+  DEFAULT_CHAT_RIGHT_SIZE,
   clampWorkspaceScale,
+  type LeftSidebarView,
   WORKSPACE_SCALE_DEFAULT,
   WORKSPACE_SCALE_STEP,
   type OrchestratorRect,
@@ -139,6 +145,7 @@ interface WorkspaceStore extends WorkspaceSnapshot {
 
   getActiveWorkspace: () => ProjectWorkspaceState | null
   openPlayerPanel: () => string
+  openTimerPanel: () => string
   addPanel: (
     type: PanelType,
     zone?: PanelZone,
@@ -161,7 +168,7 @@ interface WorkspaceStore extends WorkspaceSnapshot {
   toggleSidebar: (projectId: string) => void
   selectLeftSidebar: (
     projectId: string,
-    view: 'files' | 'changes' | 'accounts' | 'tasks' | 'profile' | 'music'
+    view: LeftSidebarView
   ) => void
   clearPanelLaunchMode: (panelId: string) => void
   setPanelWorktree: (panelId: string, worktreePath: string | null) => void
@@ -214,6 +221,8 @@ function getDefaultZone(type: PanelType): PanelZone {
     case 'codex':
     case 'git-changes':
     case 'player':
+    case 'timer':
+    case 'browser':
       return 'center'
     case 'chatgpt':
     case 'claude-chat':
@@ -375,6 +384,19 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     return get().addPanel('player', 'center')
   },
 
+  openTimerPanel: () => {
+    const { activeProjectId, workspaces } = get()
+    if (!activeProjectId) return ''
+    const workspace = workspaces[activeProjectId]
+    if (!workspace) return ''
+    const existing = workspace.panels.find((panel) => panel.type === 'timer')
+    if (existing) {
+      window.dispatchEvent(new CustomEvent('bikorch:focus-panel', { detail: existing.id }))
+      return existing.id
+    }
+    return get().addPanel('timer', 'center')
+  },
+
   addPanel: (type, zone, rect, launchMode, accountId, titleOverride) => {
     const { activeProjectId, workspaces } = get()
     if (!activeProjectId) return ''
@@ -385,6 +407,14 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     if (type === 'tasks') {
       get().selectLeftSidebar(activeProjectId, 'tasks')
       return ''
+    }
+
+    if (isFloatingWidget(type)) {
+      const existing = workspace.panels.find((panel) => panel.type === type)
+      if (existing) {
+        window.dispatchEvent(new CustomEvent('bikorch:focus-panel', { detail: existing.id }))
+        return existing.id
+      }
     }
 
     const targetZone = zone ?? getDefaultZone(type)
@@ -423,17 +453,29 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     if (targetZone === 'right' && !hadRight) {
       nextLayout = {
         ...nextLayout,
-        rightSize: nextLayout.rightSize >= 20 ? nextLayout.rightSize : 36
+        rightSize: isWebChatPanel(type)
+          ? DEFAULT_CHAT_RIGHT_SIZE
+          : nextLayout.rightSize >= 20
+            ? nextLayout.rightSize
+            : 36
       }
     }
 
     if (targetZone === 'center') {
-      if (type === 'player' && !rect) {
+      if (isFloatingWidget(type) && !rect) {
         nextLayout = {
           ...nextLayout,
           centerPanelRects: {
             ...(nextLayout.centerPanelRects ?? {}),
-            [newPanel.id]: placePlayerRect()
+            [newPanel.id]: floatingWidgetRect(type)
+          }
+        }
+      } else if (isWebChatPanel(type) && !rect) {
+        nextLayout = {
+          ...nextLayout,
+          centerPanelRects: {
+            ...(nextLayout.centerPanelRects ?? {}),
+            [newPanel.id]: placeChatRect()
           }
         }
       } else if (rect) {
@@ -441,10 +483,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           ...nextLayout,
           centerPanelRects: {
             ...(nextLayout.centerPanelRects ?? {}),
-            [newPanel.id]:
-              type === 'player'
-                ? clampOrchestratorRect(rect, { minW: 16, minH: 14 })
-                : clampOrchestratorRect(rect)
+            [newPanel.id]: clampOrchestratorRect(rect, floatingWidgetLimits(type))
           }
         }
       } else {
@@ -460,7 +499,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           )
         }
       }
-      if (isTiledWorkspace(nextLayout) && type !== 'player') {
+      if (isTiledWorkspace(nextLayout) && !isFloatingWidget(type)) {
         nextLayout = {
           ...nextLayout,
           centerGrid: insertPanelInGrid(nextLayout.centerGrid ?? null, newPanel.id)
@@ -634,11 +673,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     const current = workspace.panels.find((p) => p.id === panelId)
     let centerPanelRects = workspace.layout.centerPanelRects ?? {}
 
-    if (zone === 'center' && current?.zone !== 'center') {
-      if (current?.type === 'player') {
+    if (zone === 'center' && current && current.zone !== 'center') {
+      if (isFloatingWidget(current.type)) {
         centerPanelRects = {
           ...centerPanelRects,
-          [panelId]: placePlayerRect()
+          [panelId]: floatingWidgetRect(current.type)
         }
       } else {
         const existingIds = workspace.panels
@@ -659,7 +698,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       ...workspace.layout,
       centerPanelRects
     }
-    if (zone === 'center' && current?.zone !== 'center' && current?.type !== 'player' && isTiledWorkspace(nextLayout)) {
+    if (zone === 'center' && current?.zone !== 'center' && !isFloatingWidget(current?.type) && isTiledWorkspace(nextLayout)) {
       nextLayout = {
         ...nextLayout,
         centerGrid: insertPanelInGrid(nextLayout.centerGrid ?? null, panelId)
@@ -671,8 +710,15 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         centerGrid: pruneCenterGrid(nextLayout.centerGrid, new Set([panelId]))
       }
     }
-    if (zone === 'right' && !hadRight && (nextLayout.rightSize ?? 0) < 20) {
-      nextLayout = { ...nextLayout, rightSize: 36 }
+    if (zone === 'right' && !hadRight) {
+      nextLayout = {
+        ...nextLayout,
+        rightSize: isWebChatPanel(current?.type)
+          ? DEFAULT_CHAT_RIGHT_SIZE
+          : (nextLayout.rightSize ?? 0) >= 20
+            ? nextLayout.rightSize
+            : 36
+      }
     }
 
     set({

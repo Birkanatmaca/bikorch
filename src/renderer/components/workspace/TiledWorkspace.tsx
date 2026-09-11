@@ -1,13 +1,15 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Panel,
   PanelGroup,
   PanelResizeHandle
 } from 'react-resizable-panels'
-import type {
-  PanelDefinition,
-  PanelType,
-  WorkspaceGridNode
+import {
+  minPercentFromPixels,
+  ORCHESTRATOR_MIN_PX,
+  type PanelDefinition,
+  type PanelType,
+  type WorkspaceGridNode
 } from '@shared/types'
 import { buildEqualGrid } from '@shared/workspace-grid'
 import { PanelShell } from '@renderer/components/panels/PanelShell'
@@ -118,7 +120,9 @@ function GridBranch({
   focusedId,
   onFocus,
   onClose,
-  onContextMenu
+  onContextMenu,
+  minWidthPct,
+  minHeightPct
 }: {
   node: WorkspaceGridNode
   path: number[]
@@ -127,6 +131,8 @@ function GridBranch({
   onFocus: (panelId: string) => void
   onClose: (panelId: string) => void
   onContextMenu: (event: React.MouseEvent, panelId: string) => void
+  minWidthPct: number
+  minHeightPct: number
 }): React.JSX.Element | null {
   const updateTiledSplitSizes = useWorkspaceStore((s) => s.updateTiledSplitSizes)
   const sizesRef = useRef<[number, number]>(node.type === 'split' ? node.sizes : [50, 50])
@@ -147,6 +153,8 @@ function GridBranch({
 
   sizesRef.current = node.sizes
   const groupDirection = node.direction === 'vertical' ? 'horizontal' : 'vertical'
+  const minSize = groupDirection === 'horizontal' ? minWidthPct : minHeightPct
+  const branchProps = { minWidthPct, minHeightPct }
 
   return (
     <PanelGroup
@@ -159,7 +167,7 @@ function GridBranch({
       <Panel
         id={`tile-${path.join('-') || 'root'}-0`}
         defaultSize={node.sizes[0]}
-        minSize={14}
+        minSize={minSize}
         order={1}
       >
         <GridBranch
@@ -170,6 +178,7 @@ function GridBranch({
           onFocus={onFocus}
           onClose={onClose}
           onContextMenu={onContextMenu}
+          {...branchProps}
         />
       </Panel>
       <PanelResizeHandle
@@ -182,7 +191,7 @@ function GridBranch({
       <Panel
         id={`tile-${path.join('-') || 'root'}-1`}
         defaultSize={node.sizes[1]}
-        minSize={14}
+        minSize={minSize}
         order={2}
       >
         <GridBranch
@@ -193,10 +202,15 @@ function GridBranch({
           onFocus={onFocus}
           onClose={onClose}
           onContextMenu={onContextMenu}
+          {...branchProps}
         />
       </Panel>
     </PanelGroup>
   )
+}
+
+function tiledAxisMin(canvasPx: number, minPx: number): number {
+  return Math.min(14, Math.max(6, minPercentFromPixels(minPx, canvasPx, 10)))
 }
 
 export function TiledWorkspace({
@@ -207,18 +221,35 @@ export function TiledWorkspace({
   onClose,
   onContextMenu
 }: TiledWorkspaceProps): React.JSX.Element {
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [minWidthPct, setMinWidthPct] = useState(10)
+  const [minHeightPct, setMinHeightPct] = useState(10)
   const panelsById = useMemo(
     () => new Map(panels.map((panel) => [panel.id, panel])),
     [panels]
   )
   const tree = grid ?? buildEqualGrid(panels.map((panel) => panel.id))
 
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    const update = (): void => {
+      const box = el.getBoundingClientRect()
+      setMinWidthPct(tiledAxisMin(box.width, ORCHESTRATOR_MIN_PX.w))
+      setMinHeightPct(tiledAxisMin(box.height, ORCHESTRATOR_MIN_PX.h))
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
   if (!tree) {
-    return <div className="tiled-workspace" />
+    return <div ref={rootRef} className="tiled-workspace" />
   }
 
   return (
-    <div className="tiled-workspace">
+    <div ref={rootRef} className="tiled-workspace">
       <GridBranch
         node={tree}
         path={[]}
@@ -227,6 +258,8 @@ export function TiledWorkspace({
         onFocus={onFocus}
         onClose={onClose}
         onContextMenu={onContextMenu}
+        minWidthPct={minWidthPct}
+        minHeightPct={minHeightPct}
       />
     </div>
   )
