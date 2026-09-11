@@ -1,5 +1,9 @@
 import type { IsolationConflictFile } from '@shared/contracts/git'
 
+export function hasConflictMarkers(text: string): boolean {
+  return /^(<<<<<<< |>>>>>>> )/m.test(text)
+}
+
 export function buildConflictResolvePrompt(input: {
   task: string
   resolverLabel: string

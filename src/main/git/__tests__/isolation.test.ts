@@ -155,4 +155,43 @@ describe('agent isolation merge', () => {
     expect(prompt).toContain('Do not modify unrelated files')
     await abortFold({ projectRoot: repo, baseDir })
   })
+
+  it('accepts a conflict after the working tree is resolved without a manual git add', async () => {
+    const repo = await initRepo()
+    const baseDir = await mkdtemp(join(tmpdir(), 'bikorch-iso-base-'))
+    trash.push(repo, baseDir)
+    const claudeId = 'a1b2c3d4-aaaa-bbbb-cccc-ddddeeeeffff'
+    const cursorId = 'b2c3d4e5-aaaa-bbbb-cccc-ddddeeeeffff'
+    const claude = await ensureAgentWorktree({ projectRoot: repo, kind: 'claude', panelId: claudeId, baseDir })
+    const cursor = await ensureAgentWorktree({ projectRoot: repo, kind: 'cursor', panelId: cursorId, baseDir })
+    if (!claude.ok || !claude.worktreePath || !cursor.ok || !cursor.worktreePath) throw new Error('worktrees')
+    await writeFile(join(claude.worktreePath, 'shared.ts'), 'export const n = 2\n')
+    await writeFile(join(cursor.worktreePath, 'shared.ts'), 'export const n = 3\n')
+
+    const first = await prepareFold({
+      projectRoot: repo,
+      panelId: claudeId,
+      kind: 'claude',
+      title: 'Auth',
+      worktreePath: claude.worktreePath,
+      baseDir
+    })
+    expect(first.status).toBe('clean')
+    const { acceptFold } = await import('../isolation')
+    expect((await acceptFold({ projectRoot: repo, baseDir })).ok).toBe(true)
+
+    const second = await prepareFold({
+      projectRoot: repo,
+      panelId: cursorId,
+      kind: 'cursor',
+      title: 'UI',
+      worktreePath: cursor.worktreePath,
+      baseDir
+    })
+    expect(second.status).toBe('conflict')
+    expect(second.integrationPath).toBeTruthy()
+    await writeFile(join(second.integrationPath!, 'shared.ts'), 'export const n = 2\nexport const n = 3\n')
+    const accepted = await acceptFold({ projectRoot: repo, baseDir })
+    expect(accepted).toEqual({ ok: true })
+  })
 })
