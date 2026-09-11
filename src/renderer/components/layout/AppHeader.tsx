@@ -6,6 +6,7 @@ import { MenuBar } from './MenuBar'
 import { TitleBarControls } from './TitleBarControls'
 import { cn } from '@renderer/lib/utils'
 import { isMacOS, isWindows } from '@renderer/lib/electron-api'
+import { useWindowDrag } from '@renderer/hooks/use-window-drag'
 
 interface AppHeaderProps {
   showWorkspaceControls?: boolean
@@ -18,16 +19,21 @@ export function AppHeader({
 }: AppHeaderProps): React.JSX.Element {
   const isWin = isWindows()
   const isMac = isMacOS()
+  const windowDrag = useWindowDrag()
 
   return (
     <header
       className={cn(
         'app-header glass-surface flex h-9 shrink-0 items-center border-b',
-        (isWin || isMac) && 'app-drag-region',
         isMac && 'app-header-macos',
         isWin && 'app-header-windows',
         isWin ? 'pl-0 pr-0' : 'px-2'
       )}
+      onPointerDown={windowDrag.onPointerDown}
+      onPointerMove={windowDrag.onPointerMove}
+      onPointerUp={windowDrag.onPointerUp}
+      onPointerCancel={windowDrag.onPointerCancel}
+      onLostPointerCapture={windowDrag.onLostPointerCapture}
       onDoubleClick={(event) => {
         if (!isWin || !window.api?.window) return
         if ((event.target as HTMLElement).closest('.app-no-drag')) return

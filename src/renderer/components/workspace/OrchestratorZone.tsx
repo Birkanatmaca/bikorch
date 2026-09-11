@@ -385,6 +385,11 @@ export function OrchestratorZone({
       if (e.button !== 0) return
       e.preventDefault()
       e.stopPropagation()
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId)
+      } catch {
+        // Capture is best-effort; window listeners still drive the drag.
+      }
       setFocusedId(panelId)
       const start = getRect(panelId)
       const isPlayer = panels.some((panel) => panel.id === panelId && panel.type === 'player')
@@ -404,9 +409,34 @@ export function OrchestratorZone({
   )
 
   useEffect(() => {
+    const handlePointerUp = (): void => {
+      const drag = dragRef.current
+      dragRef.current = null
+      if (dragFrameRef.current !== null) {
+        cancelAnimationFrame(dragFrameRef.current)
+        dragFrameRef.current = null
+      }
+      if (!drag) return
+
+      const live = previewRectsRef.current[drag.panelId]
+      const { w, h } = canvasSize()
+      if (live) {
+        updateCenterPanelRect(drag.panelId, snapRectToGrid(live, w, h))
+      }
+      previewRectsRef.current = {}
+      setPreviewRects({})
+      unlockTerminalLayout(drag.panelId)
+      if (!drag.isPlayer) focusTerminal(drag.panelId)
+    }
+
     const handlePointerMove = (e: PointerEvent): void => {
       const drag = dragRef.current
       if (!drag) return
+      if (e.pointerType === 'mouse' && e.buttons === 0) {
+        handlePointerUp()
+        return
+      }
+      e.preventDefault()
       const { dx, dy } = toDeltaPercent(e.clientX, e.clientY)
       const limits = drag.isPlayer ? { minW: 22, minH: 22 } : undefined
       const next =
@@ -432,33 +462,15 @@ export function OrchestratorZone({
       })
     }
 
-    const handlePointerUp = (): void => {
-      const drag = dragRef.current
-      dragRef.current = null
-      if (dragFrameRef.current !== null) {
-        cancelAnimationFrame(dragFrameRef.current)
-        dragFrameRef.current = null
-      }
-      if (!drag) return
-
-      const live = previewRectsRef.current[drag.panelId]
-      const { w, h } = canvasSize()
-      if (live) {
-        updateCenterPanelRect(drag.panelId, snapRectToGrid(live, w, h))
-      }
-      previewRectsRef.current = {}
-      setPreviewRects({})
-      unlockTerminalLayout(drag.panelId)
-      if (!drag.isPlayer) focusTerminal(drag.panelId)
-    }
-
-    window.addEventListener('pointermove', handlePointerMove)
-    window.addEventListener('pointerup', handlePointerUp)
-    window.addEventListener('pointercancel', handlePointerUp)
+    window.addEventListener('pointermove', handlePointerMove, { capture: true, passive: false })
+    window.addEventListener('pointerup', handlePointerUp, { capture: true })
+    window.addEventListener('pointercancel', handlePointerUp, { capture: true })
+    window.addEventListener('lostpointercapture', handlePointerUp)
     return () => {
-      window.removeEventListener('pointermove', handlePointerMove)
-      window.removeEventListener('pointerup', handlePointerUp)
-      window.removeEventListener('pointercancel', handlePointerUp)
+      window.removeEventListener('pointermove', handlePointerMove, { capture: true })
+      window.removeEventListener('pointerup', handlePointerUp, { capture: true })
+      window.removeEventListener('pointercancel', handlePointerUp, { capture: true })
+      window.removeEventListener('lostpointercapture', handlePointerUp)
       const drag = dragRef.current
       if (drag) unlockTerminalLayout(drag.panelId)
     }

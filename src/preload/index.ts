@@ -250,6 +250,9 @@ export interface WindowApi {
   maximize: () => Promise<boolean>
   close: () => Promise<void>
   isMaximized: () => Promise<boolean>
+  dragStart: () => void
+  dragMove: () => void
+  dragEnd: () => void
 }
 
 export interface UsageApi {
@@ -397,7 +400,10 @@ const windowApi: WindowApi = {
   minimize: () => ipcRenderer.invoke(WINDOW_IPC.MINIMIZE),
   maximize: () => ipcRenderer.invoke(WINDOW_IPC.MAXIMIZE),
   close: () => ipcRenderer.invoke(WINDOW_IPC.CLOSE),
-  isMaximized: () => ipcRenderer.invoke(WINDOW_IPC.IS_MAXIMIZED)
+  isMaximized: () => ipcRenderer.invoke(WINDOW_IPC.IS_MAXIMIZED),
+  dragStart: () => ipcRenderer.send(WINDOW_IPC.DRAG_START),
+  dragMove: () => ipcRenderer.send(WINDOW_IPC.DRAG_MOVE),
+  dragEnd: () => ipcRenderer.send(WINDOW_IPC.DRAG_END)
 }
 
 const developerIntelligenceApi: DeveloperIntelligenceApi = {

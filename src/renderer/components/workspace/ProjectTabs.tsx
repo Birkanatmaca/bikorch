@@ -241,7 +241,7 @@ export function ProjectTabs(): React.JSX.Element {
     <div
       ref={listRef}
       className={cn(
-        'project-tabs relative flex h-full min-w-0 w-full items-center overflow-x-auto app-no-drag',
+        'project-tabs relative flex h-full min-w-0 w-full items-center overflow-x-auto',
         session && 'project-tabs-reordering'
       )}
       role="tablist"

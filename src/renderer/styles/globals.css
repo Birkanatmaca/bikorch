@@ -869,10 +869,13 @@ body {
   -webkit-app-region: no-drag;
 }
 
-/* Keep header menus above workspace panels. */
+/* Keep header menus above workspace panels. Window move is JS-driven so
+   Chromium app-region drag cannot stall when the cursor crosses a tab. */
 .app-header {
   position: relative;
   z-index: 100;
+  user-select: none;
+  touch-action: none;
 }
 
 /* macOS-style traffic lights used by CLI terminal windows. */
