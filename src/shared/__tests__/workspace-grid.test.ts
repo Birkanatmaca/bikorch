@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildEqualGrid,
+  buildLayoutGrid,
   collectGridIds,
   columnCountForTiles,
   insertPanelInGrid,
@@ -11,7 +12,7 @@ import {
   syncGridWithPanelIds,
   updateGridSizes
 } from '../workspace-grid'
-import type { WorkspaceGridNode } from '../types'
+import { parseCanvasMode, type WorkspaceGridNode } from '../types'
 
 function idsOf(node: WorkspaceGridNode | null): string[] {
   return collectGridIds(node)
@@ -98,5 +99,55 @@ describe('tiled workspace grid', () => {
     const next = updateGridSizes(grid!, [], [40, 60])
     if (next.type !== 'split') throw new Error('expected split')
     expect(next.sizes).toEqual([40, 60])
+  })
+})
+
+describe('layout presets', () => {
+  it('splits four panels into equal columns', () => {
+    const grid = buildLayoutGrid(['a', 'b', 'c', 'd'], 'cols-4')
+    expect(idsOf(grid)).toEqual(['a', 'b', 'c', 'd'])
+    expect(leafCount(grid!)).toBe(4)
+    if (grid?.type !== 'split') throw new Error('expected split')
+    expect(grid.direction).toBe('vertical')
+    expect(grid.sizes[0]).toBeCloseTo(50)
+    expect(grid.sizes[1]).toBeCloseTo(50)
+  })
+
+  it('stacks four panels into equal rows', () => {
+    const grid = buildLayoutGrid(['a', 'b', 'c', 'd'], 'rows-4')
+    expect(idsOf(grid)).toEqual(['a', 'b', 'c', 'd'])
+    if (grid?.type !== 'split') throw new Error('expected split')
+    expect(grid.direction).toBe('horizontal')
+    expect(leafCount(grid)).toBe(4)
+  })
+
+  it('builds a 2×2 quadrant grid', () => {
+    const grid = buildLayoutGrid(['a', 'b', 'c', 'd'], 'grid-2x2')
+    expect(idsOf(grid)).toEqual(['a', 'b', 'c', 'd'])
+    if (grid?.type !== 'split') throw new Error('expected split')
+    expect(grid.direction).toBe('horizontal')
+    expect(grid.children[0].type).toBe('split')
+    expect(grid.children[1].type).toBe('split')
+    if (grid.children[0].type !== 'split' || grid.children[1].type !== 'split') return
+    expect(grid.children[0].direction).toBe('vertical')
+    expect(grid.children[1].direction).toBe('vertical')
+  })
+
+  it('keeps two panels as a single pair when asking for four columns', () => {
+    const grid = buildLayoutGrid(['a', 'b'], 'cols-4')
+    expect(idsOf(grid)).toEqual(['a', 'b'])
+    if (grid?.type !== 'split') throw new Error('expected split')
+    expect(grid.direction).toBe('vertical')
+  })
+
+  it('does not tile free mode', () => {
+    expect(buildLayoutGrid(['a', 'b'], 'free')).toBeNull()
+  })
+
+  it('parses known canvas modes and falls back to free', () => {
+    expect(parseCanvasMode('cols-4')).toBe('cols-4')
+    expect(parseCanvasMode('rows-4')).toBe('rows-4')
+    expect(parseCanvasMode('nope')).toBe('free')
+    expect(parseCanvasMode(undefined)).toBe('free')
   })
 })

@@ -31,7 +31,7 @@ import {
   swapGridPanels,
   tiledCenterPanelIds,
   updateGridSizes,
-  buildEqualGrid
+  buildLayoutGrid
 } from '@shared/workspace-grid'
 import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
@@ -742,11 +742,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     if (!activeProjectId) return
     const workspace = workspaces[activeProjectId]
     if (!workspace) return
-    if ((workspace.layout.canvasMode ?? 'free') === mode) return
 
     const ids = tiledCenterPanelIds(workspace.panels)
     const centerGrid =
-      mode === 'tiled' ? buildEqualGrid(ids) : (workspace.layout.centerGrid ?? null)
+      mode === 'free' ? (workspace.layout.centerGrid ?? null) : buildLayoutGrid(ids, mode)
 
     set({
       workspaces: {

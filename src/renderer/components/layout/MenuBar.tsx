@@ -111,6 +111,7 @@ export function MenuBar({ onCommandPalette, className }: MenuBarProps): React.JS
   const addPanel = useWorkspaceStore((s) => s.addPanel)
   const activeProjectId = useWorkspaceStore((s) => s.activeProjectId)
   const toggleSidebar = useWorkspaceStore((s) => s.toggleSidebar)
+  const setCanvasMode = useWorkspaceStore((s) => s.setCanvasMode)
   const hasOpenFolder = useHasOpenFolder()
 
   const menus = useMemo<MenuDefinition[]>(
@@ -166,7 +167,32 @@ export function MenuBar({ onCommandPalette, className }: MenuBarProps): React.JS
               if (activeProjectId) toggleSidebar(activeProjectId)
             }
           },
-          { label: 'Toggle Terminal', disabled: true }
+          { label: 'Toggle Terminal', disabled: true },
+          {
+            label: 'Layout: Free',
+            disabled: !activeProjectId,
+            action: () => setCanvasMode('free')
+          },
+          {
+            label: 'Layout: Tiled',
+            disabled: !activeProjectId,
+            action: () => setCanvasMode('tiled')
+          },
+          {
+            label: 'Layout: 2×2',
+            disabled: !activeProjectId,
+            action: () => setCanvasMode('grid-2x2')
+          },
+          {
+            label: 'Layout: 4 Columns',
+            disabled: !activeProjectId,
+            action: () => setCanvasMode('cols-4')
+          },
+          {
+            label: 'Layout: 4 Rows',
+            disabled: !activeProjectId,
+            action: () => setCanvasMode('rows-4')
+          }
         ]
       },
       {
@@ -205,7 +231,7 @@ export function MenuBar({ onCommandPalette, className }: MenuBarProps): React.JS
         ]
       }
     ],
-    [activeProjectId, addPanel, hasOpenFolder, onCommandPalette, openFolderPicker, toggleSidebar]
+    [activeProjectId, addPanel, hasOpenFolder, onCommandPalette, openFolderPicker, setCanvasMode, toggleSidebar]
   )
 
   const current = menus.find((menu) => menu.label === openMenu) ?? null

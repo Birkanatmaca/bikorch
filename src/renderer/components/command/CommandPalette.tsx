@@ -27,6 +27,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
 
   const addPanel = useWorkspaceStore((s) => s.addPanel)
   const selectLeftSidebar = useWorkspaceStore((s) => s.selectLeftSidebar)
+  const setCanvasMode = useWorkspaceStore((s) => s.setCanvasMode)
   const { openFolderPicker } = useOpenProject()
   const { projectId, projectRoot } = useActiveProject()
   const refreshGit = useGitStore((s) => s.refresh)
@@ -166,6 +167,76 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
         }
       },
       {
+        id: 'layout-free',
+        label: 'Layout: Free',
+        group: 'Layout',
+        keywords: 'floating windows free canvas',
+        action: () => {
+          setCanvasMode('free')
+          onClose()
+        }
+      },
+      {
+        id: 'layout-tiled',
+        label: 'Layout: Tiled',
+        group: 'Layout',
+        keywords: 'tile auto equal cells',
+        action: () => {
+          setCanvasMode('tiled')
+          onClose()
+        }
+      },
+      {
+        id: 'layout-grid-2x2',
+        label: 'Layout: 2×2',
+        group: 'Layout',
+        keywords: 'quad split four grid',
+        action: () => {
+          setCanvasMode('grid-2x2')
+          onClose()
+        }
+      },
+      {
+        id: 'layout-cols-4',
+        label: 'Layout: 4 Columns',
+        group: 'Layout',
+        keywords: 'split vertical four columns side by side',
+        action: () => {
+          setCanvasMode('cols-4')
+          onClose()
+        }
+      },
+      {
+        id: 'layout-rows-4',
+        label: 'Layout: 4 Rows',
+        group: 'Layout',
+        keywords: 'split horizontal four rows stacked',
+        action: () => {
+          setCanvasMode('rows-4')
+          onClose()
+        }
+      },
+      {
+        id: 'layout-cols-2',
+        label: 'Layout: 2 Columns',
+        group: 'Layout',
+        keywords: 'split two columns',
+        action: () => {
+          setCanvasMode('cols-2')
+          onClose()
+        }
+      },
+      {
+        id: 'layout-rows-2',
+        label: 'Layout: 2 Rows',
+        group: 'Layout',
+        keywords: 'split two rows stacked',
+        action: () => {
+          setCanvasMode('rows-2')
+          onClose()
+        }
+      },
+      {
         id: 'refresh-git',
         label: 'Refresh Git Changes',
         group: 'Git',
@@ -178,7 +249,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
       },
       ...panelCommands
     ]
-  }, [addPanel, onClose, openFolderPicker, projectId, projectRoot, refreshGit, selectLeftSidebar])
+  }, [addPanel, onClose, openFolderPicker, projectId, projectRoot, refreshGit, selectLeftSidebar, setCanvasMode])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()

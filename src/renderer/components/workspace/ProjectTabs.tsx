@@ -1,7 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
+import { useTerminalStore } from '@renderer/stores/terminal-store'
+import { useActivityAttentionStore } from '@renderer/stores/activity-attention-store'
 import { useOpenProject } from '@renderer/hooks/use-open-project'
+import { summarizeProjectTabActivity, type ProjectTabActivity } from '@renderer/lib/project-activity'
+import { focusWorkspacePanel } from '@renderer/lib/app-events'
 import { cn, formatProjectName } from '@renderer/lib/utils'
 import { FolderOpen, Plus, X } from 'lucide-react'
 import type { Project } from '@shared/types'
@@ -27,15 +31,31 @@ interface DragSession {
 
 function TabFace({
   project,
-  isActive
+  isActive,
+  activity
 }: {
   project: Project
   isActive: boolean
+  activity: ProjectTabActivity
 }): React.JSX.Element {
   return (
     <>
-      <span className={cn('project-tab-dot', isActive && 'is-on')} aria-hidden />
+      <span
+        className={cn(
+          'project-tab-dot',
+          isActive && activity.signal === 'idle' && 'is-on',
+          activity.signal === 'busy' && 'is-busy',
+          activity.signal === 'ready' && 'is-ready',
+          activity.signal === 'error' && 'is-error'
+        )}
+        aria-hidden
+      />
       <span className="project-tab-name">{project.name}</span>
+      {activity.signal === 'busy' && activity.busyCount > 1 && (
+        <span className="project-tab-mark is-busy">{activity.busyCount}</span>
+      )}
+      {activity.signal === 'ready' && <span className="project-tab-mark is-ready">Done</span>}
+      {activity.signal === 'error' && <span className="project-tab-mark is-error">Err</span>}
     </>
   )
 }
@@ -43,11 +63,29 @@ function TabFace({
 export function ProjectTabs(): React.JSX.Element {
   const projects = useWorkspaceStore((s) => s.projects)
   const activeProjectId = useWorkspaceStore((s) => s.activeProjectId)
+  const workspaces = useWorkspaceStore((s) => s.workspaces)
   const setActiveProject = useWorkspaceStore((s) => s.setActiveProject)
   const removeProject = useWorkspaceStore((s) => s.removeProject)
   const updateProject = useWorkspaceStore((s) => s.updateProject)
   const reorderProjects = useWorkspaceStore((s) => s.reorderProjects)
+  const sessions = useTerminalStore((s) => s.sessions)
+  const attentionByProject = useActivityAttentionStore((s) => s.attentionByProject)
   const { openFolderPicker } = useOpenProject()
+
+  const activityFor = (projectId: string): ProjectTabActivity =>
+    summarizeProjectTabActivity({
+      panels: workspaces[projectId]?.panels ?? [],
+      sessions,
+      attention: attentionByProject[projectId] ?? []
+    })
+
+  const activateProject = (projectId: string): void => {
+    const pending = useActivityAttentionStore.getState().attentionByProject[projectId]
+    const review = pending?.reduce((latest, item) => (item.at >= latest.at ? item : latest), pending[0])
+    setActiveProject(projectId)
+    if (!review) return
+    window.setTimeout(() => focusWorkspacePanel(review.panelId), 40)
+  }
   const listRef = useRef<HTMLDivElement>(null)
   const pendingRef = useRef<{
     id: string
@@ -230,7 +268,7 @@ export function ProjectTabs(): React.JSX.Element {
       startX: event.clientX,
       grabOffsetX: event.clientX - rect.left
     }
-    setActiveProject(projectId)
+    activateProject(projectId)
   }
 
   const dragged = session ? projects.find((project) => project.id === session.id) : null
@@ -266,6 +304,8 @@ export function ProjectTabs(): React.JSX.Element {
         const remainingIndex = remaining.findIndex((item) => item.id === project.id)
         const translateX =
           session && remainingIndex >= 0 && remainingIndex >= session.dropIndex ? shift : 0
+        const activity = activityFor(project.id)
+        const tabTitle = [project.folderPath || project.name, activity.label].filter(Boolean).join(' · ')
 
         return (
           <div
@@ -275,13 +315,14 @@ export function ProjectTabs(): React.JSX.Element {
             onDragStart={(event) => event.preventDefault()}
             role="tab"
             aria-selected={isActive}
-            title={project.folderPath || project.name}
+            aria-label={activity.label ? `${project.name}. ${activity.label}` : project.name}
+            title={tabTitle}
             tabIndex={isActive ? 0 : -1}
             onKeyDown={(event) => {
               if (event.target !== event.currentTarget) return
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault()
-                setActiveProject(project.id)
+                activateProject(project.id)
               }
               if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
                 event.preventDefault()
@@ -296,6 +337,9 @@ export function ProjectTabs(): React.JSX.Element {
             className={cn(
               'project-tab group relative flex max-w-[196px] items-center gap-1.5 app-no-drag',
               isActive ? 'is-active' : 'is-idle',
+              activity.signal === 'busy' && 'is-working',
+              activity.signal === 'ready' && 'is-ready',
+              activity.signal === 'error' && 'is-alert',
               isDragged && 'project-tab-origin'
             )}
             style={{
@@ -303,7 +347,7 @@ export function ProjectTabs(): React.JSX.Element {
               zIndex: isDragged ? 0 : translateX ? 1 : undefined
             }}
           >
-            <TabFace project={project} isActive={isActive} />
+            <TabFace project={project} isActive={isActive} activity={activity} />
             <button
               type="button"
               data-tab-action="folder"
@@ -346,6 +390,9 @@ export function ProjectTabs(): React.JSX.Element {
             className={cn(
               'project-tab-float pointer-events-none flex items-center gap-1.5',
               dragged.id === activeProjectId ? 'is-active' : 'is-idle',
+              activityFor(dragged.id).signal === 'busy' && 'is-working',
+              activityFor(dragged.id).signal === 'ready' && 'is-ready',
+              activityFor(dragged.id).signal === 'error' && 'is-alert',
               session.settling && 'project-tab-float-settle'
             )}
             style={{
@@ -354,7 +401,11 @@ export function ProjectTabs(): React.JSX.Element {
               transform: `translate3d(${session.floatX}px, ${session.floatY}px, 0) scale(${session.settling ? 1 : 1.06})`,
             }}
           >
-            <TabFace project={dragged} isActive={dragged.id === activeProjectId} />
+            <TabFace
+              project={dragged}
+              isActive={dragged.id === activeProjectId}
+              activity={activityFor(dragged.id)}
+            />
           </div>,
           document.body
         )}

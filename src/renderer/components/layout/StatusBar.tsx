@@ -2,13 +2,13 @@ import { useEffect } from 'react'
 import { useActiveProject } from '@renderer/hooks/use-active-project'
 import { useGitStatusBar, useGitStore } from '@renderer/stores/git-store'
 import { useIsolationStore } from '@renderer/stores/isolation-store'
-import { GitBranch, FolderOpen, Command, LayoutGrid, Minus, Plus } from 'lucide-react'
+import { GitBranch, FolderOpen, Command, Minus, Plus } from 'lucide-react'
 import { isMacOS } from '@renderer/lib/electron-api'
 import { COMMAND_PALETTE_EVENT } from '@renderer/lib/app-events'
 import { Button } from '@renderer/components/ui/Button'
 import { StatusChip } from '@renderer/components/ui/StatusChip'
-import { cn } from '@renderer/lib/utils'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
+import { LayoutModeMenu } from '@renderer/components/layout/LayoutModeMenu'
 import {
   WORKSPACE_SCALE_MAX,
   WORKSPACE_SCALE_MIN,
@@ -23,12 +23,6 @@ export function StatusBar(): React.JSX.Element {
   const workspaceScale = useWorkspaceStore((s) => s.workspaceScale)
   const setWorkspaceScale = useWorkspaceStore((s) => s.setWorkspaceScale)
   const nudgeWorkspaceScale = useWorkspaceStore((s) => s.nudgeWorkspaceScale)
-  const canvasMode = useWorkspaceStore((s) => {
-    const workspace = s.getActiveWorkspace()
-    return workspace?.layout.canvasMode ?? 'free'
-  })
-  const setCanvasMode = useWorkspaceStore((s) => s.setCanvasMode)
-  const tiled = canvasMode === 'tiled'
 
   useEffect(() => {
     if (!projectId || !projectRoot) return
@@ -75,22 +69,7 @@ export function StatusBar(): React.JSX.Element {
             </StatusChip>
           </>
         )}
-        <button
-          type="button"
-          className={cn('status-layout-btn', tiled && 'is-on')}
-          onClick={() => setCanvasMode(tiled ? 'free' : 'tiled')}
-          disabled={!projectId}
-          title={
-            tiled
-              ? 'Switch to free workspace — floating windows'
-              : 'Tile workspace — equal cells, swap and split'
-          }
-          aria-pressed={tiled}
-          aria-label={tiled ? 'Tiled workspace on' : 'Tiled workspace off'}
-        >
-          <LayoutGrid className="h-3 w-3" aria-hidden />
-          {tiled ? 'Tiled' : 'Free'}
-        </button>
+        <LayoutModeMenu disabled={!projectId} />
         <div className="status-zoom" title="Workspace scale">
           <button
             type="button"

@@ -44,8 +44,58 @@ export interface OrchestratorRect {
   h: number
 }
 
-/** Free-form floating windows vs equal-cell tiled workspace. */
-export type WorkspaceCanvasMode = 'free' | 'tiled'
+/** Free-form floating windows vs tiled layout presets. */
+export const WORKSPACE_CANVAS_MODES = [
+  'free',
+  'tiled',
+  'grid-2x2',
+  'cols-2',
+  'cols-3',
+  'cols-4',
+  'rows-2',
+  'rows-3',
+  'rows-4'
+] as const
+
+export type WorkspaceCanvasMode = (typeof WORKSPACE_CANVAS_MODES)[number]
+
+export const WORKSPACE_CANVAS_MODE_LABELS: Record<WorkspaceCanvasMode, string> = {
+  free: 'Free',
+  tiled: 'Tiled',
+  'grid-2x2': '2×2',
+  'cols-2': '2 cols',
+  'cols-3': '3 cols',
+  'cols-4': '4 cols',
+  'rows-2': '2 rows',
+  'rows-3': '3 rows',
+  'rows-4': '4 rows'
+}
+
+export const WORKSPACE_CANVAS_MODE_TITLES: Record<WorkspaceCanvasMode, string> = {
+  free: 'Free — floating windows',
+  tiled: 'Tiled — auto equal cells',
+  'grid-2x2': '2×2 grid',
+  'cols-2': '2 columns',
+  'cols-3': '3 columns',
+  'cols-4': '4 columns',
+  'rows-2': '2 rows',
+  'rows-3': '3 rows',
+  'rows-4': '4 rows'
+}
+
+export const WORKSPACE_CANVAS_LAYOUT_GROUPS: { label: string; modes: WorkspaceCanvasMode[] }[] = [
+  { label: 'Workspace', modes: ['free', 'tiled'] },
+  { label: 'Columns', modes: ['cols-2', 'cols-3', 'cols-4'] },
+  { label: 'Rows', modes: ['rows-2', 'rows-3', 'rows-4'] },
+  { label: 'Grid', modes: ['grid-2x2'] }
+]
+
+export function parseCanvasMode(value: unknown): WorkspaceCanvasMode {
+  return typeof value === 'string' &&
+    (WORKSPACE_CANVAS_MODES as readonly string[]).includes(value)
+    ? (value as WorkspaceCanvasMode)
+    : 'free'
+}
 
 /** Vertical = left | right. Horizontal = top / bottom. */
 export type GridSplitDirection = 'vertical' | 'horizontal'
@@ -78,7 +128,7 @@ export interface WorkspaceLayout {
   centerPanelSizes?: Record<string, number>
   /** Free-form terminal windows in the center canvas, percentages 0–100 */
   centerPanelRects?: Record<string, OrchestratorRect>
-  /** Independent tiled workspace. Free-form rects are kept when this is on. */
+  /** Free windows, auto tile, or a named split preset. Free-form rects are kept. */
   canvasMode?: WorkspaceCanvasMode
   centerGrid?: WorkspaceGridNode | null
 }
