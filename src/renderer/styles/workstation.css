@@ -1008,7 +1008,47 @@ kbd {
   .cli-busy-aura::before,
   .cli-busy-beam { animation: none; }
 }
-.terminal-surface { padding: 10px 12px; background: var(--terminal-surface); }
+.terminal-surface {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 8px 10px 10px;
+  overflow: hidden;
+  background: var(--terminal-surface);
+}
+.terminal-host {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+.terminal-host .xterm {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: auto !important;
+  height: auto !important;
+}
+.terminal-host .xterm-screen,
+.terminal-host .xterm canvas {
+  transform: none !important;
+}
+.workspace-frame.is-layout-resizing .terminal-host {
+  overflow: hidden;
+  contain: layout paint;
+}
+.terminal-host .xterm-viewport {
+  overflow-x: hidden !important;
+}
+.terminal-surface.is-cli-tui .xterm-viewport {
+  overflow-y: hidden !important;
+}
+.terminal-surface:not(.is-cli-tui) .xterm-viewport {
+  overflow-y: auto !important;
+}
 .workstation-canvas { border-radius: var(--panel-radius); }
 .workstation-window::after {
   content: '';

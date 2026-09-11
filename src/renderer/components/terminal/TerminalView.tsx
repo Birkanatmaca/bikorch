@@ -36,6 +36,16 @@ import {
   resumeAgentSession
 } from '@renderer/lib/developer-events'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
+import {
+  TERMINAL_FIT_SETTLE_MS,
+  measureTerminalGrid,
+  pinViewportToBottom,
+  readXtermCellSize,
+  shouldPinTerminalToBottom,
+  terminalGridEquals,
+  viewportIsAtBottom
+} from '@renderer/lib/terminal-fit'
+import { cn } from '@renderer/lib/utils'
 
 interface TerminalViewProps {
   sessionId: string
@@ -44,9 +54,7 @@ interface TerminalViewProps {
   accountId?: string
 }
 
-const MIN_COLS = 20
-const MIN_ROWS = 6
-const PTY_RESIZE_MS = 140
+const PTY_RESIZE_MS = 80
 
 export function TerminalView({
   sessionId,
@@ -75,8 +83,46 @@ export function TerminalView({
   const startSessionRef = useRef<(terminal: Terminal) => Promise<void>>(async () => {})
 
   const layoutLockedRef = useRef(false)
+  const layoutLockGenRef = useRef(0)
   const lastSizeRef = useRef({ cols: 0, rows: 0 })
   const ptyResizeTimerRef = useRef<number | null>(null)
+  const settleTimersRef = useRef<number[]>([])
+  const cliKind = isCliKind(kind)
+
+  const pinIfNeeded = useCallback((force = false) => {
+    const terminal = terminalRef.current
+    const container = containerRef.current
+    if (!terminal || !container) return
+    const viewport = container.querySelector('.xterm-viewport') as HTMLElement | null
+    const atBottom = viewport ? viewportIsAtBottom(viewport) : true
+    if (!force && !shouldPinTerminalToBottom(cliKind, atBottom)) return
+    terminal.scrollToBottom()
+    if (viewport) pinViewportToBottom(viewport)
+  }, [cliKind])
+
+  const sendPtyResize = useCallback((cols: number, rows: number, immediate: boolean) => {
+    if (ptyResizeTimerRef.current !== null) {
+      window.clearTimeout(ptyResizeTimerRef.current)
+      ptyResizeTimerRef.current = null
+    }
+    const flush = (): void => {
+      void window.api.pty.resize({ sessionId, cols, rows }).finally(() => {
+        window.setTimeout(() => {
+          if (disposedRef.current || layoutLockedRef.current) return
+          pinIfNeeded(cliKind)
+        }, 40)
+      })
+    }
+    if (immediate) {
+      flush()
+      return
+    }
+    ptyResizeTimerRef.current = window.setTimeout(() => {
+      ptyResizeTimerRef.current = null
+      if (disposedRef.current) return
+      flush()
+    }, PTY_RESIZE_MS)
+  }, [cliKind, pinIfNeeded, sessionId])
 
   const fitTerminal = useCallback((sendPty = true, immediate = false) => {
     if (disposedRef.current) return
@@ -87,43 +133,43 @@ export function TerminalView({
     if (!terminal || !fitAddon || !container) return
     if (layoutLockedRef.current) return
 
-    const { clientWidth, clientHeight } = container
-    if (clientWidth < 80 || clientHeight < 40) return
-
     try {
-      const proposed = fitAddon.proposeDimensions()
-      if (!proposed) return
+      const viewport = container.querySelector('.xterm-viewport') as HTMLElement | null
+      const wasAtBottom = viewport ? viewportIsAtBottom(viewport) : true
 
-      const cols = Math.max(MIN_COLS, Math.min(400, proposed.cols))
-      const rows = Math.max(MIN_ROWS, Math.min(200, proposed.rows))
-      if (cols === lastSizeRef.current.cols && rows === lastSizeRef.current.rows) {
-        return
+      fitAddon.fit()
+      const next = measureTerminalGrid(
+        container,
+        readXtermCellSize(terminal),
+        fitAddon.proposeDimensions()
+      )
+      if (!next) return
+      if (terminal.cols !== next.cols || terminal.rows !== next.rows) {
+        terminal.resize(next.cols, next.rows)
       }
 
-      terminal.resize(cols, rows)
-      lastSizeRef.current = { cols, rows }
+      try {
+        terminal.refresh(0, Math.max(0, terminal.rows - 1))
+      } catch {
+        // Renderer may not be ready on the first paint.
+      }
 
+      if (shouldPinTerminalToBottom(cliKind, wasAtBottom)) {
+        pinIfNeeded(true)
+      }
+
+      const changed = !terminalGridEquals(lastSizeRef.current, next)
+      lastSizeRef.current = next
       if (!sendPty) return
-      if (ptyResizeTimerRef.current !== null) {
-        window.clearTimeout(ptyResizeTimerRef.current)
-        ptyResizeTimerRef.current = null
-      }
-      if (immediate) {
-        void window.api.pty.resize({ sessionId, cols, rows })
-        return
-      }
-      ptyResizeTimerRef.current = window.setTimeout(() => {
-        ptyResizeTimerRef.current = null
-        if (disposedRef.current) return
-        void window.api.pty.resize({ sessionId, cols, rows })
-      }, PTY_RESIZE_MS)
+      if (!changed && !immediate) return
+      sendPtyResize(next.cols, next.rows, immediate)
     } catch {
       // xterm can throw if the renderer is not ready yet
     }
-  }, [sessionId])
+  }, [cliKind, pinIfNeeded, sendPtyResize])
 
   const scheduleFit = useCallback(() => {
-    if (disposedRef.current) return
+    if (disposedRef.current || layoutLockedRef.current) return
     if (fitFrameRef.current !== null) {
       cancelAnimationFrame(fitFrameRef.current)
     }
@@ -131,6 +177,27 @@ export function TerminalView({
       fitFrameRef.current = null
       fitTerminal()
     })
+  }, [fitTerminal])
+
+  const settleFit = useCallback(() => {
+    if (disposedRef.current) return
+    const generation = layoutLockGenRef.current
+    for (const timer of settleTimersRef.current) window.clearTimeout(timer)
+    settleTimersRef.current = []
+
+    const run = (immediate: boolean): void => {
+      if (disposedRef.current || layoutLockedRef.current) return
+      if (generation !== layoutLockGenRef.current) return
+      fitTerminal(true, immediate)
+    }
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => run(true))
+    })
+    for (const delay of TERMINAL_FIT_SETTLE_MS) {
+      if (delay === 0) continue
+      settleTimersRef.current.push(window.setTimeout(() => run(true), delay))
+    }
   }, [fitTerminal])
 
   useEffect(() => {
@@ -503,13 +570,14 @@ export function TerminalView({
       const detail = (event as CustomEvent<{ panelId: string | null; locked: boolean }>).detail
       if (detail.panelId && detail.panelId !== sessionId) return
       if (detail.locked) {
+        layoutLockGenRef.current += 1
         layoutLockedRef.current = true
+        for (const timer of settleTimersRef.current) window.clearTimeout(timer)
+        settleTimersRef.current = []
         return
       }
-      window.setTimeout(() => {
-        layoutLockedRef.current = false
-        if (!disposedRef.current) fitTerminal(true, true)
-      }, 180)
+      layoutLockedRef.current = false
+      settleFit()
     }
 
     container.addEventListener('pointerdown', focusThis)
@@ -520,6 +588,12 @@ export function TerminalView({
       scheduleFit()
     })
     resizeObserver.observe(container)
+    window.addEventListener('resize', scheduleFit)
+
+    const onFontsReady = (): void => {
+      if (!disposedRef.current) settleFit()
+    }
+    void document.fonts?.ready.then(onFontsReady)
 
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -539,10 +613,13 @@ export function TerminalView({
         window.clearTimeout(ptyResizeTimerRef.current)
         ptyResizeTimerRef.current = null
       }
+      for (const timer of settleTimersRef.current) window.clearTimeout(timer)
+      settleTimersRef.current = []
       if (idleTimer !== null) window.clearTimeout(idleTimer)
       if (authInspectTimer !== null) window.clearTimeout(authInspectTimer)
       if (authPollTimer !== null) window.clearInterval(authPollTimer)
       resizeObserver.disconnect()
+      window.removeEventListener('resize', scheduleFit)
       container.removeEventListener('pointerdown', focusThis)
       window.removeEventListener(FOCUS_TERMINAL_EVENT, onFocusRequest)
       window.removeEventListener(TERMINAL_LAYOUT_LOCK_EVENT, onLayoutLock)
@@ -583,14 +660,13 @@ export function TerminalView({
       }
       if (!panelStillExists) removeSession(sessionId)
     }
-  }, [sessionId, kind, accountId, project?.folderPath, setStatus, removeSession, clearPanelLaunchMode, scheduleFit, fitTerminal])
+  }, [sessionId, kind, accountId, project?.folderPath, setStatus, removeSession, clearPanelLaunchMode, scheduleFit, settleFit, fitTerminal])
 
   // Refit when project tab becomes active again
   useEffect(() => {
     if (!activeProjectId) return
-    const timer = setTimeout(scheduleFit, 100)
-    return () => clearTimeout(timer)
-  }, [activeProjectId, scheduleFit])
+    settleFit()
+  }, [activeProjectId, settleFit])
 
   const handleInstall = async (): Promise<void> => {
     if (!window.api.cli) return
@@ -612,11 +688,14 @@ export function TerminalView({
 
   return (
     <div
-      className="terminal-surface relative h-full min-h-0 w-full app-no-drag"
+      className={cn(
+        'terminal-surface relative h-full min-h-0 w-full app-no-drag',
+        cliKind && 'is-cli-tui'
+      )}
       data-terminal-session={sessionId}
       onPointerDown={() => terminalRef.current?.focus()}
     >
-      <div ref={containerRef} className="h-full min-h-0 w-full overflow-hidden" />
+      <div ref={containerRef} className="terminal-host" />
       {installPrompt === 'cursor' && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-app-bg/80 p-4">
           <div className="w-full max-w-sm rounded-lg border border-border bg-elevated p-4 shadow-xl">

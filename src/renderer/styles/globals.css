@@ -721,15 +721,13 @@ body {
   }
 }
 
-/* Smooth panel resize when not dragging */
-.layout-panel-group.layout-idle [data-panel] {
-  transition:
-    flex-grow var(--duration-slow) var(--ease-smooth),
-    flex-basis var(--duration-slow) var(--ease-smooth);
+/* Never animate split flex: xterm canvases smear if the pane eases while glyphs stay bitmap-sized. */
+.layout-panel-group [data-panel] {
+  transition: none !important;
 }
 
 .layout-panel-group.layout-resizing [data-panel] {
-  transition: none !important;
+  contain: layout paint;
 }
 
 ::-webkit-scrollbar {
@@ -840,7 +838,6 @@ body {
 }
 
 .xterm-viewport {
-  overflow-y: auto !important;
   scrollbar-width: thin;
   scrollbar-color: #272c35 transparent;
 }
