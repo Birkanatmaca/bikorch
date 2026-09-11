@@ -13,8 +13,23 @@ import { initDeveloperIntelligence } from './developer-intelligence/service'
 import { registerMusicSchemes, registerMusicProtocol } from './music/protocol'
 import { initMusic } from './music/service'
 import { disposeDownloadManager, initDownloadManager } from './music/downloader/service'
+import { disposeAutomationService, getAutomationSettings, initAutomationService } from './automation/service'
+import {
+  acquireSingleInstanceLock,
+  isAppQuitting,
+  registerMainWindow,
+  watchPowerEvents
+} from './lifecycle/background'
+import { disposeTray, initTray } from './lifecycle/tray'
 
 const isDev = !app.isPackaged
+const isBackgroundStart = process.argv.includes('--background')
+
+if (!acquireSingleInstanceLock()) {
+  // Another instance owns the lock; exit immediately rather than continuing
+  // to register schemes/handlers for a process that is about to die.
+  app.exit(0)
+}
 
 registerMusicSchemes()
 
@@ -27,7 +42,7 @@ function chromeUserAgent(): string {
   return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`
 }
 
-function createWindow(): void {
+function createWindow(): BrowserWindow {
   const isWin = process.platform === 'win32'
   const isMac = process.platform === 'darwin'
 
@@ -56,9 +71,12 @@ function createWindow(): void {
   mainWindow.webContents.setUserAgent(chromeUserAgent())
 
   watchWindowChrome(mainWindow)
+  registerMainWindow(mainWindow, createWindow)
 
   mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+    // A `--background` launch (login start) initializes services and the
+    // tray without flashing the workspace window (spec §5).
+    if (!isBackgroundStart) mainWindow.show()
   })
 
   mainWindow.webContents.on(
@@ -92,6 +110,8 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  return mainWindow
 }
 
 app.whenReady().then(async () => {
@@ -101,6 +121,7 @@ app.whenReady().then(async () => {
     initDeveloperIntelligence()
     initMusic()
     await initDownloadManager()
+    initAutomationService()
   } catch (error) {
     console.error('Persistence init failed, continuing without database:', error)
   }
@@ -110,6 +131,8 @@ app.whenReady().then(async () => {
     callback(permission === 'media' || permission === 'fullscreen')
   })
   createWindow()
+  initTray()
+  watchPowerEvents()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -117,12 +140,24 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  if (isAppQuitting()) return
+  let backgroundMode = false
+  try {
+    backgroundMode = getAutomationSettings().backgroundMode
+  } catch {
+    backgroundMode = false
+  }
+  // The tray keeps the process alive when background mode is enabled, even
+  // on platforms that would otherwise quit once every window closes.
+  if (backgroundMode) return
   if (process.platform !== 'darwin') {
     app.quit()
   }
 })
 
 app.on('before-quit', () => {
+  disposeAutomationService()
+  disposeTray()
   disposeDownloadManager()
   ptyManager.killAll()
   closePersistenceDatabase()

@@ -39,6 +39,7 @@ import {
 import { parseTaskStatus, type ProjectTask, type TaskPriority } from '@shared/contracts/tasks'
 import { initMusicSchema } from '../music/store'
 import { initDownloadSchema } from '../music/downloader/job-store'
+import { initAutomationSchema } from '../automation/store'
 import { v4 as uuidv4 } from 'uuid'
 
 let db: Database | null = null
@@ -238,6 +239,7 @@ export async function initPersistenceDatabase(): Promise<void> {
     initSchema(db)
     initMusicSchema(db)
     initDownloadSchema(db)
+    initAutomationSchema(db)
     persistToDisk()
   } catch (error) {
     console.error('Failed to initialize persistence database:', error)

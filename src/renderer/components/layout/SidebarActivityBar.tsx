@@ -1,10 +1,20 @@
-import { CheckSquare2, CircleUser, FolderTree, GitBranch, Music2, SquareTerminal, Timer } from 'lucide-react'
+import {
+  CalendarClock,
+  CheckSquare2,
+  CircleUser,
+  FolderTree,
+  GitBranch,
+  Music2,
+  SquareTerminal,
+  Timer
+} from 'lucide-react'
 import { TASK_PRIORITIES, TASK_PRIORITY_LABELS, type ProjectTask } from '@shared/contracts/tasks'
 import { useActiveProject } from '@renderer/hooks/use-active-project'
 import { cn } from '@renderer/lib/utils'
 import { useMusicStore } from '@renderer/stores/music-store'
 import { useTasksStore } from '@renderer/stores/tasks-store'
 import { useTimerStore } from '@renderer/stores/timer-store'
+import { useAutomationStore } from '@renderer/stores/automation-store'
 import { displayMs, formatTimerClock } from '@shared/contracts/timer'
 import type { LeftSidebarView } from '@shared/types'
 
@@ -25,6 +35,7 @@ interface SidebarActivityBarProps {
   onSelectAccounts: () => void
   onSelectTasks: () => void
   onSelectProfile: () => void
+  onSelectAutomation: () => void
   onSelectMusic: () => void
   onSelectTimer: () => void
 }
@@ -40,6 +51,7 @@ export function SidebarActivityBar({
   onSelectAccounts,
   onSelectTasks,
   onSelectProfile,
+  onSelectAutomation,
   onSelectMusic,
   onSelectTimer
 }: SidebarActivityBarProps): React.JSX.Element {
@@ -48,9 +60,13 @@ export function SidebarActivityBar({
   const accountsActive = isOpen && view === 'accounts'
   const tasksActive = isOpen && view === 'tasks'
   const profileActive = isOpen && view === 'profile'
+  const automationActive = isOpen && view === 'automation'
   const musicActive = isOpen && view === 'music'
   const timerActive = isOpen && view === 'timer'
   const musicPlaying = useMusicStore((state) => state.status === 'playing')
+  const automationStatus = useAutomationStore((state) => state.status)
+  const automationRunning = automationStatus.running > 0
+  const automationNeedsAttention = automationStatus.needsAttention > 0
   const timerSession = useTimerStore((state) => state.session)
   const timerNow = useTimerStore((state) => state.nowMs)
   const timerRunning = timerSession.status === 'running'
@@ -123,6 +139,43 @@ export function SidebarActivityBar({
         className={cn('glass-icon-btn h-9 w-9', accountsActive && 'glass-icon-btn-active')}
       >
         <SquareTerminal className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={onSelectAutomation}
+        aria-pressed={automationActive}
+        title={
+          automationNeedsAttention
+            ? `${automationActive ? 'Hide' : 'Show'} automations, needs attention`
+            : automationRunning
+              ? `${automationActive ? 'Hide' : 'Show'} automations, ${automationStatus.running} running`
+              : automationStatus.enabled > 0
+                ? `${automationActive ? 'Hide' : 'Show'} automations, ${automationStatus.enabled} enabled`
+                : automationActive
+                  ? 'Hide automations'
+                  : 'Show automations'
+        }
+        aria-label={
+          automationNeedsAttention
+            ? 'Show automations, needs attention'
+            : automationRunning
+              ? `Show automations, ${automationStatus.running} running`
+              : automationActive
+                ? 'Hide automations'
+                : 'Show automations'
+        }
+        className={cn(
+          'glass-icon-btn relative h-9 w-9',
+          automationActive && 'glass-icon-btn-active',
+          automationRunning && 'is-timing'
+        )}
+      >
+        <CalendarClock className="h-4 w-4" />
+        {automationNeedsAttention ? (
+          <span className="activity-badge is-conflict">!</span>
+        ) : automationStatus.enabled > 0 ? (
+          <span className={cn('rail-automation-dot', automationRunning && 'is-live')} aria-hidden />
+        ) : null}
       </button>
       <button
         type="button"

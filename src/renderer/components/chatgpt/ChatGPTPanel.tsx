@@ -1,49 +1,45 @@
 import { useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
+import {
+  attachWebChat,
+  detachWebChat,
+  isWebChatReady,
+  setWebChatZoom,
+  WEB_CHAT_SERVICES,
+  type WebChatProvider
+} from '@renderer/lib/web-chat-runtime'
+import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 
-export type WebChatProvider = 'chatgpt' | 'claude'
-
-const WEB_CHAT_SERVICES: Record<WebChatProvider, { label: string; url: string; partition: string }> = {
-  chatgpt: {
-    label: 'ChatGPT',
-    url: 'https://chatgpt.com/',
-    partition: 'persist:chatgpt'
-  },
-  claude: {
-    label: 'Claude',
-    url: 'https://claude.ai/',
-    partition: 'persist:claude-chat'
-  }
-}
+export type { WebChatProvider }
 
 export function WebChatPanel({ provider }: { provider: WebChatProvider }): React.JSX.Element {
   const service = WEB_CHAT_SERVICES[provider]
   const webviewContainerRef = useRef<HTMLDivElement>(null)
-  const [loading, setLoading] = useState(true)
+  const workspaceScale = useWorkspaceStore((state) => state.workspaceScale)
+  const [loading, setLoading] = useState(() => !isWebChatReady(provider))
+
+  useEffect(() => {
+    setWebChatZoom(workspaceScale / 100)
+  }, [workspaceScale])
 
   useEffect(() => {
     const container = webviewContainerRef.current
     if (!container) return
 
-    const webview = document.createElement('webview')
-    webview.setAttribute('src', service.url)
-    webview.setAttribute('partition', service.partition)
-    webview.setAttribute('allowpopups', '')
-    webview.className = 'h-full w-full border-0'
+    const guest = attachWebChat(provider, container)
+    setLoading(!isWebChatReady(provider))
 
     const handleStartLoading = (): void => setLoading(true)
     const handleStopLoading = (): void => setLoading(false)
-
-    webview.addEventListener('did-start-loading', handleStartLoading)
-    webview.addEventListener('did-stop-loading', handleStopLoading)
-    container.appendChild(webview)
+    guest.addEventListener('did-start-loading', handleStartLoading)
+    guest.addEventListener('did-stop-loading', handleStopLoading)
 
     return () => {
-      webview.removeEventListener('did-start-loading', handleStartLoading)
-      webview.removeEventListener('did-stop-loading', handleStopLoading)
-      webview.remove()
+      guest.removeEventListener('did-start-loading', handleStartLoading)
+      guest.removeEventListener('did-stop-loading', handleStopLoading)
+      detachWebChat(provider, container)
     }
-  }, [provider, service.partition, service.url])
+  }, [provider])
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-app-bg">

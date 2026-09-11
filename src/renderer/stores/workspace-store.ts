@@ -103,6 +103,19 @@ function noteProjectOpened(project: Project): void {
   })
 }
 
+const WEB_CHAT_TYPES = ['chatgpt', 'claude-chat'] as const
+
+function workspaceHasType(workspace: ProjectWorkspaceState | undefined, type: PanelType): boolean {
+  return Boolean(workspace?.panels.some((panel) => panel.type === type))
+}
+
+function anyWorkspaceHasType(
+  workspaces: Record<string, ProjectWorkspaceState>,
+  type: PanelType
+): boolean {
+  return Object.values(workspaces).some((workspace) => workspaceHasType(workspace, type))
+}
+
 interface WorkspaceSnapshot {
   projects: Project[]
   activeProjectId: string | null
@@ -142,6 +155,8 @@ interface WorkspaceStore extends WorkspaceSnapshot {
   reorderProjects: (fromIndex: number, toIndex: number) => void
   touchRecentProject: (projectId: string) => void
   ensureProjectWorkspace: (projectId: string, openSidebar?: boolean) => void
+  carryWebChats: (projectId: string) => void
+  closeWebChat: (type: 'chatgpt' | 'claude-chat') => void
 
   getActiveWorkspace: () => ProjectWorkspaceState | null
   openPlayerPanel: () => string
@@ -269,6 +284,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       workspaces,
       isHydrated: true
     })
+    if (snapshot.activeProjectId) {
+      get().ensureProjectWorkspace(snapshot.activeProjectId)
+      get().carryWebChats(snapshot.activeProjectId)
+    }
   },
 
   getSnapshot: () => {
@@ -307,6 +326,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   setActiveProject: (projectId) => {
     set({ activeProjectId: projectId })
     get().ensureProjectWorkspace(projectId)
+    get().carryWebChats(projectId)
   },
 
   updateProject: (projectId, updates) => {
@@ -341,6 +361,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   touchRecentProject: (projectId) => {
     set({ activeProjectId: projectId })
     get().ensureProjectWorkspace(projectId)
+    get().carryWebChats(projectId)
   },
 
   ensureProjectWorkspace: (projectId, openSidebar = false) => {
@@ -410,7 +431,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       return ''
     }
 
-    if (isFloatingWidget(type)) {
+    if (isFloatingWidget(type) || isWebChatPanel(type)) {
       const existing = workspace.panels.find((panel) => panel.type === type)
       if (existing) {
         window.dispatchEvent(new CustomEvent('bikorch:focus-panel', { detail: existing.id }))
@@ -545,6 +566,53 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     })
   },
 
+  carryWebChats: (projectId) => {
+    const workspace = get().workspaces[projectId]
+    if (!workspace) return
+    for (const type of WEB_CHAT_TYPES) {
+      if (workspaceHasType(workspace, type)) continue
+      if (!anyWorkspaceHasType(get().workspaces, type)) continue
+      get().addPanel(type, 'right')
+    }
+  },
+
+  closeWebChat: (type) => {
+    const { workspaces } = get()
+    let changed = false
+    const nextWorkspaces: Record<string, ProjectWorkspaceState> = {}
+
+    for (const [projectId, workspace] of Object.entries(workspaces)) {
+      const removedIds = new Set(
+        workspace.panels.filter((panel) => panel.type === type).map((panel) => panel.id)
+      )
+      if (removedIds.size === 0) {
+        nextWorkspaces[projectId] = workspace
+        continue
+      }
+      changed = true
+      const centerPanelRects = Object.fromEntries(
+        Object.entries(workspace.layout.centerPanelRects ?? {}).filter(
+          ([panelId]) => !removedIds.has(panelId)
+        )
+      )
+      const nextPanels = workspace.panels.filter((panel) => !removedIds.has(panel.id))
+      nextWorkspaces[projectId] = {
+        ...workspace,
+        panels: nextPanels,
+        layout: normalizeLayoutForPanels(
+          {
+            ...workspace.layout,
+            centerPanelRects,
+            centerGrid: pruneCenterGrid(workspace.layout.centerGrid, removedIds)
+          },
+          nextPanels
+        )
+      }
+    }
+
+    if (changed) set({ workspaces: nextWorkspaces })
+  },
+
   removePanel: (panelId) => {
     const { activeProjectId, workspaces } = get()
     if (!activeProjectId) return
@@ -553,6 +621,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     if (!workspace) return
 
     const removedPanel = workspace.panels.find((p) => p.id === panelId)
+    if (removedPanel && isWebChatPanel(removedPanel.type)) {
+      get().closeWebChat(removedPanel.type)
+      return
+    }
     const projectRoot = get().projects.find((project) => project.id === activeProjectId)?.folderPath
     if (removedPanel) releasePanelIsolation(removedPanel, projectRoot)
 

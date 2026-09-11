@@ -4,6 +4,7 @@ import { FileExplorerPanel } from '@renderer/components/file-explorer/FileExplor
 import { GitChangesPanel } from '@renderer/components/git/GitChangesPanel'
 import { TasksPanel } from '@renderer/components/tasks/TasksPanel'
 import { ProfilePanel } from '@renderer/components/profile/ProfilePanel'
+import { AutomationPanel } from '@renderer/components/automation/AutomationPanel'
 import { MusicPanel } from '@renderer/components/music/MusicPanel'
 import { TimerPanel } from '@renderer/components/timer/TimerPanel'
 import { SidebarTimerDock } from '@renderer/components/timer/SidebarTimerDock'
@@ -22,6 +23,7 @@ const TITLES: Record<LeftSidebarView, string> = {
   accounts: 'CLI accounts',
   tasks: 'Tasks',
   profile: 'Profile',
+  automation: 'Automations',
   music: 'Music',
   timer: 'Timer'
 }
@@ -58,6 +60,9 @@ export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Eleme
         </div>
         <div className={cn('h-full', view !== 'profile' && 'hidden')}>
           <ProfilePanel visible={view === 'profile'} />
+        </div>
+        <div className={cn('h-full', view !== 'automation' && 'hidden')}>
+          <AutomationPanel />
         </div>
         <div className={cn('h-full', view !== 'music' && 'hidden')}>
           <MusicPanel />

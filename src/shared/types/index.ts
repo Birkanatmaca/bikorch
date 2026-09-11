@@ -37,6 +37,7 @@ export type LeftSidebarView =
   | 'accounts'
   | 'tasks'
   | 'profile'
+  | 'automation'
   | 'music'
   | 'timer'
 
@@ -46,9 +47,13 @@ export const LEFT_SIDEBAR_VIEWS: readonly LeftSidebarView[] = [
   'accounts',
   'tasks',
   'profile',
+  'automation',
   'music',
   'timer'
 ] as const
+
+/** Wide sidebar views render a full-width panel instead of the narrow file/changes rail. */
+export const WIDE_LEFT_SIDEBAR_VIEWS: readonly LeftSidebarView[] = ['accounts', 'profile', 'automation']
 
 export function isLeftSidebarView(value: unknown): value is LeftSidebarView {
   return typeof value === 'string' && (LEFT_SIDEBAR_VIEWS as readonly string[]).includes(value)
@@ -58,7 +63,7 @@ export function isFloatingWidget(type: PanelType | undefined): boolean {
   return type === 'player' || type === 'timer'
 }
 
-export function isWebChatPanel(type: PanelType | undefined): boolean {
+export function isWebChatPanel(type: PanelType | undefined): type is 'chatgpt' | 'claude-chat' {
   return type === 'chatgpt' || type === 'claude-chat'
 }
 
