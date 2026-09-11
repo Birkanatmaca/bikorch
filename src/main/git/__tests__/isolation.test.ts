@@ -144,6 +144,7 @@ describe('agent isolation merge', () => {
     })
     expect(second.status).toBe('conflict')
     expect(second.conflicts.some((file) => file.path === 'shared.ts')).toBe(true)
+    expect(second.conflicts[0]?.hunks).toContain('<<<<<<<')
     const prompt = buildConflictResolvePrompt({
       task: 'UI',
       resolverLabel: 'Cursor CLI',

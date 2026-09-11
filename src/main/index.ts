@@ -2,6 +2,7 @@ import { app, BrowserWindow, session, shell } from 'electron'
 import { join } from 'path'
 import { ptyManager } from './cli/pty-manager'
 import { registerIpcHandlers } from './ipc'
+import { watchWindowChrome } from './ipc/window'
 import { installConsoleCapture, recordRendererConsole } from './logs'
 import {
   closePersistenceDatabase,
@@ -53,6 +54,8 @@ function createWindow(): void {
     }
   })
   mainWindow.webContents.setUserAgent(chromeUserAgent())
+
+  watchWindowChrome(mainWindow)
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()

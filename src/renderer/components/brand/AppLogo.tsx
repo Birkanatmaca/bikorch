@@ -50,7 +50,7 @@ export function AppLogo({
   className
 }: AppLogoProps): React.JSX.Element {
   return (
-    <div className={cn('flex items-center gap-3', className)}>
+    <div className={cn('flex items-center', size === 'xs' ? 'gap-1.5' : 'gap-3', className)}>
       <img
         src={appLogo}
         alt=""
@@ -60,7 +60,10 @@ export function AppLogo({
       {showName && (
         <AppWordmark
           size={size === 'sm' ? 'md' : size === 'md' ? 'lg' : size}
-          className={size === 'sm' ? 'min-w-[72px]' : undefined}
+          className={cn(
+            size === 'xs' && 'app-header-wordmark !h-8 max-w-[96px] -my-1.5',
+            size === 'sm' && 'min-w-[72px]'
+          )}
         />
       )}
     </div>

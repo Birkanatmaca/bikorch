@@ -1,10 +1,30 @@
 import { BrowserWindow, ipcMain, screen } from 'electron'
-import { WINDOW_IPC } from '@shared/contracts/window'
+import { WINDOW_IPC, type WindowChromeState } from '@shared/contracts/window'
 
 const EDGE_KEEP = 80
 const TITLE_KEEP = 40
 
 let windowDrag: { windowId: number; dx: number; dy: number } | null = null
+
+function chromeState(win: BrowserWindow): WindowChromeState {
+  return {
+    maximized: win.isMaximized(),
+    fullScreen: win.isFullScreen()
+  }
+}
+
+function emitChromeState(win: BrowserWindow): void {
+  if (win.isDestroyed()) return
+  win.webContents.send(WINDOW_IPC.STATE_CHANGED, chromeState(win))
+}
+
+export function watchWindowChrome(win: BrowserWindow): void {
+  const emit = (): void => emitChromeState(win)
+  win.on('enter-full-screen', emit)
+  win.on('leave-full-screen', emit)
+  win.on('maximize', emit)
+  win.on('unmaximize', emit)
+}
 
 function windowFromEvent(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): BrowserWindow | null {
   return BrowserWindow.fromWebContents(event.sender)
@@ -79,6 +99,15 @@ export function registerWindowHandlers(): void {
 
   ipcMain.handle(WINDOW_IPC.IS_MAXIMIZED, (event) => {
     return windowFromEvent(event)?.isMaximized() ?? false
+  })
+
+  ipcMain.handle(WINDOW_IPC.IS_FULL_SCREEN, (event) => {
+    return windowFromEvent(event)?.isFullScreen() ?? false
+  })
+
+  ipcMain.handle(WINDOW_IPC.GET_STATE, (event) => {
+    const win = windowFromEvent(event)
+    return win ? chromeState(win) : { maximized: false, fullScreen: false }
   })
 
   ipcMain.on(WINDOW_IPC.DRAG_START, (event) => {

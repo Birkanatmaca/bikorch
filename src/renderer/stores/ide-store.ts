@@ -74,6 +74,11 @@ function workspaceRootFor(projectId: string): string | null {
   return useWorkspaceStore.getState().projects.find((project) => project.id === projectId)?.folderPath ?? null
 }
 
+function collapseSidebarForActiveProject(): void {
+  const projectId = useWorkspaceStore.getState().activeProjectId
+  if (projectId) useWorkspaceStore.getState().collapseLeftSidebar(projectId)
+}
+
 export function tabIsDirty(tab: IdeTab): boolean {
   return !tab.binary && !tab.loading && tab.value !== tab.savedValue
 }
@@ -284,10 +289,12 @@ export const useIdeStore = create<IdeStore>((set, get) => ({
   closeIde: () => {
     if (get().tabs.some(tabIsDirty)) return false
     set({ open: false, tabs: [], activePath: null })
+    collapseSidebarForActiveProject()
     return true
   },
 
   forceClose: () => {
     set({ open: false, tabs: [], activePath: null, saving: false })
+    collapseSidebarForActiveProject()
   }
 }))
