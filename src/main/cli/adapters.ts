@@ -13,44 +13,50 @@ function localAppData(): string {
   return process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local')
 }
 
+function pushExistingVersionBins(dirs: string[], versionsRoot: string): void {
+  if (!existsSync(versionsRoot)) return
+  try {
+    for (const name of readdirSync(versionsRoot)) {
+      const bin = join(versionsRoot, name, 'bin')
+      dirs.push(existsSync(bin) ? bin : join(versionsRoot, name))
+    }
+  } catch {
+    // ignore unreadable version dirs
+  }
+}
+
 function extraCliDirs(): string[] {
   const local = localAppData()
   const roaming = process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming')
+  const home = homedir()
   const dirs = [
+    // macOS / Linux — GUI apps (Dock/Finder) often miss these until shell env is loaded.
+    '/opt/homebrew/bin',
+    '/opt/homebrew/sbin',
+    '/usr/local/bin',
+    '/usr/local/sbin',
+    join(home, '.nvm', 'current', 'bin'),
+    join(home, '.fnm', 'current', 'bin'),
+    join(home, '.volta', 'bin'),
+    join(home, '.asdf', 'shims'),
+    join(home, '.local', 'bin'),
+    join(home, '.npm-global', 'bin'),
+    join(home, '.local', 'share', 'cursor-agent'),
+    join(home, '.cursor', 'bin'),
+    // Windows
     join(local, 'cursor-agent'),
     join(local, 'agy', 'bin'),
     join(roaming, 'npm'),
-    join(homedir(), '.local', 'bin'),
-    join(homedir(), '.npm-global', 'bin'),
     join(local, 'Programs', 'cursor', 'resources', 'app', 'bin'),
     join(local, 'Programs', 'Cursor', 'resources', 'app', 'bin'),
     'C:\\Program Files\\cursor\\resources\\app\\bin',
-    'C:\\Program Files\\Cursor\\resources\\app\\bin',
-    join(homedir(), '.local', 'share', 'cursor-agent'),
-    join(homedir(), '.cursor', 'bin')
+    'C:\\Program Files\\Cursor\\resources\\app\\bin'
   ]
 
-  const versionsRoot = join(local, 'cursor-agent', 'versions')
-  if (existsSync(versionsRoot)) {
-    try {
-      for (const name of readdirSync(versionsRoot)) {
-        dirs.push(join(versionsRoot, name))
-      }
-    } catch {
-      // ignore unreadable version dirs
-    }
-  }
-
-  const codexVersionsRoot = join(local, 'OpenAI', 'Codex', 'bin')
-  if (existsSync(codexVersionsRoot)) {
-    try {
-      for (const name of readdirSync(codexVersionsRoot)) {
-        dirs.push(join(codexVersionsRoot, name))
-      }
-    } catch {
-      // ignore unreadable Codex version dirs
-    }
-  }
+  // nvm rarely creates `current`; prefer the newest installed Node bin.
+  pushExistingVersionBins(dirs, join(home, '.nvm', 'versions', 'node'))
+  pushExistingVersionBins(dirs, join(local, 'cursor-agent', 'versions'))
+  pushExistingVersionBins(dirs, join(local, 'OpenAI', 'Codex', 'bin'))
 
   return dirs.filter((dir) => existsSync(dir))
 }
@@ -58,8 +64,17 @@ function extraCliDirs(): string[] {
 export function enrichedPath(): string {
   const delimiter = process.platform === 'win32' ? ';' : ':'
   const current = process.env.PATH ?? ''
-  const extra = extraCliDirs().join(delimiter)
-  return extra ? `${current}${delimiter}${extra}` : current
+  const seen = new Set<string>()
+  const parts: string[] = []
+
+  // Prefer user tool dirs over the minimal GUI PATH so npm/node/brew resolve.
+  for (const part of [...extraCliDirs(), ...current.split(delimiter)]) {
+    if (!part || seen.has(part)) continue
+    seen.add(part)
+    parts.push(part)
+  }
+
+  return parts.join(delimiter)
 }
 
 export function spawnEnv(): Record<string, string> {
@@ -93,7 +108,7 @@ function findOnDisk(names: string[]): string | null {
   return null
 }
 
-function getDefaultShell(): SpawnConfig {
+export function getDefaultShell(): SpawnConfig {
   if (process.platform === 'win32') {
     const systemRoot = process.env.SystemRoot ?? 'C:\\Windows'
     const powershell = join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
@@ -110,9 +125,11 @@ function getDefaultShell(): SpawnConfig {
     }
   }
 
+  // Login shell so .zprofile / .bash_profile (Homebrew, nvm, PATH) load the
+  // same way as Terminal.app — non-login shells inherit Electron's GUI PATH.
   return {
-    command: process.env.SHELL ?? '/bin/bash',
-    args: []
+    command: process.env.SHELL ?? (process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash'),
+    args: ['-l']
   }
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "ai-dev-workspace",
   "productName": "Bikorch",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Bikorch — multi-CLI desktop workspace orchestrator",
   "main": "./out/main/index.js",
   "scripts": {
@@ -17,6 +17,7 @@
   "build": {
     "appId": "com.bikorch.app",
     "productName": "Bikorch",
+    "npmRebuild": false,
     "directories": {
       "output": "release"
     },

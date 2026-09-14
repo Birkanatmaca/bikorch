@@ -11,6 +11,17 @@ vi.mock('../../accounts/profile-manager', () => ({ prepareAuthProfileLaunch: asy
 vi.mock('../../accounts/antigravity-logout', () => ({ logoutAntigravityCli: vi.fn() }))
 vi.mock('../../accounts/antigravity-credential', () => ({ markAntigravitySessionAccount: vi.fn() }))
 vi.mock('../../accounts/cursor-profile', () => ({ withCursorAccountLock: (_id: string, task: () => Promise<unknown>) => task() }))
+vi.mock('../pty-host/client', () => ({
+  ptyHostClient: {
+    ensureConnected: async () => false,
+    onMessage: () => () => {},
+    spawn: vi.fn(),
+    write: vi.fn(),
+    resize: vi.fn(),
+    kill: vi.fn(),
+    disconnect: vi.fn()
+  }
+}))
 vi.mock('../../logs', () => ({ recordLog: vi.fn() }))
 import { ptyManager } from '../pty-manager'
 

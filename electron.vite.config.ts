@@ -10,7 +10,15 @@ const sharedAlias = {
 export default defineConfig({
   main: {
     resolve: { alias: sharedAlias },
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve('src/main/index.ts'),
+          'pty-host': resolve('src/main/cli/pty-host/main.ts')
+        }
+      }
+    }
   },
   preload: {
     resolve: { alias: sharedAlias },

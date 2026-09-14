@@ -1,6 +1,8 @@
 import { app, BrowserWindow, session, shell } from 'electron'
 import { join } from 'path'
 import { ptyManager } from './cli/pty-manager'
+import { loadUserShellEnv } from './cli/shell-env'
+import { ptyHostClient } from './cli/pty-host/client'
 import { registerIpcHandlers } from './ipc'
 import { watchWindowChrome } from './ipc/window'
 import { installConsoleCapture, recordRendererConsole } from './logs'
@@ -116,6 +118,10 @@ function createWindow(): BrowserWindow {
 
 app.whenReady().then(async () => {
   applyAppBranding()
+  // Dock/Finder launches miss the user's shell PATH; load it before any PTY spawn.
+  loadUserShellEnv()
+  // Durable PTY host keeps CLI sessions alive across app updates/restarts.
+  void ptyHostClient.ensureConnected()
   try {
     await initPersistenceDatabase()
     initDeveloperIntelligence()
@@ -159,6 +165,7 @@ app.on('before-quit', () => {
   disposeAutomationService()
   disposeTray()
   disposeDownloadManager()
-  ptyManager.killAll()
+  // Keep durable host sessions alive so updates/restarts can reattach.
+  ptyManager.releaseForAppQuit()
   closePersistenceDatabase()
 })

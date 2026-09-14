@@ -1,6 +1,6 @@
 import type { PtyKind, PtySessionStatus } from '@shared/contracts/pty'
 import { isCliKind } from '@renderer/lib/cli-activity'
-import { PANEL_TYPE_LABELS, type PanelDefinition, type PanelType, type ProjectWorkspaceState } from '@shared/types'
+import { type PanelDefinition, type PanelType, type ProjectWorkspaceState } from '@shared/types'
 
 export const PTY_PANEL_TYPES: PanelType[] = [
   'terminal',
@@ -58,14 +58,12 @@ export function summarizeProjectTabActivity(input: {
   attention: ProcessAttention[]
 }): ProjectTabActivity {
   let busyCount = 0
-  let workingTitle: string | null = null
 
   for (const panel of input.panels) {
     if (!isPtyPanelType(panel.type)) continue
     const status = input.sessions[panel.id]
     if (status === 'busy' || status === 'starting') {
       busyCount += 1
-      workingTitle ??= panel.title || PANEL_TYPE_LABELS[panel.type]
     }
   }
 
@@ -73,7 +71,7 @@ export function summarizeProjectTabActivity(input: {
     return {
       signal: 'busy',
       busyCount,
-      label: busyCount === 1 ? `${workingTitle ?? 'Agent'} working` : `${busyCount} agents working`
+      label: busyCount === 1 ? 'Working' : `${busyCount} working`
     }
   }
 
@@ -86,14 +84,14 @@ export function summarizeProjectTabActivity(input: {
     return {
       signal: 'error',
       busyCount: 0,
-      label: `${latest.title} failed — open to review`
+      label: 'Needs attention'
     }
   }
 
   return {
     signal: 'ready',
     busyCount: 0,
-    label: `${latest.title} finished — open to review`
+    label: 'Finished'
   }
 }
 
