@@ -82,8 +82,19 @@ export interface OrchestratorRect {
   h: number
 }
 
-/** Free-form floating windows vs tiled layout presets. */
-export const WORKSPACE_CANVAS_MODES = [
+/** Free-form floating windows vs tiled presets. */
+export type WorkspaceCanvasMode =
+  | 'free'
+  | 'tiled'
+  | 'grid-2x2'
+  | 'cols-2'
+  | 'cols-3'
+  | 'cols-4'
+  | 'rows-2'
+  | 'rows-3'
+  | 'rows-4'
+
+export const WORKSPACE_CANVAS_MODES: readonly WorkspaceCanvasMode[] = [
   'free',
   'tiled',
   'grid-2x2',
@@ -95,45 +106,46 @@ export const WORKSPACE_CANVAS_MODES = [
   'rows-4'
 ] as const
 
-export type WorkspaceCanvasMode = (typeof WORKSPACE_CANVAS_MODES)[number]
+export function parseCanvasMode(value: unknown): WorkspaceCanvasMode {
+  if (typeof value === 'string' && (WORKSPACE_CANVAS_MODES as readonly string[]).includes(value)) {
+    return value as WorkspaceCanvasMode
+  }
+  return 'free'
+}
 
 export const WORKSPACE_CANVAS_MODE_LABELS: Record<WorkspaceCanvasMode, string> = {
   free: 'Free',
-  tiled: 'Tiled',
+  tiled: 'Auto',
   'grid-2x2': '2×2',
-  'cols-2': '2 cols',
-  'cols-3': '3 cols',
-  'cols-4': '4 cols',
-  'rows-2': '2 rows',
-  'rows-3': '3 rows',
-  'rows-4': '4 rows'
+  'cols-2': '2',
+  'cols-3': '3',
+  'cols-4': '4',
+  'rows-2': '2',
+  'rows-3': '3',
+  'rows-4': '4'
 }
 
 export const WORKSPACE_CANVAS_MODE_TITLES: Record<WorkspaceCanvasMode, string> = {
-  free: 'Free — floating windows',
-  tiled: 'Tiled — auto equal cells',
-  'grid-2x2': '2×2 grid',
-  'cols-2': '2 columns',
-  'cols-3': '3 columns',
-  'cols-4': '4 columns',
-  'rows-2': '2 rows',
-  'rows-3': '3 rows',
-  'rows-4': '4 rows'
+  free: 'Freeform windows',
+  tiled: 'Auto tile',
+  'grid-2x2': 'Quadrants',
+  'cols-2': 'Two columns',
+  'cols-3': 'Three columns',
+  'cols-4': 'Four columns',
+  'rows-2': 'Two rows',
+  'rows-3': 'Three rows',
+  'rows-4': 'Four rows'
 }
 
-export const WORKSPACE_CANVAS_LAYOUT_GROUPS: { label: string; modes: WorkspaceCanvasMode[] }[] = [
-  { label: 'Workspace', modes: ['free', 'tiled'] },
+export const WORKSPACE_CANVAS_LAYOUT_GROUPS: ReadonlyArray<{
+  label: string
+  modes: WorkspaceCanvasMode[]
+}> = [
+  { label: 'Canvas', modes: ['free', 'tiled'] },
+  { label: 'Grid', modes: ['grid-2x2'] },
   { label: 'Columns', modes: ['cols-2', 'cols-3', 'cols-4'] },
-  { label: 'Rows', modes: ['rows-2', 'rows-3', 'rows-4'] },
-  { label: 'Grid', modes: ['grid-2x2'] }
+  { label: 'Rows', modes: ['rows-2', 'rows-3', 'rows-4'] }
 ]
-
-export function parseCanvasMode(value: unknown): WorkspaceCanvasMode {
-  return typeof value === 'string' &&
-    (WORKSPACE_CANVAS_MODES as readonly string[]).includes(value)
-    ? (value as WorkspaceCanvasMode)
-    : 'free'
-}
 
 /** Vertical = left | right. Horizontal = top / bottom. */
 export type GridSplitDirection = 'vertical' | 'horizontal'
@@ -166,7 +178,7 @@ export interface WorkspaceLayout {
   centerPanelSizes?: Record<string, number>
   /** Free-form terminal windows in the center canvas, percentages 0–100 */
   centerPanelRects?: Record<string, OrchestratorRect>
-  /** Free windows, auto tile, or a named split preset. Free-form rects are kept. */
+  /** Independent tiled workspace. Free-form rects are kept when this is on. */
   canvasMode?: WorkspaceCanvasMode
   centerGrid?: WorkspaceGridNode | null
 }
@@ -419,6 +431,108 @@ export function panelMinLimits(
   return orchestratorMinLimits(limitKindForPanel(type), canvas)
 }
 
+/** Minimum gap between free-form panels (percent of canvas). */
+const ORCH_GAP = 1.5
+
+const NEXT_PANEL_SIZES: ReadonlyArray<{ w: number; h: number }> = [
+  { w: 48, h: 56 },
+  { w: 42, h: 50 },
+  { w: 36, h: 44 },
+  { w: 30, h: 38 },
+  { w: 26, h: 32 },
+  { w: ORCH_MIN_W, h: ORCH_MIN_H }
+]
+
+export function orchestratorRectsOverlap(
+  a: OrchestratorRect,
+  b: OrchestratorRect,
+  gap = ORCH_GAP
+): boolean {
+  return !(
+    a.x + a.w + gap <= b.x ||
+    b.x + b.w + gap <= a.x ||
+    a.y + a.h + gap <= b.y ||
+    b.y + b.h + gap <= a.y
+  )
+}
+
+function rectFitsFree(
+  candidate: OrchestratorRect,
+  existingRects: OrchestratorRect[],
+  size: { w: number; h: number }
+): boolean {
+  if (candidate.w + 0.05 < size.w || candidate.h + 0.05 < size.h) return false
+  return existingRects.every((rect) => !orchestratorRectsOverlap(candidate, rect))
+}
+
+function candidateOrigins(
+  existingRects: OrchestratorRect[],
+  size: { w: number; h: number }
+): Array<{ x: number; y: number }> {
+  const origins: Array<{ x: number; y: number }> = [{ x: 2, y: 2 }]
+
+  for (const rect of existingRects) {
+    origins.push(
+      { x: rect.x + rect.w + ORCH_GAP, y: rect.y },
+      { x: rect.x, y: rect.y + rect.h + ORCH_GAP },
+      { x: Math.max(0, rect.x - size.w - ORCH_GAP), y: rect.y },
+      { x: rect.x, y: Math.max(0, rect.y - size.h - ORCH_GAP) },
+      { x: rect.x + rect.w + ORCH_GAP, y: rect.y + rect.h + ORCH_GAP }
+    )
+  }
+
+  const step = 4
+  for (let y = 2; y <= 100 - size.h; y += step) {
+    for (let x = 2; x <= 100 - size.w; x += step) {
+      origins.push({ x, y })
+    }
+  }
+
+  return origins
+}
+
+function findNonOverlappingRect(
+  existingRects: OrchestratorRect[],
+  size: { w: number; h: number }
+): OrchestratorRect | null {
+  for (const origin of candidateOrigins(existingRects, size)) {
+    const candidate = clampOrchestratorRect(
+      { x: origin.x, y: origin.y, w: size.w, h: size.h },
+      { minW: ORCH_MIN_W, minH: ORCH_MIN_H }
+    )
+    if (rectFitsFree(candidate, existingRects, size)) return candidate
+  }
+  return null
+}
+
+function splitFirstBeside(
+  first: OrchestratorRect
+): { next: OrchestratorRect; shrinkFirst: OrchestratorRect } | null {
+  const usable = first.w - ORCH_GAP
+  if (usable < ORCH_MIN_W * 2) return null
+
+  const leftW = Math.max(ORCH_MIN_W, usable * 0.5)
+  const rightW = Math.max(ORCH_MIN_W, usable - leftW)
+  const shrinkFirst = clampOrchestratorRect(
+    { x: first.x, y: first.y, w: leftW, h: first.h },
+    { minW: ORCH_MIN_W, minH: ORCH_MIN_H }
+  )
+  const next = clampOrchestratorRect(
+    {
+      x: shrinkFirst.x + shrinkFirst.w + ORCH_GAP,
+      y: first.y,
+      w: rightW,
+      h: first.h
+    },
+    { minW: ORCH_MIN_W, minH: ORCH_MIN_H }
+  )
+
+  if (orchestratorRectsOverlap(shrinkFirst, next)) return null
+  if (next.x + next.w > 100.05) return null
+  return { next, shrinkFirst }
+}
+
+/** Place the next free-form panel without stacking on existing ones. */
 export function allocateOrchestratorRect(
   existingRects: OrchestratorRect[]
 ): { next: OrchestratorRect; shrinkFirst?: OrchestratorRect } {
@@ -426,38 +540,30 @@ export function allocateOrchestratorRect(
     return { next: { ...DEFAULT_ORCHESTRATOR_RECT } }
   }
 
-  const first = existingRects[0]
-  if (existingRects.length === 1) {
-    const rightEdge = first.x + first.w
-    const spaceOnRight = 100 - rightEdge
-    if (spaceOnRight >= 26) {
-      return {
-        next: clampOrchestratorRect({
-          x: rightEdge + 2,
-          y: first.y,
-          w: Math.max(24, spaceOnRight - 2),
-          h: first.h
-        })
-      }
-    }
-    return {
-      next: clampOrchestratorRect({
-        x: 12,
-        y: 14,
-        w: 48,
-        h: 56
-      })
-    }
+  // Prefer a usable panel size; avoid parking a tiny window when a split works.
+  for (const size of NEXT_PANEL_SIZES.slice(0, -1)) {
+    const found = findNonOverlappingRect(existingRects, size)
+    if (found) return { next: found }
   }
 
-  const n = existingRects.length
+  if (existingRects.length === 1) {
+    const split = splitFirstBeside(existingRects[0])
+    if (split) return split
+  }
+
+  const compact = findNonOverlappingRect(existingRects, {
+    w: ORCH_MIN_W,
+    h: ORCH_MIN_H
+  })
+  if (compact) return { next: compact }
+
+  // Canvas is packed: park a minimum panel in the far corner instead of
+  // cascading over the previous window.
   return {
-    next: clampOrchestratorRect({
-      x: 8 + ((n * 5) % 28),
-      y: 10 + ((n * 6) % 24),
-      w: 46,
-      h: 54
-    })
+    next: clampOrchestratorRect(
+      { x: 100 - ORCH_MIN_W, y: 100 - ORCH_MIN_H, w: ORCH_MIN_W, h: ORCH_MIN_H },
+      { minW: ORCH_MIN_W, minH: ORCH_MIN_H }
+    )
   }
 }
 
@@ -466,14 +572,13 @@ export function layoutAfterAddCenterPanel(
   existingRects: Record<string, OrchestratorRect>,
   newId: string
 ): Record<string, OrchestratorRect> {
-  const rects = existingIds
-    .map((id) => existingRects[id])
-    .filter((rect): rect is OrchestratorRect => Boolean(rect))
+  const placedIds = existingIds.filter((id) => Boolean(existingRects[id]))
+  const rects = placedIds.map((id) => existingRects[id])
   const { next, shrinkFirst } = allocateOrchestratorRect(rects)
 
   const result = { ...existingRects, [newId]: next }
-  if (shrinkFirst && existingIds[0]) {
-    result[existingIds[0]] = shrinkFirst
+  if (shrinkFirst && placedIds[0]) {
+    result[placedIds[0]] = shrinkFirst
   }
   return result
 }

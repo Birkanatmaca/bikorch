@@ -2899,9 +2899,10 @@ kbd {
 }
 .music-seek-track {
   position: relative;
+  z-index: 1;
   flex: 1;
-  min-width: 0;
-  height: 10px;
+  min-width: 48px;
+  height: 16px;
   cursor: pointer;
   touch-action: none;
 }
@@ -2915,6 +2916,7 @@ kbd {
   border-radius: 99px;
   background: rgb(255 255 255 / 0.1);
   transform: translateY(-50%);
+  pointer-events: none;
 }
 .music-seek-fill {
   position: absolute;
@@ -2927,7 +2929,6 @@ kbd {
   transform: translateY(-50%) scaleX(0);
   transform-origin: left center;
   pointer-events: none;
-  will-change: transform;
 }
 .music-seek-thumb {
   position: absolute;
@@ -3092,6 +3093,8 @@ kbd {
   color: var(--color-text-muted);
 }
 .music-player-transport {
+  position: relative;
+  z-index: 30;
   display: flex;
   min-width: 0;
   flex-shrink: 0;
@@ -3099,6 +3102,21 @@ kbd {
   align-items: center;
   gap: 8px;
   padding-top: 8px;
+}
+/* Keep the scrubber on its own row so resize never collapses it under controls. */
+.music-workspace-player .music-player-transport {
+  flex-wrap: wrap;
+  row-gap: 6px;
+  padding-bottom: 2px;
+}
+.music-workspace-player .music-player-gain,
+.music-workspace-player .music-player-controls {
+  flex: 0 0 auto;
+}
+.music-workspace-player .music-player-seek {
+  flex: 1 1 100%;
+  min-width: 0;
+  order: 2;
 }
 .music-player-controls {
   display: flex;

@@ -238,6 +238,7 @@ function OrchestratorWindow({
               onClose={onClose}
             />
           )}
+          {panel.type === 'timer' ? <ResizeHandles onStart={onResizeStart} /> : null}
         </div>
       ) : (
         <div
@@ -355,22 +356,24 @@ export function OrchestratorZone({
 
     const missing = panels.filter((panel) => !next[panel.id])
     if (missing.length > 0) {
-      const placed: OrchestratorRect[] = panels
-        .filter((panel) => next[panel.id])
-        .map((panel) => next[panel.id])
+      const placedPanels = panels.filter((panel) => next[panel.id])
+      const placed: OrchestratorRect[] = placedPanels.map((panel) => next[panel.id])
 
       for (const panel of missing) {
         if (isFloatingWidget(panel.type)) {
           next[panel.id] = floatingWidgetRect(panel.type)
+          placedPanels.push(panel)
           placed.push(next[panel.id])
           changed = true
           continue
         }
         const { next: allocated, shrinkFirst } = allocateOrchestratorRect(placed)
-        if (shrinkFirst && panels[0] && !isFloatingWidget(panels[0].type)) {
-          next[panels[0].id] = shrinkFirst
+        if (shrinkFirst && placedPanels[0] && !isFloatingWidget(placedPanels[0].type)) {
+          next[placedPanels[0].id] = shrinkFirst
+          placed[0] = shrinkFirst
         }
         next[panel.id] = allocated
+        placedPanels.push(panel)
         placed.push(allocated)
         changed = true
       }
@@ -413,11 +416,6 @@ export function OrchestratorZone({
       if (e.button !== 0) return
       e.preventDefault()
       e.stopPropagation()
-      try {
-        e.currentTarget.setPointerCapture(e.pointerId)
-      } catch {
-        // Capture is best-effort; window listeners still drive the drag.
-      }
       setFocusedId(panelId)
       const start = getRect(panelId)
       const widget = panels.find((panel) => panel.id === panelId)
@@ -437,35 +435,9 @@ export function OrchestratorZone({
   )
 
   useEffect(() => {
-    const handlePointerUp = (): void => {
-      const drag = dragRef.current
-      dragRef.current = null
-      if (dragFrameRef.current !== null) {
-        cancelAnimationFrame(dragFrameRef.current)
-        dragFrameRef.current = null
-      }
-      if (!drag) return
-
-      const live = previewRectsRef.current[drag.panelId]
-      const { w, h } = canvasSize()
-      if (live) {
-        const limits = panelMinLimits(drag.panelType, { w, h })
-        updateCenterPanelRect(drag.panelId, snapRectToGrid(live, w, h, limits))
-      }
-      previewRectsRef.current = {}
-      setPreviewRects({})
-      unlockTerminalLayout(drag.panelId)
-      if (!isFloatingWidget(drag.panelType)) focusTerminal(drag.panelId)
-    }
-
     const handlePointerMove = (e: PointerEvent): void => {
       const drag = dragRef.current
       if (!drag) return
-      if (e.pointerType === 'mouse' && e.buttons === 0) {
-        handlePointerUp()
-        return
-      }
-      e.preventDefault()
       const { dx, dy } = toDeltaPercent(e.clientX, e.clientY)
       const canvas = canvasSize()
       const limits = panelMinLimits(drag.panelType, canvas)
@@ -492,15 +464,34 @@ export function OrchestratorZone({
       })
     }
 
-    window.addEventListener('pointermove', handlePointerMove, { capture: true, passive: false })
-    window.addEventListener('pointerup', handlePointerUp, { capture: true })
-    window.addEventListener('pointercancel', handlePointerUp, { capture: true })
-    window.addEventListener('lostpointercapture', handlePointerUp)
+    const handlePointerUp = (): void => {
+      const drag = dragRef.current
+      dragRef.current = null
+      if (dragFrameRef.current !== null) {
+        cancelAnimationFrame(dragFrameRef.current)
+        dragFrameRef.current = null
+      }
+      if (!drag) return
+
+      const live = previewRectsRef.current[drag.panelId]
+      const { w, h } = canvasSize()
+      if (live) {
+        const limits = panelMinLimits(drag.panelType, { w, h })
+        updateCenterPanelRect(drag.panelId, snapRectToGrid(live, w, h, limits))
+      }
+      previewRectsRef.current = {}
+      setPreviewRects({})
+      unlockTerminalLayout(drag.panelId)
+      if (!isFloatingWidget(drag.panelType)) focusTerminal(drag.panelId)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerUp)
     return () => {
-      window.removeEventListener('pointermove', handlePointerMove, { capture: true })
-      window.removeEventListener('pointerup', handlePointerUp, { capture: true })
-      window.removeEventListener('pointercancel', handlePointerUp, { capture: true })
-      window.removeEventListener('lostpointercapture', handlePointerUp)
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerUp)
       const drag = dragRef.current
       if (drag) unlockTerminalLayout(drag.panelId)
     }

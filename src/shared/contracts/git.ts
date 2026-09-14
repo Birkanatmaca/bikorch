@@ -86,18 +86,25 @@ export interface GitEnsureWorktreeRequest {
   projectRoot: string
   panelId: string
   kind: AgentWorktreeKind
+  title?: string
 }
 
 export interface GitEnsureWorktreeResponse {
   ok: boolean
   worktreePath?: string
   branch?: string
+  runId?: string
+  targetBranch?: string
+  baseSha?: string
   error?: string
 }
 
 export interface GitRemoveWorktreeRequest {
   projectRoot: string
   worktreePath: string
+  title?: string
+  /** park = checkpoint and keep the worktree. remove = checkpoint, drop the folder, keep the branch. */
+  mode?: 'park' | 'remove'
 }
 
 export interface GitSessionSnapshotRequest {
@@ -112,6 +119,30 @@ export interface GitSessionSnapshot {
 }
 
 export type WorkspaceIsolation = 'isolated' | 'shared'
+export type IsolationActiveState = 'ready' | 'parked' | 'missing' | 'inactive'
+export type AgentRunStatus =
+  | 'active'
+  | 'parked'
+  | 'queued'
+  | 'integrating'
+  | 'conflict'
+  | 'accepted'
+  | 'abandoned'
+
+export interface AgentRunRecord {
+  id: string
+  kind: AgentWorktreeKind
+  title: string
+  branch: string
+  worktreePath: string
+  targetBranch: string
+  baseSha: string
+  isolationPolicy: WorkspaceIsolation
+  status: AgentRunStatus
+  attachedPanelId: string | null
+  createdAt: number
+  updatedAt: number
+}
 
 export interface IsolationLaneInput {
   panelId: string
@@ -122,11 +153,28 @@ export interface IsolationLaneInput {
 
 export interface IsolationLane {
   panelId: string
+  runId: string
   kind: AgentWorktreeKind
   title: string
   worktreePath: string
   branch: string
   files: string[]
+  targetBranch: string
+  baseSha: string
+  isolationPolicy: WorkspaceIsolation
+  isolationState: IsolationActiveState
+  attached: boolean
+}
+
+export type MergeQueueStatus = 'pending' | 'integrating' | 'conflict' | 'review' | 'stale'
+
+export interface MergeQueueItem {
+  runId: string
+  panelId: string
+  kind: AgentWorktreeKind
+  title: string
+  status: MergeQueueStatus
+  fileCount: number
 }
 
 export interface IsolationOverlap {
@@ -146,6 +194,7 @@ export interface IsolationConflictFile {
 
 export interface IsolationFoldSession {
   id: string
+  runId: string
   panelId: string
   kind: AgentWorktreeKind
   title: string
@@ -153,6 +202,10 @@ export interface IsolationFoldSession {
   agentWorktreePath: string
   integrationPath?: string
   integrationBranch?: string
+  targetBranch: string
+  baseSha: string
+  targetSha: string
+  stale: boolean
   status: 'empty' | 'clean' | 'conflict'
   files: string[]
   conflicts: IsolationConflictFile[]
@@ -161,12 +214,17 @@ export interface IsolationFoldSession {
 export interface IsolationInspectRequest {
   projectRoot: string
   lanes: IsolationLaneInput[]
+  /** Test-only override; the renderer never sends this. */
+  baseDir?: string
 }
 
 export interface IsolationInspectResponse {
   lanes: IsolationLane[]
   overlaps: IsolationOverlap[]
   fold: IsolationFoldSession | null
+  queue: MergeQueueItem[]
+  targetBranch: string
+  targetSha: string
 }
 
 export interface IsolationFoldRequest {
@@ -202,6 +260,7 @@ export const GIT_IPC = {
   SESSION_SNAPSHOT: 'git:session-snapshot',
   ISOLATION_INSPECT: 'git:isolation-inspect',
   ISOLATION_FOLD: 'git:isolation-fold',
+  ISOLATION_SYNC: 'git:isolation-sync',
   ISOLATION_ACCEPT: 'git:isolation-accept',
   ISOLATION_ABORT: 'git:isolation-abort',
   ISOLATION_DIFF: 'git:isolation-diff'

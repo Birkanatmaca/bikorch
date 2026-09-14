@@ -18,7 +18,6 @@ import {
 import {
   clampOrchestratorRect,
   DEFAULT_CHAT_RECT,
-  DEFAULT_ORCHESTRATOR_RECT,
   DEFAULT_PLAYER_RECT,
   DEFAULT_TIMER_RECT,
   floatingWidgetLimits,
@@ -73,6 +72,12 @@ export function useOrchestratorContextMenu(
   const addAtCursor = useCallback(
     (type: PanelType) => {
       if (!menu) return
+      // CLI/terminal panels use free-space allocation so they do not stack.
+      // Widgets/chat keep click-anchored placement with their compact defaults.
+      if (!isFloatingWidget(type) && !isWebChatPanel(type)) {
+        addPanel(type, 'center')
+        return
+      }
       const canvas = getCanvasRect()
       const box = canvas ?? new DOMRect(0, 0, 1, 1)
       const measured = canvas ? { w: canvas.width, h: canvas.height } : undefined
@@ -80,9 +85,7 @@ export function useOrchestratorContextMenu(
         ? type === 'timer'
           ? { w: DEFAULT_TIMER_RECT.w, h: DEFAULT_TIMER_RECT.h }
           : { w: DEFAULT_PLAYER_RECT.w, h: DEFAULT_PLAYER_RECT.h }
-        : isWebChatPanel(type)
-          ? { w: DEFAULT_CHAT_RECT.w, h: DEFAULT_CHAT_RECT.h }
-          : { w: DEFAULT_ORCHESTRATOR_RECT.w, h: DEFAULT_ORCHESTRATOR_RECT.h }
+        : { w: DEFAULT_CHAT_RECT.w, h: DEFAULT_CHAT_RECT.h }
       const rect = clampOrchestratorRect(
         rectFromCanvasClick(box, menu.canvasX, menu.canvasY, size),
         floatingWidgetLimits(type, measured) ?? panelMinLimits(type, measured)

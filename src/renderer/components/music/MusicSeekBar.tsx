@@ -16,10 +16,23 @@ function applyClock(
   if (total) total.textContent = durationMs > 0 ? formatTrackDuration(durationMs) : '—'
 }
 
+function seekRatioFromClientX(track: HTMLElement, clientX: number): number | null {
+  const box = track.getBoundingClientRect()
+  // Prefer visual width (transform/zoom safe). Fall back to layout width if rect is stale.
+  const width = box.width > 0 ? box.width : track.offsetWidth
+  if (width <= 0) return null
+  return Math.min(1, Math.max(0, (clientX - box.left) / width))
+}
+
 export function MusicSeekBar(): React.JSX.Element {
   const playing = useMusicStore((state) => state.status === 'playing')
   const storePosition = useMusicStore((state) => state.positionMs)
   const storeDuration = useMusicStore((state) => state.durationMs)
+  const trackDuration = useMusicStore((state) => {
+    const id = state.currentTrackId
+    if (!id) return 0
+    return state.tracks.find((track) => track.id === id)?.durationMs ?? 0
+  })
   const seek = useMusicStore((state) => state.seek)
   const trackRef = useRef<HTMLDivElement>(null)
   const fillRef = useRef<HTMLDivElement>(null)
@@ -27,6 +40,13 @@ export function MusicSeekBar(): React.JSX.Element {
   const elapsedRef = useRef<HTMLSpanElement>(null)
   const totalRef = useRef<HTMLSpanElement>(null)
   const draggingRef = useRef(false)
+  const seekFromClientXRef = useRef<(clientX: number) => void>(() => undefined)
+  const durationFallback = storeDuration || trackDuration
+
+  const resolveDuration = (): number => {
+    const clock = readPlaybackClock()
+    return clock.durationMs || storeDuration || trackDuration
+  }
 
   const paintFromClock = (): void => {
     const clock = readPlaybackClock()
@@ -36,9 +56,22 @@ export function MusicSeekBar(): React.JSX.Element {
       elapsedRef.current,
       totalRef.current,
       clock.positionMs,
-      clock.durationMs || storeDuration
+      clock.durationMs || storeDuration || trackDuration
     )
   }
+
+  const seekFromClientX = (clientX: number): void => {
+    const track = trackRef.current
+    if (!track) return
+    const ratio = seekRatioFromClientX(track, clientX)
+    if (ratio == null) return
+    const duration = resolveDuration()
+    if (duration <= 0) return
+    const next = Math.round(ratio * duration)
+    applyClock(fillRef.current, thumbRef.current, elapsedRef.current, totalRef.current, next, duration)
+    seek(next)
+  }
+  seekFromClientXRef.current = seekFromClientX
 
   useEffect(() => {
     paintFromClock()
@@ -50,21 +83,26 @@ export function MusicSeekBar(): React.JSX.Element {
     }
     frame = window.requestAnimationFrame(tick)
     return () => window.cancelAnimationFrame(frame)
-  }, [playing, storePosition, storeDuration])
+  }, [playing, storePosition, storeDuration, trackDuration])
 
-  const seekFromEvent = (event: PointerEvent | React.PointerEvent): void => {
-    const track = trackRef.current
-    if (!track) return
-    const box = track.getBoundingClientRect()
-    if (box.width <= 0) return
-    const clock = readPlaybackClock()
-    const duration = clock.durationMs || storeDuration
-    if (duration <= 0) return
-    const ratio = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width))
-    const next = Math.round(ratio * duration)
-    applyClock(fillRef.current, thumbRef.current, elapsedRef.current, totalRef.current, next, duration)
-    seek(next)
-  }
+  useEffect(() => {
+    const onMove = (event: PointerEvent): void => {
+      if (!draggingRef.current) return
+      event.preventDefault()
+      seekFromClientXRef.current(event.clientX)
+    }
+    const onUp = (): void => {
+      draggingRef.current = false
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+  }, [])
 
   return (
     <div className="music-player-seek">
@@ -76,34 +114,38 @@ export function MusicSeekBar(): React.JSX.Element {
         tabIndex={0}
         aria-label="Seek"
         aria-valuemin={0}
-        aria-valuemax={Math.max(storeDuration, 1)}
+        aria-valuemax={Math.max(durationFallback, 1)}
         aria-valuenow={storePosition}
         onPointerDown={(event) => {
           if (event.button !== 0) return
           event.preventDefault()
           event.stopPropagation()
           draggingRef.current = true
-          event.currentTarget.setPointerCapture(event.pointerId)
-          seekFromEvent(event)
+          seekFromClientX(event.clientX)
         }}
-        onPointerMove={(event) => {
-          if (!draggingRef.current) return
-          seekFromEvent(event)
-        }}
-        onPointerUp={(event) => {
-          draggingRef.current = false
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId)
+        onKeyDown={(event) => {
+          const duration = resolveDuration()
+          if (duration <= 0) return
+          const step = Math.max(1000, Math.round(duration / 100))
+          if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
+            event.preventDefault()
+            seek(Math.max(0, readPlaybackClock().positionMs - step))
+          } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
+            event.preventDefault()
+            seek(Math.min(duration, readPlaybackClock().positionMs + step))
+          } else if (event.key === 'Home') {
+            event.preventDefault()
+            seek(0)
+          } else if (event.key === 'End') {
+            event.preventDefault()
+            seek(duration)
           }
-        }}
-        onPointerCancel={() => {
-          draggingRef.current = false
         }}
       >
         <div ref={fillRef} className="music-seek-fill" />
         <div ref={thumbRef} className="music-seek-thumb" />
       </div>
-      <span ref={totalRef}>{storeDuration > 0 ? formatTrackDuration(storeDuration) : '—'}</span>
+      <span ref={totalRef}>{durationFallback > 0 ? formatTrackDuration(durationFallback) : '—'}</span>
     </div>
   )
 }

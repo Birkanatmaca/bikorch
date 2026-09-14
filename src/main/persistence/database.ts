@@ -23,12 +23,14 @@ import {
   type PanelType,
   type Project,
   type ProjectWorkspaceState,
+  type WorkspaceGridNode,
   type WorkspaceLayout,
   DEFAULT_LAYOUT,
   createDefaultPanels,
   sanitizeWorkspacePanels,
   normalizeLayoutForPanels,
-  isLeftSidebarView
+  isLeftSidebarView,
+  parseCanvasMode
 } from '@shared/types'
 import {
   AI_ACCOUNT_KINDS,
@@ -344,7 +346,33 @@ function parseLayout(raw: unknown): WorkspaceLayout {
     centerPanelRects:
       layout.centerPanelRects && typeof layout.centerPanelRects === 'object'
         ? layout.centerPanelRects
-        : DEFAULT_LAYOUT.centerPanelRects
+        : DEFAULT_LAYOUT.centerPanelRects,
+    canvasMode: parseCanvasMode(layout.canvasMode),
+    centerGrid: parseGridNode(layout.centerGrid)
+  }
+}
+
+function parseGridNode(raw: unknown): WorkspaceGridNode | null {
+  if (!raw || typeof raw !== 'object') return null
+  const node = raw as Partial<WorkspaceGridNode>
+  if (node.type === 'leaf' && typeof node.panelId === 'string' && node.panelId.length > 0) {
+    return { type: 'leaf', panelId: node.panelId }
+  }
+  if (node.type !== 'split') return null
+  if (node.direction !== 'vertical' && node.direction !== 'horizontal') return null
+  if (!Array.isArray(node.sizes) || node.sizes.length !== 2) return null
+  if (!Array.isArray(node.children) || node.children.length !== 2) return null
+  const left = parseGridNode(node.children[0])
+  const right = parseGridNode(node.children[1])
+  if (!left || !right) return null
+  const first = Number(node.sizes[0])
+  const second = Number(node.sizes[1])
+  if (!Number.isFinite(first) || !Number.isFinite(second)) return null
+  return {
+    type: 'split',
+    direction: node.direction,
+    sizes: [first, second],
+    children: [left, right]
   }
 }
 
