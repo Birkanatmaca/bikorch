@@ -1,15 +1,16 @@
-import { spawn } from 'child_process'
 import { app } from 'electron'
-import { access, mkdir, readFile, rm } from 'fs/promises'
+import { mkdir, readFile, rm } from 'fs/promises'
 import { dirname, join, resolve } from 'path'
 import type {
+  AgentRunRecord,
   GitDiffResponse,
   IsolationConflictFile,
   IsolationFoldSession,
   IsolationInspectRequest,
   IsolationInspectResponse,
   IsolationLane,
-  IsolationOverlap
+  IsolationOverlap,
+  MergeQueueItem
 } from '@shared/contracts/git'
 import { detectLanguage } from '@shared/lib/languages'
 import {
@@ -17,6 +18,22 @@ import {
   extractConflictHunks,
   hasConflictMarkers
 } from '@shared/lib/isolation-prompt'
+import {
+  clearRepoIsolationMemory,
+  loadRepoIsolation,
+  saveRepoIsolation,
+  upsertAgentRun
+} from './agent-run-store'
+import {
+  commitIfDirty,
+  currentBranch,
+  foldCommitMessage,
+  headSha,
+  isWorkingTreeDirty,
+  pathExists,
+  resolveRepoRoot,
+  runGit
+} from './git-exec'
 import {
   agentBranchName,
   buildIntegrationWorktreePath,
@@ -28,44 +45,8 @@ const MAX_SNIPPET = 1_500
 const MAX_WORKING_BYTES = 2 * 1024 * 1024
 const foldByRepo = new Map<string, IsolationFoldSession>()
 
-function runGit(cwd: string, args: string[]): Promise<string> {
-  return new Promise((resolvePromise, reject) => {
-    const proc = spawn('git', args, { cwd, windowsHide: true })
-    let stdout = ''
-    let stderr = ''
-    proc.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString()
-    })
-    proc.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString()
-    })
-    proc.on('error', reject)
-    proc.on('close', (code) => {
-      if (code === 0) {
-        resolvePromise(stdout)
-        return
-      }
-      reject(new Error(stderr.trim() || stdout.trim() || `git exited with code ${code}`))
-    })
-  })
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path)
-    return true
-  } catch {
-    return false
-  }
-}
-
 function worktreeBaseDir(override?: string): string {
   return override ?? app.getPath('userData')
-}
-
-async function resolveRepoRoot(projectRoot: string): Promise<string> {
-  const toplevel = (await runGit(projectRoot, ['rev-parse', '--show-toplevel']).catch(() => '')).trim()
-  return toplevel || resolve(projectRoot)
 }
 
 function uniqueSorted(values: string[]): string[] {
@@ -98,35 +79,24 @@ async function listChangedFiles(worktreePath: string, mainHead: string): Promise
   return uniqueSorted(lines([committed, unstaged, staged, untracked].join('\n')))
 }
 
-async function currentBranch(cwd: string): Promise<string | null> {
-  const name = (await runGit(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => '')).trim()
-  if (!name || name === 'HEAD') return null
-  return name
-}
-
-async function commitLaneIfDirty(worktreePath: string, title: string): Promise<void> {
-  await runGit(worktreePath, ['add', '-A']).catch(() => undefined)
-  const dirty = (await runGit(worktreePath, ['status', '--porcelain']).catch(() => '')).trim().length > 0
-  if (!dirty) return
-  const message = `bikorch: ${title.trim().slice(0, 72) || 'agent work'}`
-  try {
-    await runGit(worktreePath, ['commit', '-m', message])
-  } catch {
-    await runGit(worktreePath, [
-      '-c',
-      'user.email=bikorch@local',
-      '-c',
-      'user.name=Bikorch',
-      'commit',
-      '-m',
-      message
-    ])
-  }
-}
-
 async function listUnmerged(cwd: string): Promise<string[]> {
   const raw = await runGit(cwd, ['diff', '--name-only', '--diff-filter=U']).catch(() => '')
   return uniqueSorted(lines(raw))
+}
+
+async function readWorkingText(absolutePath: string): Promise<string> {
+  try {
+    const buffer = await readFile(absolutePath)
+    if (buffer.includes(0) || buffer.byteLength > MAX_WORKING_BYTES) return ''
+    return buffer.toString('utf8')
+  } catch {
+    return ''
+  }
+}
+
+async function showStage(cwd: string, stage: 1 | 2 | 3, file: string): Promise<string | undefined> {
+  const text = await runGit(cwd, ['show', `:${stage}:${file}`]).catch(() => '')
+  return text.length > 0 ? clip(text) : undefined
 }
 
 async function stageResolvedConflicts(cwd: string): Promise<void> {
@@ -138,7 +108,27 @@ async function stageResolvedConflicts(cwd: string): Promise<void> {
   }
 }
 
-async function refreshFoldSession(session: IsolationFoldSession): Promise<IsolationFoldSession> {
+async function mergeHeadPresent(cwd: string): Promise<boolean> {
+  const sha = (await runGit(cwd, ['rev-parse', '-q', '--verify', 'MERGE_HEAD']).catch(() => '')).trim()
+  return sha.length > 0
+}
+
+async function resolveTarget(repoRoot: string): Promise<{ branch: string; sha: string }> {
+  const branch = (await currentBranch(repoRoot)) ?? 'main'
+  const sha = await headSha(repoRoot)
+  return { branch, sha }
+}
+
+function markStale(session: IsolationFoldSession, targetSha: string): IsolationFoldSession {
+  session.stale = Boolean(session.targetSha) && session.targetSha !== targetSha
+  return session
+}
+
+async function refreshFoldSession(
+  session: IsolationFoldSession,
+  targetSha: string
+): Promise<IsolationFoldSession> {
+  markStale(session, targetSha)
   if (!session.integrationPath) return session
   await stageResolvedConflicts(session.integrationPath)
   const unmerged = await listUnmerged(session.integrationPath)
@@ -164,26 +154,6 @@ async function refreshFoldSession(session: IsolationFoldSession): Promise<Isolat
   return session
 }
 
-async function showStage(cwd: string, stage: 1 | 2 | 3, file: string): Promise<string | undefined> {
-  const text = await runGit(cwd, ['show', `:${stage}:${file}`]).catch(() => '')
-  return text.length > 0 ? clip(text) : undefined
-}
-
-async function readWorkingText(absolutePath: string): Promise<string> {
-  try {
-    const buffer = await readFile(absolutePath)
-    if (buffer.includes(0) || buffer.byteLength > MAX_WORKING_BYTES) return ''
-    return buffer.toString('utf8')
-  } catch {
-    return ''
-  }
-}
-
-async function mergeHeadPresent(cwd: string): Promise<boolean> {
-  const sha = (await runGit(cwd, ['rev-parse', '-q', '--verify', 'MERGE_HEAD']).catch(() => '')).trim()
-  return sha.length > 0
-}
-
 function overlapsFromLanes(lanes: IsolationLane[]): IsolationOverlap[] {
   const owners = new Map<string, string[]>()
   for (const lane of lanes) {
@@ -202,36 +172,172 @@ function overlapsFromLanes(lanes: IsolationLane[]): IsolationOverlap[] {
     }))
 }
 
+function queueFrom(lanes: IsolationLane[], fold: IsolationFoldSession | null): MergeQueueItem[] {
+  const items: MergeQueueItem[] = []
+  for (const lane of lanes) {
+    const isActive = fold && fold.status !== 'empty' && fold.panelId === lane.panelId
+    if (!isActive && lane.files.length === 0) continue
+    let status: MergeQueueItem['status'] = 'pending'
+    if (isActive) {
+      if (fold.stale) status = 'stale'
+      else if (fold.status === 'conflict') status = 'conflict'
+      else status = 'review'
+    }
+    items.push({
+      runId: lane.runId,
+      panelId: lane.panelId,
+      kind: lane.kind,
+      title: lane.title,
+      status,
+      fileCount: isActive ? fold.files.length : lane.files.length
+    })
+  }
+  return items
+}
+
+async function persistState(
+  repoRoot: string,
+  baseDir: string,
+  fold: IsolationFoldSession | null,
+  extras?: { targetBranch?: string; targetSha?: string }
+): Promise<void> {
+  const state = await loadRepoIsolation(repoRoot, baseDir)
+  state.fold = fold
+  if (extras?.targetBranch) state.targetBranch = extras.targetBranch
+  if (extras?.targetSha) state.targetSha = extras.targetSha
+  await saveRepoIsolation(state, baseDir)
+}
+
+async function describeLane(input: {
+  panelId: string
+  kind: IsolationLane['kind']
+  title: string
+  worktreePath: string
+  attached: boolean
+  run?: AgentRunRecord
+  targetBranch: string
+  targetSha: string
+}): Promise<IsolationLane | null> {
+  if (!(await pathExists(input.worktreePath))) {
+    if (!input.run) return null
+    return {
+      panelId: input.panelId,
+      runId: input.run.id,
+      kind: input.kind,
+      title: input.title,
+      worktreePath: input.worktreePath,
+      branch: input.run.branch,
+      files: [],
+      targetBranch: input.run.targetBranch,
+      baseSha: input.run.baseSha,
+      isolationPolicy: input.run.isolationPolicy,
+      isolationState: 'missing',
+      attached: input.attached
+    }
+  }
+  const files = input.targetSha ? await listChangedFiles(input.worktreePath, input.targetSha) : []
+  const branch = (await currentBranch(input.worktreePath)) ?? agentBranchName(input.kind, input.panelId)
+  return {
+    panelId: input.panelId,
+    runId: input.run?.id ?? input.panelId,
+    kind: input.kind,
+    title: input.title,
+    worktreePath: input.worktreePath,
+    branch,
+    files,
+    targetBranch: input.run?.targetBranch ?? input.targetBranch,
+    baseSha: input.run?.baseSha ?? input.targetSha,
+    isolationPolicy: input.run?.isolationPolicy ?? 'isolated',
+    isolationState: input.attached ? 'ready' : 'parked',
+    attached: input.attached
+  }
+}
+
 export { buildConflictResolvePrompt }
 
 export async function inspectIsolation(
   request: IsolationInspectRequest
 ): Promise<IsolationInspectResponse> {
   const repoRoot = await resolveRepoRoot(request.projectRoot)
-  const mainHead = (await runGit(repoRoot, ['rev-parse', 'HEAD']).catch(() => '')).trim()
+  const baseDir = worktreeBaseDir(request.baseDir)
+  const target = await resolveTarget(repoRoot)
+  const state = await loadRepoIsolation(repoRoot, baseDir)
+  const attachedIds = new Set(request.lanes.map((lane) => lane.panelId))
   const lanes: IsolationLane[] = []
 
   for (const input of request.lanes) {
-    if (!(await exists(input.worktreePath))) continue
-    const files = mainHead ? await listChangedFiles(input.worktreePath, mainHead) : []
-    const branch = (await currentBranch(input.worktreePath)) ?? agentBranchName(input.kind, input.panelId)
-    lanes.push({
-      panelId: input.panelId,
-      kind: input.kind,
-      title: input.title,
-      worktreePath: input.worktreePath,
-      branch,
-      files
+    const run = state.runs.find((item) => item.id === input.panelId)
+    const lane = await describeLane({
+      ...input,
+      attached: true,
+      run,
+      targetBranch: target.branch,
+      targetSha: target.sha
     })
+    if (lane) {
+      lanes.push(lane)
+      upsertAgentRun(state, {
+        id: lane.runId,
+        kind: lane.kind,
+        title: lane.title,
+        branch: lane.branch,
+        worktreePath: lane.worktreePath,
+        targetBranch: lane.targetBranch,
+        baseSha: lane.baseSha,
+        isolationPolicy: 'isolated',
+        status: 'active',
+        attachedPanelId: lane.panelId,
+        createdAt: run?.createdAt ?? Date.now(),
+        updatedAt: Date.now()
+      })
+    }
   }
 
-  const fold = foldByRepo.get(repoRoot) ?? null
-  if (fold) await refreshFoldSession(fold)
+  for (const run of state.runs) {
+    if (attachedIds.has(run.id)) continue
+    if (run.status === 'abandoned' || run.status === 'accepted') continue
+    if (run.isolationPolicy === 'shared') continue
+    run.status = 'parked'
+    run.attachedPanelId = null
+    const lane = await describeLane({
+      panelId: run.id,
+      kind: run.kind,
+      title: run.title,
+      worktreePath: run.worktreePath,
+      attached: false,
+      run,
+      targetBranch: target.branch,
+      targetSha: target.sha
+    })
+    if (lane && (lane.files.length > 0 || lane.isolationState !== 'missing')) {
+      lanes.push(lane)
+    }
+  }
+
+  let fold = foldByRepo.get(repoRoot) ?? state.fold
+  if (fold && !foldByRepo.has(repoRoot) && fold.integrationPath && (await pathExists(fold.integrationPath))) {
+    foldByRepo.set(repoRoot, fold)
+  } else if (fold && fold.integrationPath && !(await pathExists(fold.integrationPath))) {
+    fold = null
+    foldByRepo.delete(repoRoot)
+  }
+  if (fold) {
+    await refreshFoldSession(fold, target.sha)
+    foldByRepo.set(repoRoot, fold)
+  }
+
+  state.targetBranch = target.branch
+  state.targetSha = target.sha
+  state.fold = fold
+  await saveRepoIsolation(state, baseDir)
 
   return {
     lanes,
     overlaps: overlapsFromLanes(lanes),
-    fold
+    fold,
+    queue: queueFrom(lanes, fold),
+    targetBranch: target.branch,
+    targetSha: target.sha
   }
 }
 
@@ -249,35 +355,39 @@ export async function prepareFold(input: {
     throw new Error('Worktree path is not managed by Bikorch')
   }
 
-  const mainDirty = (await runGit(repoRoot, ['status', '--porcelain']).catch(() => '')).trim()
-  if (mainDirty.length > 0) {
-    throw new Error('Commit or stash changes on main before folding an agent')
-  }
-
-  await commitLaneIfDirty(input.worktreePath, input.title)
+  const target = await resolveTarget(repoRoot)
+  await commitIfDirty(input.worktreePath, input.title)
   const branch = (await currentBranch(input.worktreePath)) ?? agentBranchName(input.kind, input.panelId)
   const changed = uniqueSorted(lines(await runGit(repoRoot, ['diff', '--name-only', 'HEAD', branch]).catch(() => '')))
+  const empty = (sessionStatus: IsolationFoldSession['status'] = 'empty'): IsolationFoldSession => ({
+    id: input.panelId,
+    runId: input.panelId,
+    panelId: input.panelId,
+    kind: input.kind,
+    title: input.title,
+    branch,
+    agentWorktreePath: input.worktreePath,
+    targetBranch: target.branch,
+    baseSha: target.sha,
+    targetSha: target.sha,
+    stale: false,
+    status: sessionStatus,
+    files: [],
+    conflicts: []
+  })
+
   if (changed.length === 0) {
-    return {
-      id: input.panelId,
-      panelId: input.panelId,
-      kind: input.kind,
-      title: input.title,
-      branch,
-      agentWorktreePath: input.worktreePath,
-      status: 'empty',
-      files: [],
-      conflicts: []
-    }
+    const session = empty()
+    await persistState(repoRoot, baseDir, null, target)
+    return session
   }
 
   const existing = foldByRepo.get(repoRoot)
   if (existing) await abortFold({ projectRoot: repoRoot, baseDir })
 
-  const mainHead = (await runGit(repoRoot, ['rev-parse', 'HEAD'])).trim()
   const integrationPath = buildIntegrationWorktreePath(baseDir, repoRoot, input.panelId)
   const integrationBranch = integrationBranchName(input.panelId)
-  if (await exists(integrationPath)) {
+  if (await pathExists(integrationPath)) {
     await runGit(repoRoot, ['worktree', 'remove', '--force', integrationPath]).catch(async () => {
       await rm(integrationPath, { recursive: true, force: true })
       await runGit(repoRoot, ['worktree', 'prune']).catch(() => undefined)
@@ -285,7 +395,7 @@ export async function prepareFold(input: {
   }
   await runGit(repoRoot, ['branch', '-D', integrationBranch]).catch(() => undefined)
   await mkdir(dirname(integrationPath), { recursive: true })
-  await runGit(repoRoot, ['worktree', 'add', '-b', integrationBranch, integrationPath])
+  await runGit(repoRoot, ['worktree', 'add', '-b', integrationBranch, integrationPath, target.branch])
 
   let status: IsolationFoldSession['status'] = 'clean'
   try {
@@ -318,10 +428,11 @@ export async function prepareFold(input: {
   const files =
     status === 'conflict'
       ? conflicts.map((file) => file.path)
-      : uniqueSorted(lines(await runGit(integrationPath, ['diff', '--name-only', mainHead]).catch(() => '')))
+      : uniqueSorted(lines(await runGit(integrationPath, ['diff', '--name-only', target.sha]).catch(() => '')))
 
   const session: IsolationFoldSession = {
     id: input.panelId,
+    runId: input.panelId,
     panelId: input.panelId,
     kind: input.kind,
     title: input.title,
@@ -329,29 +440,63 @@ export async function prepareFold(input: {
     agentWorktreePath: input.worktreePath,
     integrationPath,
     integrationBranch,
+    targetBranch: target.branch,
+    baseSha: target.sha,
+    targetSha: target.sha,
+    stale: false,
     status,
     files: files.length > 0 ? files : changed,
     conflicts
   }
   foldByRepo.set(repoRoot, session)
+  const state = await loadRepoIsolation(repoRoot, baseDir)
+  upsertAgentRun(state, {
+    id: input.panelId,
+    kind: input.kind,
+    title: input.title,
+    branch,
+    worktreePath: input.worktreePath,
+    targetBranch: target.branch,
+    baseSha: target.sha,
+    isolationPolicy: 'isolated',
+    status: status === 'conflict' ? 'conflict' : 'queued',
+    attachedPanelId: input.panelId,
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  })
+  state.targetBranch = target.branch
+  state.targetSha = target.sha
+  state.fold = session
+  await saveRepoIsolation(state, baseDir)
   return session
 }
 
-export async function acceptFold(input: {
+export async function syncFold(input: {
   projectRoot: string
   baseDir?: string
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+}): Promise<IsolationFoldSession> {
   const repoRoot = await resolveRepoRoot(input.projectRoot)
-  const session = foldByRepo.get(repoRoot)
-  if (!session || !session.integrationPath || !session.integrationBranch) {
-    return { ok: false, error: 'Nothing to accept' }
+  const session = foldByRepo.get(repoRoot) ?? (await loadRepoIsolation(repoRoot, worktreeBaseDir(input.baseDir))).fold
+  if (!session) {
+    throw new Error('Nothing to sync')
   }
+  return prepareFold({
+    projectRoot: repoRoot,
+    panelId: session.panelId,
+    kind: session.kind,
+    title: session.title,
+    worktreePath: session.agentWorktreePath,
+    baseDir: input.baseDir
+  })
+}
 
+async function finishIntegrationMerge(session: IsolationFoldSession): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!session.integrationPath) return { ok: false, error: 'Nothing to accept' }
   if (session.status === 'conflict' || (await mergeHeadPresent(session.integrationPath))) {
     await stageResolvedConflicts(session.integrationPath)
     const still = await listUnmerged(session.integrationPath)
     if (still.length > 0) {
-      await refreshFoldSession(session)
+      await refreshFoldSession(session, session.targetSha)
       return { ok: false, error: `${still.length} conflicted file${still.length === 1 ? '' : 's'} remain` }
     }
     if (await mergeHeadPresent(session.integrationPath)) {
@@ -373,22 +518,66 @@ export async function acceptFold(input: {
           'user.name=Bikorch',
           'commit',
           '-m',
-          `bikorch: resolve ${session.title}`
+          foldCommitMessage(session.title)
         ])
       }
     }
   }
+  return { ok: true }
+}
 
-  const mainDirty = (await runGit(repoRoot, ['status', '--porcelain']).catch(() => '')).trim()
-  if (mainDirty.length > 0) {
-    return { ok: false, error: 'Commit or stash changes on main before accepting' }
+export async function acceptFold(input: {
+  projectRoot: string
+  baseDir?: string
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const repoRoot = await resolveRepoRoot(input.projectRoot)
+  const baseDir = worktreeBaseDir(input.baseDir)
+  const session = foldByRepo.get(repoRoot) ?? (await loadRepoIsolation(repoRoot, baseDir)).fold
+  if (!session || !session.integrationPath || !session.integrationBranch) {
+    return { ok: false, error: 'Nothing to accept' }
+  }
+  foldByRepo.set(repoRoot, session)
+
+  const liveSha = await headSha(repoRoot)
+  markStale(session, liveSha)
+  if (session.stale) {
+    await persistState(repoRoot, baseDir, session)
+    return { ok: false, error: `Target ${session.targetBranch} moved since this review. Sync before accepting.` }
+  }
+
+  const onTarget = (await currentBranch(repoRoot)) ?? 'main'
+  if (onTarget !== session.targetBranch) {
+    return { ok: false, error: `Switch to ${session.targetBranch} before accepting` }
+  }
+
+  const finished = await finishIntegrationMerge(session)
+  if (!finished.ok) return finished
+
+  if (await isWorkingTreeDirty(repoRoot)) {
+    return { ok: false, error: 'Commit or stash changes on the target branch before accepting' }
   }
 
   try {
-    await runGit(repoRoot, ['merge', '--no-edit', session.integrationBranch])
+    await runGit(repoRoot, ['merge', '--squash', session.integrationBranch])
+    if (await isWorkingTreeDirty(repoRoot)) {
+      const message = foldCommitMessage(session.title)
+      try {
+        await runGit(repoRoot, ['commit', '-m', message])
+      } catch {
+        await runGit(repoRoot, [
+          '-c',
+          'user.email=bikorch@local',
+          '-c',
+          'user.name=Bikorch',
+          'commit',
+          '-m',
+          message
+        ])
+      }
+    }
   } catch (error) {
-    await runGit(repoRoot, ['merge', '--abort']).catch(() => undefined)
-    return { ok: false, error: error instanceof Error ? error.message : 'Merge into main failed' }
+    await runGit(repoRoot, ['reset', '--merge']).catch(() => undefined)
+    return { ok: false, error: error instanceof Error ? error.message : 'Squash into target failed' }
   }
 
   await abortFold({ projectRoot: repoRoot, baseDir: input.baseDir })
@@ -400,8 +589,8 @@ export async function abortFold(input: {
   baseDir?: string
 }): Promise<{ ok: true }> {
   const repoRoot = await resolveRepoRoot(input.projectRoot)
-  const session = foldByRepo.get(repoRoot)
   const baseDir = worktreeBaseDir(input.baseDir)
+  const session = foldByRepo.get(repoRoot) ?? (await loadRepoIsolation(repoRoot, baseDir)).fold
   if (session?.integrationPath && isManagedWorktreePath(baseDir, session.integrationPath)) {
     await runGit(session.integrationPath, ['merge', '--abort']).catch(() => undefined)
     await runGit(repoRoot, ['worktree', 'remove', '--force', session.integrationPath]).catch(async () => {
@@ -413,15 +602,18 @@ export async function abortFold(input: {
     await runGit(repoRoot, ['branch', '-D', session.integrationBranch]).catch(() => undefined)
   }
   foldByRepo.delete(repoRoot)
+  await persistState(repoRoot, baseDir, null)
   return { ok: true }
 }
 
 export async function foldFileDiff(input: {
   projectRoot: string
   filePath: string
+  baseDir?: string
 }): Promise<GitDiffResponse> {
   const repoRoot = await resolveRepoRoot(input.projectRoot)
-  const session = foldByRepo.get(repoRoot)
+  const session =
+    foldByRepo.get(repoRoot) ?? (await loadRepoIsolation(repoRoot, worktreeBaseDir(input.baseDir))).fold
   if (!session?.integrationPath) {
     throw new Error('Nothing to review')
   }
@@ -450,4 +642,5 @@ export function getFold(projectRoot: string): IsolationFoldSession | null {
 
 export function clearFoldSessions(): void {
   foldByRepo.clear()
+  clearRepoIsolationMemory()
 }
