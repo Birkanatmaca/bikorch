@@ -1,5 +1,6 @@
 import type { ITheme, ITerminalOptions } from '@xterm/xterm'
 import type { PtyKind } from '@shared/contracts/pty'
+import { currentResourceLimits } from '@renderer/lib/resource-limits'
 
 export const TERMINAL_THEME: ITheme = {
   background: '#0D0F12',
@@ -39,7 +40,6 @@ const BASE_TERMINAL_OPTIONS: ITerminalOptions = {
   theme: TERMINAL_THEME,
   allowProposedApi: true,
   drawBoldTextInBrightColors: true,
-  scrollback: 8000,
   smoothScrollDuration: 0,
   overviewRulerWidth: 0,
   rescaleOverlappingGlyphs: true,
@@ -54,6 +54,16 @@ export const TERMINAL_OPTIONS: ITerminalOptions = {
 }
 
 export function getTerminalOptions(kind: PtyKind): ITerminalOptions {
+  const limits = currentResourceLimits()
+  const scrollback =
+    kind === 'cursor' ||
+    kind === 'claude' ||
+    kind === 'gemini' ||
+    kind === 'antigravity' ||
+    kind === 'codex'
+      ? limits.cliTerminalScrollback
+      : limits.terminalScrollback
+
   if (
     kind === 'cursor' ||
     kind === 'claude' ||
@@ -64,9 +74,13 @@ export function getTerminalOptions(kind: PtyKind): ITerminalOptions {
     return {
       ...BASE_TERMINAL_OPTIONS,
       fontSize: 12,
-      lineHeight: 1
+      lineHeight: 1,
+      scrollback
     }
   }
 
-  return TERMINAL_OPTIONS
+  return {
+    ...TERMINAL_OPTIONS,
+    scrollback
+  }
 }

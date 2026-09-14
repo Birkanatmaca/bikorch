@@ -53,9 +53,12 @@ function clipSide(text: string): string {
 }
 
 function compactSides(file: IsolationConflictFile): string {
+  const currentTarget = file.currentTarget ?? file.main
+  const incoming = file.incoming ?? file.agent
   const parts: string[] = []
-  if (file.main) parts.push(`MAIN\n${clipSide(file.main)}`)
-  if (file.agent) parts.push(`YOUR BRANCH\n${clipSide(file.agent)}`)
+  if (file.base) parts.push(`BASE\n${clipSide(file.base)}`)
+  if (currentTarget) parts.push(`CURRENT TARGET\n${clipSide(currentTarget)}`)
+  if (incoming) parts.push(`INCOMING AGENT CHANGE\n${clipSide(incoming)}`)
   return parts.join('\n\n')
 }
 
@@ -64,6 +67,7 @@ export function buildConflictResolvePrompt(input: {
   resolverLabel: string
   otherLabels: string[]
   files: IsolationConflictFile[]
+  integrationPath?: string
 }): string {
   const others = input.otherLabels.length > 0 ? input.otherLabels.join(', ') : 'the other agent'
   const blocks = input.files.map((file) => {
@@ -80,13 +84,16 @@ export function buildConflictResolvePrompt(input: {
     `Task: ${input.task}`,
     '',
     `Conflict between ${input.resolverLabel} and ${others}.`,
-    '',
+    ...(input.integrationPath ? [`Working directory: ${input.integrationPath}`, ''] : ['']),
     ...blocks,
     '',
     'Instructions:',
-    'Resolve the merge conflict while preserving both intended changes.',
+    'You are in the integration worktree. Resolve the merge conflict in place.',
+    'Sides are labeled BASE, CURRENT TARGET, and INCOMING AGENT CHANGE.',
+    'Preserve both intended changes.',
     'Edit only the conflicted files listed above (use the absolute paths).',
     'Do not modify unrelated files.',
-    'Leave the files without conflict markers when you are done.'
+    'Leave the files without conflict markers when you are done.',
+    'Do not commit. Leave the resolution uncommitted for review.'
   ].join('\n')
 }

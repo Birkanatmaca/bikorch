@@ -297,7 +297,14 @@ export function PanelShell({
     }
     return 'isolated'
   })
-  const canIsolate = (AGENT_WORKTREE_KINDS as readonly string[]).includes(type)
+  const panelRole = useWorkspaceStore((state) => {
+    for (const workspace of Object.values(state.workspaces)) {
+      const panel = workspace.panels.find((candidate) => candidate.id === id)
+      if (panel) return panel.panelRole ?? 'agent'
+    }
+    return 'agent'
+  })
+  const canIsolate = (AGENT_WORKTREE_KINDS as readonly string[]).includes(type) && panelRole !== 'resolver'
   const terminalRunning = Boolean(status && status !== 'stopped' && status !== 'error')
   const account = accountKind
     ? accountId
@@ -430,6 +437,11 @@ export function PanelShell({
             </div>
           )}
           <div className="panel-header-actions flex shrink-0 items-center gap-1">
+            {panelRole === 'resolver' && (
+              <span className="iso-mode-chip is-shared" title="This session edits the integration worktree">
+                Integration
+              </span>
+            )}
             {canIsolate && (
               <button
                 type="button"
@@ -437,10 +449,10 @@ export function PanelShell({
                 aria-pressed={isolationMode === 'isolated'}
                 title={
                   terminalRunning
-                    ? 'Applies on next launch'
+                    ? 'Policy applies on next launch. Existing agent work stays parked.'
                     : isolationMode === 'isolated'
-                      ? 'Using an isolated copy'
-                      : 'Editing the main project tree'
+                      ? 'Policy: isolated copy'
+                      : 'Policy: main project tree'
                 }
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={() => {

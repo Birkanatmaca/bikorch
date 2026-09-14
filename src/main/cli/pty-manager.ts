@@ -20,6 +20,7 @@ import { logoutAntigravityCli } from '../accounts/antigravity-logout'
 import { markAntigravitySessionAccount } from '../accounts/antigravity-credential'
 import { recordLog } from '../logs'
 import { ptyHostClient } from './pty-host/client'
+import { appendOutputBuffer } from './pty-host/session-store'
 
 interface PtySession {
   id: string
@@ -33,14 +34,27 @@ interface PtySession {
   status: PtySessionStatus
   cols: number
   rows: number
-  outputBuffer: string
+  /** In-process fallback only. Durable sessions replay from the PTY host. */
+  outputBuffer?: string
 }
 
 const OUTPUT_BUFFER_LIMIT = 120_000
+const HOST_RELEASE_MS = 8_000
 
 class PtyManager {
   private sessions = new Map<string, PtySession>()
   private hostEventsBound = false
+  private hostReleaseTimer: ReturnType<typeof setTimeout> | null = null
+
+  runtimeStats(): { bound: number; durable: number; inProcess: number } {
+    let durable = 0
+    let inProcess = 0
+    for (const session of this.sessions.values()) {
+      if (session.durable) durable += 1
+      else inProcess += 1
+    }
+    return { bound: this.sessions.size, durable, inProcess }
+  }
 
   async create(request: PtyCreateRequest, webContents: WebContents): Promise<PtyCreateResponse> {
     this.bindHostEvents()
@@ -67,13 +81,11 @@ class PtyManager {
       if (!session?.durable) return
 
       if (event.type === 'data') {
-        session.outputBuffer = `${session.outputBuffer}${event.data}`.slice(-OUTPUT_BUFFER_LIMIT)
         this.emit(session.webContents, { type: 'data', sessionId: event.sessionId, data: event.data })
         return
       }
       if (event.type === 'exit') {
-        session.status = 'stopped'
-        session.process = null
+        this.sessions.delete(event.sessionId)
         this.emit(session.webContents, {
           type: 'exit',
           sessionId: event.sessionId,
@@ -84,6 +96,7 @@ class PtyManager {
           sessionId: event.sessionId,
           status: 'stopped'
         })
+        this.scheduleHostRelease()
         return
       }
       if (event.type === 'status') {
@@ -121,18 +134,36 @@ class PtyManager {
           existing.rows = nextRows
           void ptyHostClient.resize(sessionId, nextCols, nextRows)
         }
-      } else if (existing.process && (existing.cols !== nextCols || existing.rows !== nextRows)) {
-        this.resize(sessionId, nextCols, nextRows)
+        const connected = await ptyHostClient.ensureConnected()
+        if (connected) {
+          try {
+            const replay = await ptyHostClient.replay(sessionId)
+            this.emit(webContents, { type: 'status', sessionId, status: existing.status, kind })
+            if (replay.outputBuffer) {
+              this.emit(webContents, { type: 'data', sessionId, data: replay.outputBuffer })
+            }
+            recordLog('debug', `${getKindLabel(kind)} session reattached (${sessionId})`, 'pty')
+            return { sessionId, status: existing.status, reattached: true }
+          } catch {
+            this.sessions.delete(sessionId)
+          }
+        } else {
+          this.sessions.delete(sessionId)
+        }
+      } else {
+        if (existing.process && (existing.cols !== nextCols || existing.rows !== nextRows)) {
+          this.resize(sessionId, nextCols, nextRows)
+        }
+        this.emit(webContents, { type: 'status', sessionId, status: existing.status, kind })
+        if (existing.outputBuffer) {
+          this.emit(webContents, { type: 'data', sessionId, data: existing.outputBuffer })
+        }
+        recordLog('debug', `${getKindLabel(kind)} session reattached (${sessionId})`, 'pty')
+        return { sessionId, status: existing.status, reattached: true }
       }
-      this.emit(webContents, { type: 'status', sessionId, status: existing.status, kind })
-      if (existing.outputBuffer) {
-        this.emit(webContents, { type: 'data', sessionId, data: existing.outputBuffer })
-      }
-      recordLog('debug', `${getKindLabel(kind)} session reattached (${sessionId})`, 'pty')
-      return { sessionId, status: existing.status, reattached: true }
     }
 
-    if (existing) {
+    if (this.sessions.has(sessionId)) {
       this.kill(sessionId)
     }
 
@@ -260,13 +291,13 @@ class PtyManager {
             webContents,
             status: hosted.status === 'stopped' ? 'stopped' : 'running',
             cols: safeCols,
-            rows: safeRows,
-            outputBuffer: hosted.outputBuffer ?? ''
+            rows: safeRows
           }
           this.sessions.set(sessionId, session)
+          this.clearHostRelease()
           this.emit(webContents, { type: 'status', sessionId, status: session.status })
-          if (session.outputBuffer) {
-            this.emit(webContents, { type: 'data', sessionId, data: session.outputBuffer })
+          if (hosted.outputBuffer) {
+            this.emit(webContents, { type: 'data', sessionId, data: hosted.outputBuffer })
           }
           if (kind === 'antigravity') {
             markAntigravitySessionAccount(request.accountId ?? null)
@@ -313,15 +344,14 @@ class PtyManager {
         recordLog('info', `${getKindLabel(kind)} session started (${sessionId})`, 'pty')
 
         shellProcess.onData((data) => {
-          session.outputBuffer = `${session.outputBuffer}${data}`.slice(-OUTPUT_BUFFER_LIMIT)
+          session.outputBuffer = appendOutputBuffer(session.outputBuffer ?? '', data, OUTPUT_BUFFER_LIMIT)
           this.emit(session.webContents, { type: 'data', sessionId, data })
         })
 
         shellProcess.onExit(({ exitCode }) => {
           const current = this.sessions.get(sessionId)
           if (!current || current.process !== shellProcess) return
-          current.status = 'stopped'
-          current.process = null
+          this.sessions.delete(sessionId)
           this.emit(current.webContents, { type: 'exit', sessionId, exitCode })
           this.emit(current.webContents, { type: 'status', sessionId, status: 'stopped' })
           recordLog(
@@ -391,6 +421,7 @@ class PtyManager {
     this.sessions.delete(sessionId)
     if (session.durable) {
       void ptyHostClient.kill(sessionId)
+      this.scheduleHostRelease()
       return
     }
     if (!session.process) return
@@ -425,6 +456,7 @@ class PtyManager {
    * sessions running so the next launch can reattach.
    */
   releaseForAppQuit(): void {
+    this.clearHostRelease()
     for (const [sessionId, session] of [...this.sessions.entries()]) {
       if (session.durable) {
         this.sessions.delete(sessionId)
@@ -434,6 +466,32 @@ class PtyManager {
     }
     ptyHostClient.disconnect()
     recordLog('info', 'Released durable PTY sessions for app quit/update', 'pty')
+  }
+
+  private hasDurableSessions(): boolean {
+    for (const session of this.sessions.values()) {
+      if (session.durable) return true
+    }
+    return false
+  }
+
+  private scheduleHostRelease(): void {
+    if (this.hasDurableSessions()) {
+      this.clearHostRelease()
+      return
+    }
+    this.clearHostRelease()
+    this.hostReleaseTimer = setTimeout(() => {
+      this.hostReleaseTimer = null
+      if (this.hasDurableSessions()) return
+      ptyHostClient.disconnect()
+    }, HOST_RELEASE_MS)
+  }
+
+  private clearHostRelease(): void {
+    if (!this.hostReleaseTimer) return
+    clearTimeout(this.hostReleaseTimer)
+    this.hostReleaseTimer = null
   }
 
   private emit(webContents: WebContents, event: PtyEvent): void {

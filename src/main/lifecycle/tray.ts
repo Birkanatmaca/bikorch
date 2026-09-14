@@ -9,10 +9,14 @@ function applyLoginItemSettings(enabled: boolean): void {
   // Packaged Linux autostart uses a desktop-entry file, handled by the
   // installer; app.setLoginItemSettings only applies to macOS/Windows.
   if (process.platform === 'linux') return
-  app.setLoginItemSettings({
-    openAtLogin: enabled,
-    ...(enabled ? { args: ['--background'] } : {})
-  })
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: enabled,
+      ...(enabled ? { args: ['--background'] } : {})
+    })
+  } catch (error) {
+    console.error('[automation] failed to update login item settings:', error)
+  }
 }
 
 function statusLabel(): string {
@@ -41,7 +45,11 @@ function buildMenu(): Menu {
       type: 'checkbox',
       checked: settings?.backgroundMode ?? false,
       click: (item) => {
-        updateAutomationSettings({ backgroundMode: item.checked })
+        try {
+          updateAutomationSettings({ backgroundMode: item.checked })
+        } catch (error) {
+          console.error('[automation] failed to update background mode:', error)
+        }
         refreshTrayMenu()
       }
     },
@@ -50,8 +58,12 @@ function buildMenu(): Menu {
       type: 'checkbox',
       checked: settings?.startAtLogin ?? false,
       click: (item) => {
-        updateAutomationSettings({ startAtLogin: item.checked })
-        applyLoginItemSettings(item.checked)
+        try {
+          updateAutomationSettings({ startAtLogin: item.checked })
+          applyLoginItemSettings(item.checked)
+        } catch (error) {
+          console.error('[automation] failed to update start-at-login:', error)
+        }
         refreshTrayMenu()
       }
     },

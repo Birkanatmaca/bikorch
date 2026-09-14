@@ -5,6 +5,7 @@ import CssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker'
 import HtmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker'
 import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
 import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
+import { markMonacoLoaded } from '@renderer/lib/monaco-status'
 
 const globalScope = globalThis as typeof globalThis & {
   MonacoEnvironment?: {
@@ -23,3 +24,4 @@ globalScope.MonacoEnvironment = {
 }
 
 loader.config({ monaco })
+markMonacoLoaded()

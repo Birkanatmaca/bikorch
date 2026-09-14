@@ -2,6 +2,8 @@ import { Component, type ErrorInfo, type ReactNode } from 'react'
 
 interface Props {
   children: ReactNode
+  /** section = recover in place. app = reload the workspace window. */
+  variant?: 'app' | 'section'
 }
 
 interface State {
@@ -19,6 +21,14 @@ export class ErrorBoundary extends Component<Props, State> {
     console.error('Renderer error:', error, info.componentStack)
   }
 
+  private recover = (): void => {
+    if (this.props.variant === 'section') {
+      this.setState({ error: null })
+      return
+    }
+    window.location.reload()
+  }
+
   render(): ReactNode {
     if (this.state.error) {
       return (
@@ -27,10 +37,10 @@ export class ErrorBoundary extends Component<Props, State> {
           <p className="max-w-md font-mono text-xs text-text-muted">{this.state.error.message}</p>
           <button
             type="button"
-            onClick={() => window.location.reload()}
+            onClick={this.recover}
             className="rounded-md border border-border px-3 py-1.5 text-xs text-text-secondary hover:bg-hover"
           >
-            Reload
+            {this.props.variant === 'section' ? 'Try again' : 'Reload'}
           </button>
         </div>
       )

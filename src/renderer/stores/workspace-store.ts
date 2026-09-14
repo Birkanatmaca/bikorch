@@ -81,12 +81,18 @@ function releasePanelIsolation(panel: PanelDefinition, projectRoot: string | nul
       }
       await window.api.pty.kill({ sessionId: panel.id })
       if (
+        panel.panelRole !== 'resolver' &&
         panel.worktreePath &&
         projectRoot &&
         AGENT_WORKTREE_TYPES.has(panel.type) &&
         window.api.git?.removeWorktree
       ) {
-        await window.api.git.removeWorktree({ projectRoot, worktreePath: panel.worktreePath })
+        await window.api.git.removeWorktree({
+          projectRoot,
+          worktreePath: panel.worktreePath,
+          title: panel.title,
+          mode: 'park'
+        })
       }
     })()
     return
@@ -167,8 +173,16 @@ interface WorkspaceStore extends WorkspaceSnapshot {
     rect?: OrchestratorRect,
     launchMode?: 'normal' | 'login',
     accountId?: string,
-    titleOverride?: string
+    titleOverride?: string,
+    options?: {
+      id?: string
+      panelRole?: 'agent' | 'resolver'
+      cwdOverride?: string
+      workspaceIsolation?: WorkspaceIsolation
+    }
   ) => string
+  openResolverPanel: (kind: PanelType, title: string, cwdOverride: string) => string
+  reopenAgentRun: (runId: string, kind: PanelType, title: string) => string
   renamePanel: (panelId: string, title: string) => void
   removePanel: (panelId: string) => void
   removePanelsForAccount: (kind: CliUsageKind, accountId: string) => void
@@ -419,7 +433,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     return get().addPanel('timer', 'center')
   },
 
-  addPanel: (type, zone, rect, launchMode, accountId, titleOverride) => {
+  addPanel: (type, zone, rect, launchMode, accountId, titleOverride, options) => {
     const { activeProjectId, workspaces } = get()
     if (!activeProjectId) return ''
 
@@ -429,6 +443,14 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     if (type === 'tasks') {
       get().selectLeftSidebar(activeProjectId, 'tasks')
       return ''
+    }
+
+    if (options?.id) {
+      const existing = workspace.panels.find((panel) => panel.id === options.id)
+      if (existing) {
+        window.dispatchEvent(new CustomEvent('bikorch:focus-panel', { detail: existing.id }))
+        return existing.id
+      }
     }
 
     if (isFloatingWidget(type) || isWebChatPanel(type)) {
@@ -460,14 +482,20 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         )?.id
       : undefined
     const panelAccountId = accountId ?? defaultAccountId
+    const isolation =
+      options?.workspaceIsolation ??
+      (AGENT_WORKTREE_TYPES.has(type) ? ('isolated' as const) : undefined)
     const newPanel: PanelDefinition = {
-      id: uuidv4(),
+      id: options?.id ?? uuidv4(),
       type,
       title: titleOverride?.trim() || getNextPanelTitle(type, workspace.panels),
       zone: targetZone,
       ...(launchMode === 'login' ? { launchMode: 'login' as const } : {}),
       ...(panelAccountId ? { accountId: panelAccountId } : {}),
-      ...(AGENT_WORKTREE_TYPES.has(type) ? { workspaceIsolation: 'isolated' as const } : {})
+      ...(isolation ? { workspaceIsolation: isolation } : {}),
+      ...(options?.panelRole ? { panelRole: options.panelRole } : {}),
+      ...(options?.cwdOverride ? { cwdOverride: options.cwdOverride } : {}),
+      ...(options?.id && AGENT_WORKTREE_TYPES.has(type) ? { agentRunId: options.id } : {})
     }
 
     const panels = [...workspace.panels, newPanel]
@@ -541,6 +569,32 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     })
 
     return newPanel.id
+  },
+
+  openResolverPanel: (kind, title, cwdOverride) => {
+    const { activeProjectId, workspaces } = get()
+    if (!activeProjectId) return ''
+    const workspace = workspaces[activeProjectId]
+    const existing = workspace?.panels.find(
+      (panel) => panel.panelRole === 'resolver' && panel.cwdOverride === cwdOverride
+    )
+    if (existing) {
+      window.dispatchEvent(new CustomEvent('bikorch:focus-panel', { detail: existing.id }))
+      return existing.id
+    }
+    return get().addPanel(kind, 'center', undefined, undefined, undefined, title, {
+      panelRole: 'resolver',
+      cwdOverride,
+      workspaceIsolation: 'shared'
+    })
+  },
+
+  reopenAgentRun: (runId, kind, title) => {
+    return get().addPanel(kind, 'center', undefined, undefined, undefined, title, {
+      id: runId,
+      panelRole: 'agent',
+      workspaceIsolation: 'isolated'
+    })
   },
 
   renamePanel: (panelId, title) => {
@@ -1025,7 +1079,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     const panels = sanitizeWorkspacePanels(workspace.panels)
     const wideSidebarSize = 24
     const nextLeftSize =
-      view === 'accounts' || view === 'profile'
+      view === 'accounts' || view === 'profile' || view === 'automation'
         ? Math.max(workspace.layout.leftSize ?? 14, wideSidebarSize)
         : workspace.layout.leftSize
     set({
@@ -1038,7 +1092,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
             ...workspace.layout,
             leftCollapsed: false,
             leftSidebarView: view,
-            ...((view === 'accounts' || view === 'profile') && nextLeftSize !== workspace.layout.leftSize
+            ...((view === 'accounts' || view === 'profile' || view === 'automation') &&
+            nextLeftSize !== workspace.layout.leftSize
               ? { leftSize: nextLeftSize }
               : {})
           }

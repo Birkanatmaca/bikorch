@@ -43,7 +43,11 @@
       "category": "public.app-category.developer-tools",
       "target": [
         "dmg"
-      ]
+      ],
+      "extendInfo": {
+        "NSUserNotificationsUsageDescription": "Bikorch notifies you when a CLI task finishes or fails.",
+        "NSUserNotificationAlertStyle": "banner"
+      }
     },
     "dmg": {
       "artifactName": "Bikorch.dmg",

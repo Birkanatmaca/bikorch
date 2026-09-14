@@ -2,20 +2,18 @@ import { app, BrowserWindow, session, shell } from 'electron'
 import { join } from 'path'
 import { ptyManager } from './cli/pty-manager'
 import { loadUserShellEnv } from './cli/shell-env'
-import { ptyHostClient } from './cli/pty-host/client'
 import { registerIpcHandlers } from './ipc'
 import { watchWindowChrome } from './ipc/window'
 import { installConsoleCapture, recordRendererConsole } from './logs'
-import {
-  closePersistenceDatabase,
-  initPersistenceDatabase
-} from './persistence/database'
+import { closePersistenceDatabase, initPersistenceDatabase } from './persistence/database'
+import { loadResourceProfile } from './resources/settings'
 import { APP_DISPLAY_NAME, applyAppBranding, resolveAppIconPath } from './app-branding'
 import { initDeveloperIntelligence } from './developer-intelligence/service'
 import { registerMusicSchemes, registerMusicProtocol } from './music/protocol'
 import { initMusic } from './music/service'
 import { disposeDownloadManager, initDownloadManager } from './music/downloader/service'
 import { disposeAutomationService, getAutomationSettings, initAutomationService } from './automation/service'
+import { reconcilePersistedProjects } from './git/reconcile'
 import {
   acquireSingleInstanceLock,
   isAppQuitting,
@@ -23,6 +21,7 @@ import {
   watchPowerEvents
 } from './lifecycle/background'
 import { disposeTray, initTray } from './lifecycle/tray'
+import { closeAllNotifications } from './notifications'
 
 const isDev = !app.isPackaged
 const isBackgroundStart = process.argv.includes('--background')
@@ -120,14 +119,22 @@ app.whenReady().then(async () => {
   applyAppBranding()
   // Dock/Finder launches miss the user's shell PATH; load it before any PTY spawn.
   loadUserShellEnv()
-  // Durable PTY host keeps CLI sessions alive across app updates/restarts.
-  void ptyHostClient.ensureConnected()
+  // PTY host is spawned on first terminal/CLI open (and reconnects if a durable
+  // host is already alive). Do not pay for a host process at startup.
   try {
     await initPersistenceDatabase()
+    loadResourceProfile()
     initDeveloperIntelligence()
     initMusic()
     await initDownloadManager()
-    initAutomationService()
+    try {
+      initAutomationService()
+    } catch (error) {
+      console.error('Automation service failed to start:', error)
+    }
+    void reconcilePersistedProjects().catch((error) => {
+      console.error('Agent run reconcile failed:', error)
+    })
   } catch (error) {
     console.error('Persistence init failed, continuing without database:', error)
   }
@@ -165,6 +172,7 @@ app.on('before-quit', () => {
   disposeAutomationService()
   disposeTray()
   disposeDownloadManager()
+  closeAllNotifications()
   // Keep durable host sessions alive so updates/restarts can reattach.
   ptyManager.releaseForAppQuit()
   closePersistenceDatabase()

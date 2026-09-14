@@ -61,7 +61,12 @@ class CronParserScheduleCalculator implements ScheduleCalculator {
       return schedule.anchorAt + steps * stepMs
     }
 
-    const spec = toCronSpec(schedule)
+    let spec: { expression: string; timeZone: string } | null = null
+    try {
+      spec = toCronSpec(schedule)
+    } catch {
+      return null
+    }
     if (!spec) return null
     try {
       const interval = CronExpressionParser.parse(spec.expression, {
@@ -86,7 +91,12 @@ class CronParserScheduleCalculator implements ScheduleCalculator {
       return schedule.anchorAt + steps * stepMs
     }
 
-    const spec = toCronSpec(schedule)
+    let spec: { expression: string; timeZone: string } | null = null
+    try {
+      spec = toCronSpec(schedule)
+    } catch {
+      return null
+    }
     if (!spec) return null
     try {
       // `.prev()` is exclusive of `currentDate`. Add 1ms so an occurrence that

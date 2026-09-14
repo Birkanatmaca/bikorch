@@ -2,7 +2,6 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from '../App'
 import { ErrorBoundary } from '../components/ui/ErrorBoundary'
-import '../lib/monaco'
 import '../styles/globals.css'
 import '../styles/workstation.css'
 

@@ -95,8 +95,15 @@ export class AutomationScheduler {
     this.reconciling = true
     try {
       const result = reconcileOnce(this.repository, this.calculator, this.now(), this.connectivity)
-      this.onReconciled?.(result)
+      try {
+        this.onReconciled?.(result)
+      } catch (error) {
+        console.error('[automation] status update failed:', error)
+      }
       return result
+    } catch (error) {
+      console.error('[automation] reconcile failed:', error)
+      return { claimedRunAutomationIds: [] }
     } finally {
       this.reconciling = false
     }

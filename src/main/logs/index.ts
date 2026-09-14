@@ -58,7 +58,10 @@ function append(level: AppLogLevel, message: string, source: string): AppLogEntr
     message: message.slice(0, MAX_LOG_MESSAGE_LENGTH)
   }
 
-  entries = [...entries, entry].slice(-MAX_LOG_ENTRIES)
+  entries.push(entry)
+  if (entries.length > MAX_LOG_ENTRIES) {
+    entries.splice(0, entries.length - MAX_LOG_ENTRIES)
+  }
   broadcast({ type: 'entry', entry })
   return entry
 }

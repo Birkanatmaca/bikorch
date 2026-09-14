@@ -64,7 +64,13 @@ export function SidebarActivityBar({
   const musicActive = isOpen && view === 'music'
   const timerActive = isOpen && view === 'timer'
   const musicPlaying = useMusicStore((state) => state.status === 'playing')
-  const automationStatus = useAutomationStore((state) => state.status)
+  const automationStatus = useAutomationStore((state) => state.status) ?? {
+    running: 0,
+    enabled: 0,
+    waitingNetwork: 0,
+    needsAttention: 0,
+    nextRunAt: null
+  }
   const automationRunning = automationStatus.running > 0
   const automationNeedsAttention = automationStatus.needsAttention > 0
   const timerSession = useTimerStore((state) => state.session)

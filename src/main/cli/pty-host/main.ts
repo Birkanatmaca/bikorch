@@ -10,8 +10,7 @@ import {
   type PtyHostServerMessage,
   type PtyHostSpawnRequest
 } from './protocol'
-
-const OUTPUT_BUFFER_LIMIT = 120_000
+import { appendOutputBuffer, hostHasRunningSessions } from './session-store'
 
 interface HostSession {
   id: string
@@ -152,6 +151,24 @@ class PtyHostRuntime {
         socket.write(encodeMessage({ v: 1, id: message.id, type: 'ok' }))
         this.scheduleIdleExit()
         return
+      case 'replay': {
+        const session = this.sessions.get(message.payload.sessionId)
+        socket.write(
+          encodeMessage({
+            v: 1,
+            id: message.id,
+            type: 'ok',
+            payload: session
+              ? {
+                  sessionId: session.id,
+                  status: session.status,
+                  outputBuffer: session.outputBuffer
+                }
+              : { sessionId: message.payload.sessionId, status: 'stopped', outputBuffer: '' }
+          })
+        )
+        return
+      }
     }
   }
 
@@ -202,7 +219,7 @@ class PtyHostRuntime {
       this.clearIdleTimer()
 
       shellProcess.onData((data) => {
-        session.outputBuffer = `${session.outputBuffer}${data}`.slice(-OUTPUT_BUFFER_LIMIT)
+        session.outputBuffer = appendOutputBuffer(session.outputBuffer, data)
         this.broadcast({
           v: 1,
           type: 'event',
@@ -213,8 +230,7 @@ class PtyHostRuntime {
       shellProcess.onExit(({ exitCode }) => {
         const current = this.sessions.get(payload.sessionId)
         if (!current || current.process !== shellProcess) return
-        current.status = 'stopped'
-        current.process = null
+        this.sessions.delete(payload.sessionId)
         this.broadcast({
           v: 1,
           type: 'event',
@@ -263,14 +279,12 @@ class PtyHostRuntime {
     kind: string
     accountId?: string
     status: 'running' | 'stopped'
-    outputBuffer: string
   }> {
     return [...this.sessions.values()].map((session) => ({
       sessionId: session.id,
       kind: session.kind,
       ...(session.accountId ? { accountId: session.accountId } : {}),
-      status: session.status,
-      outputBuffer: session.outputBuffer
+      status: session.status
     }))
   }
 
@@ -286,10 +300,10 @@ class PtyHostRuntime {
   }
 
   private scheduleIdleExit(): void {
-    if (this.sessions.size > 0 || this.clients.size > 0) return
+    if (hostHasRunningSessions(this.sessions) || this.clients.size > 0) return
     this.clearIdleTimer()
     this.idleTimer = setTimeout(() => {
-      if (this.sessions.size > 0 || this.clients.size > 0) return
+      if (hostHasRunningSessions(this.sessions) || this.clients.size > 0) return
       this.shutdown(true)
       process.exit(0)
     }, 30_000)

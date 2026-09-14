@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { processNoticeBody, type ProcessFinishOutcome } from '@renderer/lib/project-activity'
+import type { ProcessFinishOutcome } from '@renderer/lib/project-activity'
 
 export interface ProcessNotice {
   id: string
@@ -13,7 +13,6 @@ export interface ProcessNotice {
 
 interface ActivityAttentionStore {
   attentionByProject: Record<string, ProcessNotice[]>
-  notices: ProcessNotice[]
   noteFinish: (input: {
     projectId: string
     panelId: string
@@ -22,28 +21,24 @@ interface ActivityAttentionStore {
     outcome: ProcessFinishOutcome
   }) => void
   clearProject: (projectId: string) => void
-  dismissNotice: (id: string) => void
 }
 
-const MAX_NOTICES = 4
-
 function desktopNotify(notice: ProcessNotice): void {
-  if (typeof Notification === 'undefined') return
-  const focused =
-    typeof document !== 'undefined' && document.visibilityState === 'visible' && document.hasFocus()
-  if (focused) return
-  try {
-    new Notification(processNoticeBody(notice.outcome, notice.title, notice.projectName), {
-      silent: false
+  const api = window.api?.notifications
+  if (!api?.showCliTask) return
+  void api
+    .showCliTask({
+      projectId: notice.projectId,
+      panelId: notice.panelId,
+      projectName: notice.projectName,
+      title: notice.title,
+      outcome: notice.outcome
     })
-  } catch {
-    // Renderer notification support is optional.
-  }
+    .catch(() => undefined)
 }
 
 export const useActivityAttentionStore = create<ActivityAttentionStore>((set) => ({
   attentionByProject: {},
-  notices: [],
 
   noteFinish: (input) => {
     const at = Date.now()
@@ -58,20 +53,11 @@ export const useActivityAttentionStore = create<ActivityAttentionStore>((set) =>
     }
     set((state) => {
       const existing = state.attentionByProject[input.projectId] ?? []
-      const attention = [
-        ...existing.filter((item) => item.panelId !== input.panelId),
-        notice
-      ]
-      const notices = [
-        ...state.notices.filter((item) => item.panelId !== input.panelId),
-        notice
-      ].slice(-MAX_NOTICES)
       return {
         attentionByProject: {
           ...state.attentionByProject,
-          [input.projectId]: attention
-        },
-        notices
+          [input.projectId]: [...existing.filter((item) => item.panelId !== input.panelId), notice]
+        }
       }
     })
     desktopNotify(notice)
@@ -79,20 +65,9 @@ export const useActivityAttentionStore = create<ActivityAttentionStore>((set) =>
 
   clearProject: (projectId) => {
     set((state) => {
-      if (!state.attentionByProject[projectId] && !state.notices.some((item) => item.projectId === projectId)) {
-        return state
-      }
+      if (!state.attentionByProject[projectId]) return state
       const { [projectId]: _removed, ...attentionByProject } = state.attentionByProject
-      return {
-        attentionByProject,
-        notices: state.notices.filter((item) => item.projectId !== projectId)
-      }
+      return { attentionByProject }
     })
-  },
-
-  dismissNotice: (id) => {
-    set((state) => ({
-      notices: state.notices.filter((item) => item.id !== id)
-    }))
   }
 }))

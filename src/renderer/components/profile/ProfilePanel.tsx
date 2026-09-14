@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import {
   Brain,
+  Gauge,
   History,
   LayoutDashboard,
   MessageSquareText,
@@ -21,6 +22,7 @@ import { PromptHistory } from './PromptHistory'
 import { SessionTimeline } from './SessionTimeline'
 import { MemoryManager } from './MemoryManager'
 import { PrivacySettings } from './PrivacySettings'
+import { RuntimePanel } from './RuntimePanel'
 
 const SECTIONS: Array<{ id: ProfileSection; label: string; icon: LucideIcon }> = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -28,7 +30,8 @@ const SECTIONS: Array<{ id: ProfileSection; label: string; icon: LucideIcon }> =
   { id: 'prompts', label: 'Prompts', icon: MessageSquareText },
   { id: 'sessions', label: 'Sessions', icon: History },
   { id: 'memory', label: 'Memory', icon: Brain },
-  { id: 'privacy', label: 'Privacy', icon: ShieldCheck }
+  { id: 'privacy', label: 'Privacy', icon: ShieldCheck },
+  { id: 'runtime', label: 'Runtime', icon: Gauge }
 ]
 
 const RANGE_OPTIONS: Array<{ value: MetricsRangeKey; label: string }> = [
@@ -119,6 +122,7 @@ export function ProfilePanel({ visible = true }: ProfilePanelProps): React.JSX.E
         {section === 'sessions' && <SessionTimeline />}
         {section === 'memory' && <MemoryManager />}
         {section === 'privacy' && <PrivacySettings />}
+        {section === 'runtime' && <RuntimePanel />}
       </div>
     </div>
   )

@@ -7,6 +7,12 @@ import {
   useGitStore
 } from './git-store'
 import { useWorkspaceStore } from './workspace-store'
+import { evictRecordKeys, keysToKeep, rememberRecent } from '@renderer/lib/inactive-cache'
+import {
+  resourceLimitsFor,
+  type ResourceProfile
+} from '@shared/contracts/resources'
+import { currentRendererResourceProfile } from '@renderer/lib/resource-limits'
 
 export type ReviewMode = 'diff' | 'file'
 
@@ -58,6 +64,7 @@ interface EditorStore {
   refreshDiff: (projectId: string, projectRoot: string) => Promise<void>
   ensureDiffPanel: () => void
   clearDiff: (projectId: string) => void
+  evictInactiveDiffs: (activeProjectId: string, profile?: ResourceProfile) => void
 }
 
 function toWorkspaceRelative(workspaceRoot: string, absolutePath: string): string {
@@ -68,6 +75,12 @@ function toWorkspaceRelative(workspaceRoot: string, absolutePath: string): strin
   }
   if (path.toLowerCase() === root.toLowerCase()) return ''
   return path
+}
+
+let diffRecents: string[] = []
+
+function noteDiffProject(projectId: string): void {
+  diffRecents = rememberRecent(diffRecents, projectId)
 }
 
 export const useEditorStore = create<EditorStore>((set, get) => ({
@@ -182,6 +195,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         status: change.status
       })
 
+      noteDiffProject(projectId)
       set((state) => ({
         diffContentByProject: { ...state.diffContentByProject, [projectId]: diff },
         diffLoadingByProject: { ...state.diffLoadingByProject, [projectId]: false }
@@ -221,6 +235,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
     try {
       const diff = await window.api.git.isolationDiff({ projectRoot, filePath: target })
+      noteDiffProject(projectId)
       set((state) => ({
         diffContentByProject: { ...state.diffContentByProject, [projectId]: diff },
         diffLoadingByProject: { ...state.diffLoadingByProject, [projectId]: false }
@@ -389,6 +404,17 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       diffContentByProject: { ...state.diffContentByProject, [projectId]: null },
       diffLoadingByProject: { ...state.diffLoadingByProject, [projectId]: false },
       diffErrorByProject: { ...state.diffErrorByProject, [projectId]: null }
+    }))
+  },
+
+  evictInactiveDiffs: (activeProjectId, profile) => {
+    noteDiffProject(activeProjectId)
+    const limits = resourceLimitsFor(profile ?? currentRendererResourceProfile())
+    const keep = keysToKeep(activeProjectId, diffRecents, limits.inactiveDiffCacheProjects)
+    set((state) => ({
+      diffContentByProject: evictRecordKeys(state.diffContentByProject, keep),
+      diffLoadingByProject: evictRecordKeys(state.diffLoadingByProject, keep),
+      diffErrorByProject: evictRecordKeys(state.diffErrorByProject, keep)
     }))
   }
 }))

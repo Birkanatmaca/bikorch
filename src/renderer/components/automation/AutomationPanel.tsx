@@ -109,7 +109,6 @@ function AutomationCreateForm({ onCancel }: { onCancel: () => void }): React.JSX
       onCancel()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create automation')
-    } finally {
       setSubmitting(false)
     }
   }
@@ -255,13 +254,16 @@ function AutomationCreateForm({ onCancel }: { onCancel: () => void }): React.JSX
   )
 }
 
-function AutomationCard({ automation }: { automation: AutomationDefinition }): React.JSX.Element {
+function AutomationCard({ automation }: { automation: AutomationDefinition }): React.JSX.Element | null {
   const setEnabled = useAutomationStore((state) => state.setEnabled)
   const runNow = useAutomationStore((state) => state.runNow)
   const loadRuns = useAutomationStore((state) => state.loadRuns)
-  const runs = useAutomationStore((state) => state.runsByAutomation[automation.id] ?? [])
+  const runs = useAutomationStore((state) => state.runsByAutomation[automation?.id ?? ''] ?? [])
   const [expanded, setExpanded] = useState(false)
   const [running, setRunning] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  if (!automation?.id) return null
 
   const handleToggleExpand = (): void => {
     setExpanded((value) => !value)
@@ -270,10 +272,22 @@ function AutomationCard({ automation }: { automation: AutomationDefinition }): R
 
   const handleRunNow = async (): Promise<void> => {
     setRunning(true)
+    setActionError(null)
     try {
       await runNow(automation.id)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not start this run')
     } finally {
       setRunning(false)
+    }
+  }
+
+  const handleToggleEnabled = async (): Promise<void> => {
+    setActionError(null)
+    try {
+      await setEnabled(automation.id, !automation.enabled)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not update automation')
     }
   }
 
@@ -295,7 +309,7 @@ function AutomationCard({ automation }: { automation: AutomationDefinition }): R
         </div>
         <button
           type="button"
-          onClick={() => void setEnabled(automation.id, !automation.enabled)}
+          onClick={() => void handleToggleEnabled()}
           className={cn(
             'shrink-0 rounded-md p-1.5',
             automation.enabled ? 'text-purple-200' : 'text-text-muted'
@@ -320,6 +334,8 @@ function AutomationCard({ automation }: { automation: AutomationDefinition }): R
         </button>
       </div>
 
+      {actionError ? <p className="mt-2 text-[11px] text-red-400">{actionError}</p> : null}
+
       {expanded && (
         <ul className="mt-2 space-y-1 border-t border-white/5 pt-2">
           {runs.length === 0 ? (
@@ -327,7 +343,9 @@ function AutomationCard({ automation }: { automation: AutomationDefinition }): R
           ) : (
             runs.slice(0, 6).map((run) => (
               <li key={run.id} className="flex items-center justify-between text-[11px]">
-                <span className="text-text-secondary">{RUN_STATUS_LABELS[run.status]}</span>
+                <span className="text-text-secondary">
+                  {RUN_STATUS_LABELS[run.status] ?? run.status}
+                </span>
                 <span className="text-text-muted">
                   {run.startedAt ? new Date(run.startedAt).toLocaleTimeString() : '—'}
                 </span>
@@ -345,14 +363,13 @@ export function AutomationPanel(): React.JSX.Element {
   const loaded = useAutomationStore((state) => state.loaded)
   const [creating, setCreating] = useState(false)
 
-  const sorted = useMemo(
-    () =>
-      [...definitions].sort((a, b) => {
-        if (a.enabled !== b.enabled) return a.enabled ? -1 : 1
-        return (a.nextRunAt ?? Infinity) - (b.nextRunAt ?? Infinity)
-      }),
-    [definitions]
-  )
+  const sorted = useMemo(() => {
+    if (!Array.isArray(definitions)) return []
+    return [...definitions].filter(Boolean).sort((a, b) => {
+      if (a.enabled !== b.enabled) return a.enabled ? -1 : 1
+      return (a.nextRunAt ?? Infinity) - (b.nextRunAt ?? Infinity)
+    })
+  }, [definitions])
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -390,7 +407,7 @@ export function AutomationPanel(): React.JSX.Element {
           />
         ) : (
           <div className="flex flex-col gap-2">
-            {sorted.map((automation) => (
+          {sorted.filter((automation) => automation?.id).map((automation) => (
               <AutomationCard key={automation.id} automation={automation} />
             ))}
           </div>

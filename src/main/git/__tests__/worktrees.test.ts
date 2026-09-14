@@ -68,8 +68,50 @@ describe('agent worktrees', () => {
     const removed = await removeAgentWorktree({
       projectRoot: repo,
       worktreePath: created.worktreePath,
+      mode: 'remove',
       baseDir
     })
     expect(removed.ok).toBe(true)
+  })
+
+  it('commits dirty work before removing a worktree', async () => {
+    const repo = await mkdtemp(join(tmpdir(), 'bikorch-repo-'))
+    const baseDir = await mkdtemp(join(tmpdir(), 'bikorch-wt-'))
+    trash.push(repo, baseDir)
+    await run(repo, 'git', ['init'])
+    await run(repo, 'git', ['config', 'user.email', 'test@bikorch.local'])
+    await run(repo, 'git', ['config', 'user.name', 'Bikorch Test'])
+    await writeFile(join(repo, 'README.md'), 'hello\n')
+    await run(repo, 'git', ['add', 'README.md'])
+    await run(repo, 'git', ['commit', '-m', 'init'])
+
+    const created = await ensureAgentWorktree({
+      projectRoot: repo,
+      kind: 'cursor',
+      panelId: 'b1b2c3d4-e5f6-7890-abcd-ef1234567890',
+      title: 'Cursor CLI',
+      baseDir
+    })
+    if (!created.ok || !created.worktreePath || !created.branch) throw new Error('expected worktree')
+    await writeFile(join(created.worktreePath, 'kept.ts'), 'export const kept = true\n')
+    const removed = await removeAgentWorktree({
+      projectRoot: repo,
+      worktreePath: created.worktreePath,
+      title: 'Cursor CLI',
+      mode: 'remove',
+      baseDir
+    })
+    expect(removed.ok).toBe(true)
+    const shown = await run(repo, 'git', ['show', `${created.branch}:kept.ts`])
+    expect(shown).toContain('kept = true')
+    const parked = await ensureAgentWorktree({
+      projectRoot: repo,
+      kind: 'cursor',
+      panelId: 'b1b2c3d4-e5f6-7890-abcd-ef1234567890',
+      title: 'Cursor CLI',
+      baseDir
+    })
+    if (!parked.ok || !parked.worktreePath) throw new Error('expected restored worktree')
+    expect(await run(parked.worktreePath, 'git', ['show', 'HEAD:kept.ts'])).toContain('kept = true')
   })
 })

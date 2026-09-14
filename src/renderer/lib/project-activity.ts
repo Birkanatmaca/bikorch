@@ -1,4 +1,5 @@
 import type { PtyKind, PtySessionStatus } from '@shared/contracts/pty'
+import { cliTaskNotificationCopy } from '@shared/contracts/notifications'
 import { isCliKind } from '@renderer/lib/cli-activity'
 import { type PanelDefinition, type PanelType, type ProjectWorkspaceState } from '@shared/types'
 
@@ -96,8 +97,7 @@ export function summarizeProjectTabActivity(input: {
 }
 
 export function processNoticeBody(outcome: ProcessFinishOutcome, title: string, projectName: string): string {
-  const verb = outcome === 'error' ? 'failed' : 'finished'
-  return `${title} ${verb} in ${projectName}`
+  return cliTaskNotificationCopy({ title, projectName, outcome }).body
 }
 
 function latestAttention(attention: ProcessAttention[]): ProcessAttention | null {

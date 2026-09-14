@@ -1,4 +1,5 @@
 import { createHash } from 'crypto'
+import { existsSync, realpathSync } from 'fs'
 import { isAbsolute, join, relative, resolve } from 'path'
 import { AGENT_WORKTREE_KINDS, type AgentWorktreeKind } from '@shared/contracts/git'
 
@@ -6,8 +7,16 @@ export function isAgentWorktreeKind(value: string): value is AgentWorktreeKind {
   return (AGENT_WORKTREE_KINDS as readonly string[]).includes(value)
 }
 
+export function canonicalRepoRoot(repoRoot: string): string {
+  try {
+    return existsSync(repoRoot) ? realpathSync(repoRoot) : resolve(repoRoot)
+  } catch {
+    return resolve(repoRoot)
+  }
+}
+
 export function hashRepoRoot(repoRoot: string): string {
-  return createHash('sha1').update(resolve(repoRoot)).digest('hex').slice(0, 12)
+  return createHash('sha1').update(canonicalRepoRoot(repoRoot)).digest('hex').slice(0, 12)
 }
 
 export function sanitizeWorktreeSlot(kind: string, panelId: string): string {

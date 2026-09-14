@@ -1,9 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, lazy, Suspense } from 'react'
 import { AppWindowEdge } from '@renderer/components/layout/AppWindowEdge'
 import { AppHeader } from '@renderer/components/layout/AppHeader'
 import { StatusBar } from '@renderer/components/layout/StatusBar'
 import { WorkspaceLayout } from '@renderer/components/layout/WorkspaceLayout'
-import { IdeOverlay } from '@renderer/components/ide/IdeOverlay'
 import { WelcomeScreen } from '@renderer/components/welcome/WelcomeScreen'
 import { CommandPalette } from '@renderer/components/command/CommandPalette'
 import { ErrorBoundary } from '@renderer/components/ui/ErrorBoundary'
@@ -14,15 +13,20 @@ import { useOpenProject } from '@renderer/hooks/use-open-project'
 import { usePersistenceBootstrap } from '@renderer/hooks/use-persistence-bootstrap'
 import { startUsageSync } from '@renderer/lib/usage-sync'
 import { startPtyActivityWatch } from '@renderer/lib/pty-activity-watch'
-import { ProcessNoticeBar } from '@renderer/components/layout/ProcessNoticeBar'
+import { startResourcePolicies } from '@renderer/lib/resource-policies'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import { useMusicStore } from '@renderer/stores/music-store'
 import { useAutomationStore } from '@renderer/stores/automation-store'
+import { useIdeStore } from '@renderer/stores/ide-store'
 import { MusicPlayerHost } from '@renderer/components/music/MusicPlayerHost'
 import { TimerHost } from '@renderer/components/timer/TimerHost'
 import { cn } from '@renderer/lib/utils'
 import { isMacOS, isWindows } from '@renderer/lib/electron-api'
+
+const IdeOverlay = lazy(() =>
+  import('@renderer/components/ide/IdeOverlay').then((module) => ({ default: module.IdeOverlay }))
+)
 
 export default function App(): React.JSX.Element {
   const { isReady, error } = usePersistenceBootstrap()
@@ -33,6 +37,7 @@ export default function App(): React.JSX.Element {
   const workspaceScale = useWorkspaceStore((s) => s.workspaceScale)
   const nudgeWorkspaceScale = useWorkspaceStore((s) => s.nudgeWorkspaceScale)
   const setWorkspaceScale = useWorkspaceStore((s) => s.setWorkspaceScale)
+  const ideOpen = useIdeStore((s) => s.open)
   const platformClass = isMacOS()
     ? 'platform-macos'
     : isWindows()
@@ -100,9 +105,11 @@ export default function App(): React.JSX.Element {
     useAutomationStore.getState().subscribe()
     const stopUsage = startUsageSync()
     const stopPtyWatch = startPtyActivityWatch()
+    const stopResources = startResourcePolicies()
     return () => {
       stopUsage()
       stopPtyWatch()
+      stopResources()
     }
   }, [isReady])
 
@@ -120,7 +127,6 @@ export default function App(): React.JSX.Element {
           </div>
         )}
         <AppHeader showWorkspaceControls={projects.length > 0} onCommandPalette={openPalette} />
-        <ProcessNoticeBar />
         {projects.length > 0 ? (
           <div className="workspace-zoom-host">
             <div
@@ -129,7 +135,11 @@ export default function App(): React.JSX.Element {
             >
               <WorkspaceLayout />
             </div>
-            <IdeOverlay />
+            {ideOpen ? (
+              <Suspense fallback={null}>
+                <IdeOverlay />
+              </Suspense>
+            ) : null}
           </div>
         ) : (
           <WelcomeScreen />

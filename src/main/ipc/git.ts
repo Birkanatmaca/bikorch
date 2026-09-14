@@ -15,11 +15,14 @@ import {
   type IsolationInspectRequest,
   type IsolationLaneInput,
   type IsolationProjectRequest,
+  type IsolationRunRequest,
+  type GitAgentSessionNote,
   GIT_IPC
 } from '@shared/contracts/git'
 import { isAgentWorktreeKind } from '../git/worktree-paths'
 import { abortFold, acceptFold, foldFileDiff, inspectIsolation, prepareFold, syncFold } from '../git/isolation'
 import { ensureAgentWorktree, removeAgentWorktree } from '../git/worktrees'
+import { checkpointAgentRun, discardAgentRun, noteAgentSessionEnded } from '../git/reconcile'
 import { snapshotAgentGit } from '../git/session-snapshot'
 import {
   checkoutGitBranch,
@@ -334,5 +337,37 @@ export function registerGitHandlers(): void {
       throw new Error('Invalid isolation diff request')
     }
     return foldFileDiff(payload)
+  })
+
+  ipcMain.handle(GIT_IPC.ISOLATION_CHECKPOINT, async (_event, payload: unknown) => {
+    if (!payload || typeof payload !== 'object') throw new Error('Invalid isolation checkpoint request')
+    const req = payload as IsolationRunRequest
+    if (typeof req.projectRoot !== 'string' || typeof req.runId !== 'string' || req.runId.length < 8) {
+      throw new Error('Invalid isolation checkpoint request')
+    }
+    return checkpointAgentRun(req)
+  })
+
+  ipcMain.handle(GIT_IPC.ISOLATION_DISCARD, async (_event, payload: unknown) => {
+    if (!payload || typeof payload !== 'object') throw new Error('Invalid isolation discard request')
+    const req = payload as IsolationRunRequest
+    if (typeof req.projectRoot !== 'string' || typeof req.runId !== 'string' || req.runId.length < 8) {
+      throw new Error('Invalid isolation discard request')
+    }
+    return discardAgentRun(req)
+  })
+
+  ipcMain.handle(GIT_IPC.AGENT_SESSION_NOTE, async (_event, payload: unknown) => {
+    if (!payload || typeof payload !== 'object') throw new Error('Invalid agent session note')
+    const req = payload as GitAgentSessionNote
+    if (
+      typeof req.projectRoot !== 'string' ||
+      typeof req.runId !== 'string' ||
+      typeof req.sessionId !== 'string' ||
+      (req.reason !== 'exited' && req.reason !== 'parked' && req.reason !== 'interrupted')
+    ) {
+      throw new Error('Invalid agent session note')
+    }
+    return noteAgentSessionEnded(req)
   })
 }

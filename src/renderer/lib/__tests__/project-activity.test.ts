@@ -4,6 +4,7 @@ import { DEFAULT_LAYOUT } from '@shared/types'
 import {
   didProcessFinish,
   findPanelProject,
+  isWatchedCliPanel,
   processNoticeBody,
   summarizeProjectTabActivity
 } from '../project-activity'
@@ -96,8 +97,22 @@ describe('summarizeProjectTabActivity', () => {
 })
 
 describe('processNoticeBody', () => {
-  it('names the project so the toast can send you back', () => {
+  it('matches the macOS notification body', () => {
     expect(processNoticeBody('done', 'Cursor CLI', 'shop')).toBe('Cursor CLI finished in shop')
     expect(processNoticeBody('error', 'Claude Code', 'shop')).toBe('Claude Code failed in shop')
+  })
+})
+
+describe('isWatchedCliPanel', () => {
+  it('tracks agent CLIs and ignores plain terminals', () => {
+    expect(isWatchedCliPanel(cursorPanel)).toBe(true)
+    expect(
+      isWatchedCliPanel({
+        id: 'term-1',
+        type: 'terminal',
+        title: 'Terminal',
+        zone: 'bottom'
+      })
+    ).toBe(false)
   })
 })

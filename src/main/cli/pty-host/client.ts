@@ -23,7 +23,6 @@ export type HostSessionSnapshot = {
   kind: string
   accountId?: string
   status: 'running' | 'stopped'
-  outputBuffer: string
 }
 
 class PtyHostClient {
@@ -162,7 +161,12 @@ class PtyHostClient {
     if (message.type === 'hello') {
       this.knownSessions.clear()
       for (const session of message.payload.sessions) {
-        this.knownSessions.set(session.sessionId, session)
+        this.knownSessions.set(session.sessionId, {
+          sessionId: session.sessionId,
+          kind: session.kind,
+          ...(session.accountId ? { accountId: session.accountId } : {}),
+          status: session.status
+        })
       }
     }
     if ('id' in message && message.id) {
@@ -174,6 +178,15 @@ class PtyHostClient {
       }
     }
     for (const listener of this.listeners) listener(message)
+    if (message.type === 'event') {
+      const event = message.payload
+      if (event.type === 'exit' || (event.type === 'status' && event.status === 'stopped')) {
+        this.knownSessions.delete(event.sessionId)
+      } else if (event.type === 'status' && (event.status === 'running' || event.status === 'error')) {
+        const existing = this.knownSessions.get(event.sessionId)
+        if (existing) existing.status = event.status === 'running' ? 'running' : 'stopped'
+      }
+    }
   }
 
   private nextId(): string {
@@ -237,10 +250,48 @@ class PtyHostClient {
     this.knownSessions.delete(sessionId)
   }
 
+  async replay(sessionId: string): Promise<{ status: 'running' | 'stopped' | 'error'; outputBuffer: string }> {
+    const response = await this.request({
+      v: 1,
+      id: this.nextId(),
+      type: 'replay',
+      payload: { sessionId }
+    })
+    if (response.type === 'error') return { status: 'error', outputBuffer: '' }
+    if (response.type !== 'ok') return { status: 'stopped', outputBuffer: '' }
+    return {
+      status: response.payload?.status ?? 'stopped',
+      outputBuffer: response.payload?.outputBuffer ?? ''
+    }
+  }
+
   /** Disconnect UI from host without killing durable CLI sessions. */
   disconnect(): void {
     this.socket?.destroy()
     this.socket = null
+  }
+
+  isConnected(): boolean {
+    return Boolean(this.socket && !this.socket.destroyed)
+  }
+
+  hostPid(): number | null {
+    const { pidPath } = this.paths()
+    if (!existsSync(pidPath)) return null
+    try {
+      const pid = Number(readFileSync(pidPath, 'utf8').trim())
+      return Number.isFinite(pid) && pid > 0 ? pid : null
+    } catch {
+      return null
+    }
+  }
+
+  runningSessionCount(): number {
+    let count = 0
+    for (const session of this.knownSessions.values()) {
+      if (session.status === 'running') count += 1
+    }
+    return count
   }
 
   isHostAlive(): boolean {

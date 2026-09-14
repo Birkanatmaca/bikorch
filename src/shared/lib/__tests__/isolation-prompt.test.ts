@@ -77,7 +77,8 @@ describe('buildConflictResolvePrompt', () => {
         }
       ]
     })
-    expect(prompt).toContain('MAIN\nexport const n = 2')
-    expect(prompt).toContain('YOUR BRANCH\nexport const n = 3')
+    expect(prompt).toContain('CURRENT TARGET\nexport const n = 2')
+    expect(prompt).toContain('INCOMING AGENT CHANGE\nexport const n = 3')
+    expect(prompt).toContain('BASE\nexport const n = 1')
   })
 })

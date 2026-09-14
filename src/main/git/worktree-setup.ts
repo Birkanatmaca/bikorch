@@ -3,7 +3,19 @@ import { join } from 'path'
 import { constants } from 'fs'
 import { pathExists } from './git-exec'
 
-const ENV_FILES = ['.env', '.env.local', '.env.development', '.env.development.local'] as const
+const ENV_FILES = [
+  '.env',
+  '.env.local',
+  '.env.development',
+  '.env.development.local',
+  '.npmrc',
+  '.yarnrc.yml',
+  '.pnpmfile.cjs',
+  '.nvmrc',
+  '.node-version',
+  '.python-version',
+  '.tool-versions'
+] as const
 
 async function copyMissingFile(fromRoot: string, toRoot: string, name: string): Promise<void> {
   const source = join(fromRoot, name)

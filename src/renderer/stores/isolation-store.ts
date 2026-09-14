@@ -7,6 +7,9 @@ import type {
 } from '@shared/contracts/git'
 import { AGENT_WORKTREE_KINDS } from '@shared/contracts/git'
 import { useWorkspaceStore } from './workspace-store'
+import { evictRecordKeys, keysToKeep } from '@renderer/lib/inactive-cache'
+import { resourceLimitsFor, type ResourceProfile } from '@shared/contracts/resources'
+import { currentRendererResourceProfile } from '@renderer/lib/resource-limits'
 
 export interface IsolationProjectState extends IsolationInspectResponse {
   loading: boolean
@@ -18,14 +21,21 @@ interface IsolationStore {
   byProject: Record<string, IsolationProjectState>
   inspect: (projectId: string, projectRoot: string) => Promise<void>
   fold: (projectId: string, projectRoot: string, lane: IsolationLaneInput) => Promise<IsolationFoldSession | null>
+  sync: (projectId: string, projectRoot: string) => Promise<IsolationFoldSession | null>
   accept: (projectId: string, projectRoot: string) => Promise<boolean>
   abort: (projectId: string, projectRoot: string) => Promise<void>
+  discard: (projectId: string, projectRoot: string, runId: string) => Promise<boolean>
+  evictInactive: (activeProjectId: string, profile?: ResourceProfile) => void
 }
 
 const EMPTY: IsolationProjectState = {
   lanes: [],
   overlaps: [],
   fold: null,
+  queue: [],
+  recoveries: [],
+  targetBranch: '',
+  targetSha: '',
   loading: false,
   error: null,
   notice: null
@@ -39,6 +49,7 @@ function collectLanes(projectId: string): IsolationLaneInput[] {
   const lanes: IsolationLaneInput[] = []
   for (const panel of workspace.panels) {
     if (panel.workspaceIsolation === 'shared') continue
+    if (panel.panelRole === 'resolver') continue
     if (!(AGENT_WORKTREE_KINDS as readonly string[]).includes(panel.type)) continue
     if (!panel.worktreePath) continue
     lanes.push({
@@ -85,6 +96,7 @@ export const useIsolationStore = create<IsolationStore>((set, get) => ({
         byProject: {
           ...state.byProject,
           [projectId]: {
+            ...EMPTY,
             ...snapshot,
             loading: false,
             error: null,
@@ -164,6 +176,44 @@ export const useIsolationStore = create<IsolationStore>((set, get) => ({
     }
   },
 
+  sync: async (projectId, projectRoot) => {
+    if (!window.api.git?.syncIsolation) return null
+    set((state) => ({
+      byProject: {
+        ...state.byProject,
+        [projectId]: patch(projectId, { loading: true, error: null, notice: null })
+      }
+    }))
+    try {
+      const session = await window.api.git.syncIsolation({ projectRoot })
+      set((state) => ({
+        byProject: {
+          ...state.byProject,
+          [projectId]: patch(projectId, (current) => ({
+            ...current,
+            fold: session,
+            loading: false,
+            error: null,
+            notice: session.stale ? 'Target moved — review the updated fold' : null
+          }))
+        }
+      }))
+      await get().inspect(projectId, projectRoot)
+      return session
+    } catch (error) {
+      set((state) => ({
+        byProject: {
+          ...state.byProject,
+          [projectId]: patch(projectId, {
+            loading: false,
+            error: error instanceof Error ? error.message : 'Sync failed'
+          })
+        }
+      }))
+      return null
+    }
+  },
+
   accept: async (projectId, projectRoot) => {
     if (!window.api.git?.acceptIsolation) return false
     set((state) => ({
@@ -206,6 +256,42 @@ export const useIsolationStore = create<IsolationStore>((set, get) => ({
     } finally {
       await get().inspect(projectId, projectRoot)
     }
+  },
+
+  discard: async (projectId, projectRoot, runId) => {
+    if (!window.api.git?.discardIsolation) return false
+    try {
+      const result = await window.api.git.discardIsolation({ projectRoot, runId })
+      if (!result.ok) {
+        set((state) => ({
+          byProject: {
+            ...state.byProject,
+            [projectId]: patch(projectId, { error: result.error })
+          }
+        }))
+        return false
+      }
+      await get().inspect(projectId, projectRoot)
+      return true
+    } catch (error) {
+      set((state) => ({
+        byProject: {
+          ...state.byProject,
+          [projectId]: patch(projectId, {
+            error: error instanceof Error ? error.message : 'Discard failed'
+          })
+        }
+      }))
+      return false
+    }
+  },
+
+  evictInactive: (activeProjectId, profile) => {
+    const limits = resourceLimitsFor(profile ?? currentRendererResourceProfile())
+    const keep = keysToKeep(activeProjectId, [activeProjectId], limits.inactiveDiffCacheProjects)
+    set((state) => ({
+      byProject: evictRecordKeys(state.byProject, keep)
+    }))
   }
 }))
 

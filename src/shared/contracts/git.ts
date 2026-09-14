@@ -96,6 +96,7 @@ export interface GitEnsureWorktreeResponse {
   runId?: string
   targetBranch?: string
   baseSha?: string
+  resumeContext?: string
   error?: string
 }
 
@@ -121,13 +122,26 @@ export interface GitSessionSnapshot {
 export type WorkspaceIsolation = 'isolated' | 'shared'
 export type IsolationActiveState = 'ready' | 'parked' | 'missing' | 'inactive'
 export type AgentRunStatus =
-  | 'active'
-  | 'parked'
-  | 'queued'
-  | 'integrating'
+  | 'running'
+  | 'interrupted'
+  | 'awaiting-review'
   | 'conflict'
-  | 'accepted'
+  | 'merged'
   | 'abandoned'
+  | 'parked'
+
+export interface IsolationValidationResult {
+  ok: boolean
+  skipped?: boolean
+  summary: string
+}
+
+export interface IsolationValidation {
+  typecheck?: IsolationValidationResult
+  test?: IsolationValidationResult
+  build?: IsolationValidationResult
+  ranAt: number
+}
 
 export interface AgentRunRecord {
   id: string
@@ -140,8 +154,22 @@ export interface AgentRunRecord {
   isolationPolicy: WorkspaceIsolation
   status: AgentRunStatus
   attachedPanelId: string | null
+  writerSessionId?: string | null
+  lastCheckpointSha?: string | null
+  lastCheckpointAt?: number | null
   createdAt: number
   updatedAt: number
+}
+
+export type AgentRunRecoveryAction = 'resume' | 'review' | 'discard'
+
+export interface AgentRunRecovery {
+  runId: string
+  title: string
+  kind: AgentWorktreeKind
+  status: AgentRunStatus
+  reason: string
+  actions: AgentRunRecoveryAction[]
 }
 
 export interface IsolationLaneInput {
@@ -164,6 +192,8 @@ export interface IsolationLane {
   isolationPolicy: WorkspaceIsolation
   isolationState: IsolationActiveState
   attached: boolean
+  runStatus: AgentRunStatus
+  writerLocked: boolean
 }
 
 export type MergeQueueStatus = 'pending' | 'integrating' | 'conflict' | 'review' | 'stale'
@@ -188,7 +218,11 @@ export interface IsolationConflictFile {
   absolutePath: string
   hunks?: string
   base?: string
+  currentTarget?: string
+  incoming?: string
+  /** Persisted alias of currentTarget */
   main?: string
+  /** Persisted alias of incoming */
   agent?: string
 }
 
@@ -209,6 +243,8 @@ export interface IsolationFoldSession {
   status: 'empty' | 'clean' | 'conflict'
   files: string[]
   conflicts: IsolationConflictFile[]
+  conflictsVerified?: boolean
+  validation?: IsolationValidation
 }
 
 export interface IsolationInspectRequest {
@@ -223,6 +259,7 @@ export interface IsolationInspectResponse {
   overlaps: IsolationOverlap[]
   fold: IsolationFoldSession | null
   queue: MergeQueueItem[]
+  recoveries: AgentRunRecovery[]
   targetBranch: string
   targetSha: string
 }
@@ -237,6 +274,19 @@ export interface IsolationFoldRequest {
 
 export interface IsolationProjectRequest {
   projectRoot: string
+}
+
+export interface IsolationRunRequest {
+  projectRoot: string
+  runId: string
+  title?: string
+}
+
+export interface GitAgentSessionNote {
+  projectRoot: string
+  runId: string
+  sessionId: string
+  reason: 'exited' | 'parked' | 'interrupted'
 }
 
 export interface IsolationDiffRequest {
@@ -263,7 +313,10 @@ export const GIT_IPC = {
   ISOLATION_SYNC: 'git:isolation-sync',
   ISOLATION_ACCEPT: 'git:isolation-accept',
   ISOLATION_ABORT: 'git:isolation-abort',
-  ISOLATION_DIFF: 'git:isolation-diff'
+  ISOLATION_DIFF: 'git:isolation-diff',
+  ISOLATION_CHECKPOINT: 'git:isolation-checkpoint',
+  ISOLATION_DISCARD: 'git:isolation-discard',
+  AGENT_SESSION_NOTE: 'git:agent-session-note'
 } as const
 
 export const GIT_STATUS_LABELS: Record<GitChangeStatus, string> = {

@@ -19,6 +19,8 @@ import { useBrowserStore } from '@renderer/stores/browser-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { Button } from '@renderer/components/ui/Button'
 import { cn } from '@renderer/lib/utils'
+import { IdleDestroyController } from '@renderer/lib/idle-destroy'
+import { currentResourceLimits } from '@renderer/lib/resource-limits'
 
 type GuestWebview = HTMLElement & {
   src: string
@@ -111,9 +113,24 @@ export function BrowserPanel({ panelId }: { panelId: string }): React.JSX.Elemen
     else if (guest) guest.setAttribute('src', resolved.url)
   }
 
+  const [guestGeneration, setGuestGeneration] = useState(0)
+  const hasUrl = Boolean(currentUrl)
+
   useEffect(() => {
     const frame = frameRef.current
-    if (!frame) return
+    if (!frame || !hasUrl) {
+      guestRef.current = null
+      return
+    }
+
+    const destroyGuest = (guest: GuestWebview): void => {
+      try {
+        guest.setAttribute('src', 'about:blank')
+      } catch {
+        // already gone
+      }
+      guest.remove()
+    }
 
     const guest = document.createElement('webview') as GuestWebview
     guest.setAttribute('partition', 'persist:workspace-browser')
@@ -147,19 +164,43 @@ export function BrowserPanel({ panelId }: { panelId: string }): React.JSX.Elemen
     guest.addEventListener('page-title-updated', onNavigate)
     frame.appendChild(guest)
 
+    const idle = new IdleDestroyController(
+      () => currentResourceLimits().browserIdleMs,
+      () => {
+        if (guestRef.current !== guest) return
+        destroyGuest(guest)
+        guestRef.current = null
+      }
+    )
+    idle.stayActive()
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.some((entry) => entry.isIntersecting)
+        if (visible) {
+          idle.stayActive()
+          if (!guestRef.current) setGuestGeneration((value) => value + 1)
+          return
+        }
+        idle.beginIdle()
+      },
+      { threshold: 0.05 }
+    )
+    observer.observe(frame)
+
     return () => {
+      idle.dispose()
+      observer.disconnect()
       guest.removeEventListener('did-start-loading', onStart)
       guest.removeEventListener('did-stop-loading', onStop)
       guest.removeEventListener('did-fail-load', onFail)
       guest.removeEventListener('did-navigate', onNavigate)
       guest.removeEventListener('did-navigate-in-page', onNavigate)
       guest.removeEventListener('page-title-updated', onNavigate)
-      guest.remove()
-      guestRef.current = null
+      destroyGuest(guest)
+      if (guestRef.current === guest) guestRef.current = null
     }
-    // Recreate only when the panel mounts; later moves use loadURL.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panelId])
+  }, [panelId, hasUrl, guestGeneration])
 
   const idle = !currentUrl
 

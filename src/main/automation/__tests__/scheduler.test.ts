@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AutomationDefinition, AutomationSchedule } from '@shared/contracts/automation'
 import { createScheduleCalculator } from '../schedule-calculator'
-import { reconcileOnce, type AutomationSchedulerRepository } from '../scheduler'
+import { reconcileOnce, AutomationScheduler, type AutomationSchedulerRepository } from '../scheduler'
 
 const calculator = createScheduleCalculator()
 
@@ -217,5 +217,26 @@ describe('reconcileOnce — coalesce-one', () => {
     const result = reconcileOnce(repo, calculator, rolledBack)
     expect(result.claimedRunAutomationIds).toEqual([])
     expect(repo.claimedRuns).toHaveLength(1)
+  })
+})
+
+describe('AutomationScheduler — fault isolation', () => {
+  it('swallows repository failures so a bad tick cannot take down the process', () => {
+    const repo: AutomationSchedulerRepository = {
+      listEnabled() {
+        throw new Error('db locked')
+      },
+      setNextRunAt() {},
+      markCatchUpPending() {},
+      clearCatchUp() {},
+      hasActiveRun() {
+        return false
+      },
+      claimRun() {
+        return false
+      }
+    }
+    const scheduler = new AutomationScheduler(repo, calculator, undefined, () => Date.now())
+    expect(scheduler.reconcile()).toEqual({ claimedRunAutomationIds: [] })
   })
 })

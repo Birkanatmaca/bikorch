@@ -4,6 +4,7 @@ import {
   AUTOMATION_ACTIVE_RUN_STATUSES,
   AUTOMATION_SCHEMA_VERSION,
   createDefaultAutomationSettings,
+  validateAutomationSchedule,
   type AutomationDefinition,
   type AutomationExecutorKind,
   type AutomationNetworkPolicy,
@@ -164,6 +165,7 @@ function rowToDefinition(row: Row): AutomationDefinition | null {
   } catch {
     return null
   }
+  if (!validateAutomationSchedule(schedule)) return null
 
   return {
     id,

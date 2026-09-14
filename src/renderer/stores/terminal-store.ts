@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { PtySessionStatus } from '@shared/contracts/pty'
-import { didProcessFinish, findPanelProject } from '@renderer/lib/project-activity'
+import { didProcessFinish, findPanelProject, isWatchedCliPanel } from '@renderer/lib/project-activity'
 import { useActivityAttentionStore } from '@renderer/stores/activity-attention-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 
@@ -13,12 +13,12 @@ interface TerminalStore {
   getStatus: (sessionId: string) => PtySessionStatus | undefined
 }
 
-function noteBackgroundFinish(sessionId: string, next: PtySessionStatus, prev?: PtySessionStatus): void {
+function noteCliTaskFinish(sessionId: string, next: PtySessionStatus, prev?: PtySessionStatus): void {
   const outcome = didProcessFinish(prev, next)
   if (!outcome) return
   const workspace = useWorkspaceStore.getState()
   const owner = findPanelProject(sessionId, workspace.workspaces)
-  if (!owner || owner.projectId === workspace.activeProjectId) return
+  if (!owner || !isWatchedCliPanel(owner.panel)) return
   const project = workspace.projects.find((item) => item.id === owner.projectId)
   useActivityAttentionStore.getState().noteFinish({
     projectId: owner.projectId,
@@ -40,7 +40,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       sessions: { ...state.sessions, [sessionId]: status },
       errors: { ...state.errors, [sessionId]: error }
     }))
-    noteBackgroundFinish(sessionId, status, prev)
+    noteCliTaskFinish(sessionId, status, prev)
   },
 
   removeSession: (sessionId) => {

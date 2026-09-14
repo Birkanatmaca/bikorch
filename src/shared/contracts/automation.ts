@@ -262,22 +262,31 @@ export function validateAutomationSchedule(schedule: unknown): schedule is Autom
   }
 }
 
-export function describeAutomationSchedule(schedule: AutomationSchedule): string {
+export function describeAutomationSchedule(schedule: AutomationSchedule | null | undefined): string {
+  if (!schedule || typeof schedule !== 'object') return 'Unscheduled'
   switch (schedule.kind) {
     case 'once':
-      return `Once at ${new Date(schedule.runAt).toLocaleString()}`
+      return Number.isFinite(schedule.runAt)
+        ? `Once at ${new Date(schedule.runAt).toLocaleString()}`
+        : 'Once'
     case 'daily':
-      return `Daily at ${schedule.localTime}`
+      return schedule.localTime ? `Daily at ${schedule.localTime}` : 'Daily'
     case 'weekdays':
-      return `Weekdays at ${schedule.localTime}`
+      return schedule.localTime ? `Weekdays at ${schedule.localTime}` : 'Weekdays'
     case 'weekly': {
       const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-      const days = [...schedule.days].sort().map((day) => names[day]).join(', ')
-      return `${days} at ${schedule.localTime}`
+      const days = Array.isArray(schedule.days)
+        ? [...schedule.days].sort().map((day) => names[day] ?? '?').join(', ')
+        : ''
+      return days && schedule.localTime ? `${days} at ${schedule.localTime}` : 'Weekly'
     }
     case 'interval':
-      return `Every ${schedule.everyMinutes} min`
+      return Number.isFinite(schedule.everyMinutes)
+        ? `Every ${schedule.everyMinutes} min`
+        : 'Interval'
     case 'cron':
-      return schedule.expression
+      return schedule.expression?.trim() || 'Cron'
+    default:
+      return 'Custom schedule'
   }
 }

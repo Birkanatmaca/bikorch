@@ -27,6 +27,7 @@ export type ProfileSection =
   | 'sessions'
   | 'memory'
   | 'privacy'
+  | 'runtime'
 
 interface MetricsProject {
   id: string

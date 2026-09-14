@@ -34,41 +34,73 @@ function parseId(payload: unknown): string {
 }
 
 export function registerAutomationHandlers(): void {
+  const fail = (error: unknown, fallback: string): never => {
+    throw new Error(error instanceof Error ? error.message : fallback)
+  }
+
   ipcMain.handle(AUTOMATION_IPC.LIST, (event) => {
     assertTrustedSender(event)
-    return listAutomations()
+    try {
+      return listAutomations()
+    } catch (error) {
+      fail(error, 'Could not list automations')
+    }
   })
 
   ipcMain.handle(AUTOMATION_IPC.GET, (event, payload: unknown) => {
     assertTrustedSender(event)
-    return getAutomation(parseId(payload))
+    try {
+      return getAutomation(parseId(payload))
+    } catch (error) {
+      fail(error, 'Could not load automation')
+    }
   })
 
   ipcMain.handle(AUTOMATION_IPC.CREATE, (event, payload: unknown) => {
     assertTrustedSender(event)
-    return createAutomation(payload)
+    try {
+      return createAutomation(payload)
+    } catch (error) {
+      fail(error, 'Could not create automation')
+    }
   })
 
   ipcMain.handle(AUTOMATION_IPC.UPDATE, (event, payload: unknown) => {
     assertTrustedSender(event)
-    const { id, patch } = (payload ?? {}) as { id?: unknown; patch?: unknown }
-    return updateAutomation(parseId(id), patch)
+    try {
+      const { id, patch } = (payload ?? {}) as { id?: unknown; patch?: unknown }
+      return updateAutomation(parseId(id), patch)
+    } catch (error) {
+      fail(error, 'Could not update automation')
+    }
   })
 
   ipcMain.handle(AUTOMATION_IPC.REMOVE, (event, payload: unknown) => {
     assertTrustedSender(event)
-    removeAutomation(parseId(payload))
+    try {
+      removeAutomation(parseId(payload))
+    } catch (error) {
+      fail(error, 'Could not remove automation')
+    }
   })
 
   ipcMain.handle(AUTOMATION_IPC.SET_ENABLED, (event, payload: unknown) => {
     assertTrustedSender(event)
-    const { id, enabled } = (payload ?? {}) as { id?: unknown; enabled?: unknown }
-    return setAutomationEnabled(parseId(id), enabled === true)
+    try {
+      const { id, enabled } = (payload ?? {}) as { id?: unknown; enabled?: unknown }
+      return setAutomationEnabled(parseId(id), enabled === true)
+    } catch (error) {
+      fail(error, 'Could not update automation')
+    }
   })
 
   ipcMain.handle(AUTOMATION_IPC.RUN_NOW, (event, payload: unknown) => {
     assertTrustedSender(event)
-    return runAutomationNow(parseId(payload))
+    try {
+      return runAutomationNow(parseId(payload))
+    } catch (error) {
+      fail(error, 'Could not start run')
+    }
   })
 
   ipcMain.handle(AUTOMATION_IPC.CANCEL_RUN, (event, payload: unknown) => {
@@ -94,6 +126,10 @@ export function registerAutomationHandlers(): void {
 
   ipcMain.handle(AUTOMATION_IPC.GET_STATUS, (event) => {
     assertTrustedSender(event)
-    return getAutomationStatus()
+    try {
+      return getAutomationStatus()
+    } catch {
+      return { running: 0, enabled: 0, waitingNetwork: 0, needsAttention: 0, nextRunAt: null }
+    }
   })
 }

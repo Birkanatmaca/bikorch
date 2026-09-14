@@ -1,5 +1,7 @@
 import type { PtyEvent, PtyKind } from '@shared/contracts/pty'
+import type { CliTaskNotification } from '@shared/contracts/notifications'
 import { CliActivityTracker, mapProcessStatus } from '@renderer/lib/cli-activity'
+import { focusWorkspacePanel } from '@renderer/lib/app-events'
 import { findPanelProject, isWatchedCliPanel } from '@renderer/lib/project-activity'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
@@ -36,6 +38,12 @@ function dropTracker(sessionId: string): void {
   if (!tracker) return
   tracker.dispose()
   trackers.delete(sessionId)
+}
+
+function openFinishedCliTask(payload: CliTaskNotification): void {
+  useWorkspaceStore.getState().setActiveProject(payload.projectId)
+  useActivityAttentionStore.getState().clearProject(payload.projectId)
+  window.setTimeout(() => focusWorkspacePanel(payload.panelId), 40)
 }
 
 function handlePtyEvent(event: PtyEvent): void {
@@ -78,6 +86,7 @@ export function startPtyActivityWatch(): () => void {
   started = true
 
   unsubscribePty = window.api?.pty?.onEvent(handlePtyEvent) ?? null
+  const unsubscribeClicks = window.api?.notifications?.onClicked(openFinishedCliTask) ?? null
   unsubscribeWorkspace = useWorkspaceStore.subscribe((state, prev) => {
     if (state.activeProjectId && state.activeProjectId !== prev.activeProjectId) {
       useActivityAttentionStore.getState().clearProject(state.activeProjectId)
@@ -93,6 +102,7 @@ export function startPtyActivityWatch(): () => void {
     started = false
     unsubscribePty?.()
     unsubscribePty = null
+    unsubscribeClicks?.()
     unsubscribeWorkspace?.()
     unsubscribeWorkspace = null
     for (const sessionId of trackers.keys()) dropTracker(sessionId)

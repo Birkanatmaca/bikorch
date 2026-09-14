@@ -1,5 +1,6 @@
 import { DiffEditor, Editor } from '@monaco-editor/react'
 import { useEffect, useState } from 'react'
+import '@renderer/lib/monaco'
 import { useActiveProject } from '@renderer/hooks/use-active-project'
 import { useEditorStore } from '@renderer/stores/editor-store'
 import {

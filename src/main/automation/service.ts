@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { BrowserWindow } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import {
   AUTOMATION_IPC,
   AUTOMATION_LIMITS,
@@ -72,7 +72,31 @@ function requireSettings(): AutomationSettingsRepository {
 }
 
 function emitStatus(): void {
-  broadcast({ type: 'status-changed', status: computeStatus() })
+  try {
+    broadcast({ type: 'status-changed', status: computeStatus() })
+  } catch (error) {
+    console.error('[automation] failed to emit status:', error)
+  }
+}
+
+function enableBackgroundDefaults(): void {
+  try {
+    const settings = requireSettings().get()
+    if (settings.tabEducationShown) return
+    requireSettings().update({
+      backgroundMode: true,
+      startAtLogin: true,
+      tabEducationShown: true
+    })
+    if (process.platform !== 'linux') {
+      app.setLoginItemSettings({
+        openAtLogin: true,
+        args: ['--background']
+      })
+    }
+  } catch (error) {
+    console.error('[automation] could not enable background defaults:', error)
+  }
 }
 
 function computeStatus(): AutomationStatusSummary {
@@ -143,27 +167,41 @@ function simulateExecution(runId: string): void {
   const runs = getAutomationRunRepository()
   if (!runs) return
 
-  runs.update(runId, { status: 'preparing' })
-  const run1 = runs.get(runId)
-  if (run1) broadcast({ type: 'run-changed', run: run1 })
+  try {
+    runs.update(runId, { status: 'preparing' })
+    const run1 = runs.get(runId)
+    if (run1) broadcast({ type: 'run-changed', run: run1 })
+  } catch (error) {
+    console.error('[automation] failed to start simulated run:', error)
+    return
+  }
 
   const startTimer = setTimeout(() => {
     simulatedTimers.delete(startTimer)
-    runs.update(runId, { status: 'running', startedAt: Date.now() })
-    const running = runs.get(runId)
-    if (running) broadcast({ type: 'run-changed', run: running })
+    try {
+      runs.update(runId, { status: 'running', startedAt: Date.now() })
+      const running = runs.get(runId)
+      if (running) broadcast({ type: 'run-changed', run: running })
+    } catch (error) {
+      console.error('[automation] failed to mark run running:', error)
+      return
+    }
 
     const finishTimer = setTimeout(() => {
       simulatedTimers.delete(finishTimer)
-      runs.update(runId, {
-        status: 'succeeded',
-        finishedAt: Date.now(),
-        exitCode: 0,
-        summary: 'Simulated run — real CLI execution is not enabled yet.'
-      })
-      const finished = runs.get(runId)
-      if (finished) broadcast({ type: 'run-changed', run: finished })
-      emitStatus()
+      try {
+        runs.update(runId, {
+          status: 'succeeded',
+          finishedAt: Date.now(),
+          exitCode: 0,
+          summary: 'Simulated run — real CLI execution is not enabled yet.'
+        })
+        const finished = runs.get(runId)
+        if (finished) broadcast({ type: 'run-changed', run: finished })
+        emitStatus()
+      } catch (error) {
+        console.error('[automation] failed to finish simulated run:', error)
+      }
     }, SIMULATED_RUN_DURATION_MS)
     simulatedTimers.add(finishTimer)
   }, 400)
@@ -312,6 +350,11 @@ export function createAutomation(payload: unknown): AutomationDefinition {
   }
 
   definitions.upsert(definition)
+  try {
+    enableBackgroundDefaults()
+  } catch {
+    // Background defaults are optional; the automation itself must still persist.
+  }
   broadcast({ type: 'definition-changed', definition })
   emitStatus()
   return definition

@@ -52,7 +52,15 @@ export const useAutomationStore = create<AutomationStore>((set, get) => ({
         api.getSettings(),
         api.getStatus()
       ])
-      set({ definitions, settings, status, loaded: true })
+      set({
+        definitions: Array.isArray(definitions) ? definitions.filter((item) => item && item.id) : [],
+        settings: settings ?? createDefaultAutomationSettings(),
+        status:
+          status && typeof status.running === 'number'
+            ? { ...IDLE_STATUS, ...status }
+            : IDLE_STATUS,
+        loaded: true
+      })
     } catch (error) {
       console.error('Failed to load automations:', error)
       set({ loaded: true })
@@ -66,7 +74,8 @@ export const useAutomationStore = create<AutomationStore>((set, get) => ({
     set({ subscribed: true })
 
     api.onEvent((event) => {
-      if (event.type === 'definition-changed') {
+      if (!event || typeof event !== 'object') return
+      if (event.type === 'definition-changed' && event.definition?.id) {
         set((state) => {
           const exists = state.definitions.some((d) => d.id === event.definition.id)
           return {
@@ -75,11 +84,11 @@ export const useAutomationStore = create<AutomationStore>((set, get) => ({
               : [event.definition, ...state.definitions]
           }
         })
-      } else if (event.type === 'definition-removed') {
+      } else if (event.type === 'definition-removed' && event.automationId) {
         set((state) => ({
           definitions: state.definitions.filter((d) => d.id !== event.automationId)
         }))
-      } else if (event.type === 'run-changed') {
+      } else if (event.type === 'run-changed' && event.run?.automationId) {
         set((state) => {
           const existing = state.runsByAutomation[event.run.automationId] ?? []
           const next = existing.some((r) => r.id === event.run.id)
@@ -89,7 +98,7 @@ export const useAutomationStore = create<AutomationStore>((set, get) => ({
             runsByAutomation: { ...state.runsByAutomation, [event.run.automationId]: next }
           }
         })
-      } else if (event.type === 'status-changed') {
+      } else if (event.type === 'status-changed' && event.status) {
         set({ status: event.status })
       }
     })
@@ -99,7 +108,12 @@ export const useAutomationStore = create<AutomationStore>((set, get) => ({
     const api = window.api?.automation
     if (!api) return null
     const definition = await api.create(draft)
-    set((state) => ({ definitions: [definition, ...state.definitions] }))
+    if (!definition?.id) throw new Error('Could not create automation')
+    set((state) => ({
+      definitions: state.definitions.some((item) => item.id === definition.id)
+        ? state.definitions.map((item) => (item.id === definition.id ? definition : item))
+        : [definition, ...state.definitions]
+    }))
     return definition
   },
 

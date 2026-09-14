@@ -377,6 +377,14 @@ export function TerminalView({
             idleTimer = null
           }
           if (cli) endAgentSession(sessionId, event.exitCode, 'exited')
+          if (cli && folderPathAtMount && window.api.git?.noteAgentSession) {
+            void window.api.git.noteAgentSession({
+              projectRoot: folderPathAtMount,
+              runId: sessionId,
+              sessionId,
+              reason: 'exited'
+            })
+          }
           setStatus(sessionId, 'stopped')
           terminal.writeln(`\r\n\x1b[90m[Process exited with code ${event.exitCode}]\x1b[0m`)
           if (shouldCaptureAccount) {
@@ -464,8 +472,13 @@ export function TerminalView({
       const panelAtLaunch = Object.values(useWorkspaceStore.getState().workspaces)
         .flatMap((workspace) => workspace.panels)
         .find((panel) => panel.id === sessionId)
-      const sharedTree = panelAtLaunch?.workspaceIsolation === 'shared'
+      const resolverCwd = panelAtLaunch?.panelRole === 'resolver' ? panelAtLaunch.cwdOverride : panelAtLaunch?.cwdOverride
+      if (resolverCwd) {
+        cwd = resolverCwd
+      }
+      const sharedTree = panelAtLaunch?.workspaceIsolation === 'shared' && panelAtLaunch?.panelRole !== 'resolver'
       const isolate =
+        !resolverCwd &&
         !sharedTree &&
         nextLaunchMode !== 'login' &&
         (AGENT_WORKTREE_KINDS as readonly string[]).includes(kind) &&
@@ -474,7 +487,9 @@ export function TerminalView({
       if (sharedTree && cwd && panelAtLaunch?.worktreePath && window.api.git?.removeWorktree) {
         await window.api.git.removeWorktree({
           projectRoot: cwd,
-          worktreePath: panelAtLaunch.worktreePath
+          worktreePath: panelAtLaunch.worktreePath,
+          title: panelAtLaunch.title,
+          mode: 'park'
         })
         useWorkspaceStore.getState().setPanelWorktree(sessionId, null)
       }
@@ -482,7 +497,8 @@ export function TerminalView({
         const isolated = await window.api.git.ensureWorktree({
           projectRoot: cwd,
           panelId: sessionId,
-          kind: kind as AgentWorktreeKind
+          kind: kind as AgentWorktreeKind,
+          title: panelAtLaunch?.title
         })
         if (isolated.ok && isolated.worktreePath) {
           cwd = isolated.worktreePath
@@ -490,6 +506,11 @@ export function TerminalView({
           term.writeln(
             '\x1b[90m[Bikorch] Isolated copy — this agent edits its own folder, not the main project tree.\x1b[0m'
           )
+          if (isolated.resumeContext) {
+            for (const line of isolated.resumeContext.split('\n')) {
+              term.writeln(`\x1b[90m${line}\x1b[0m`)
+            }
+          }
         } else if (!isolated.ok && isolated.error) {
           term.writeln(`\x1b[33m[Bikorch] Could not isolate this agent: ${isolated.error}\x1b[0m`)
           term.writeln('\x1b[33m[Bikorch] Falling back to the main project folder.\x1b[0m')
@@ -644,17 +665,9 @@ export function TerminalView({
         : null
 
       if (!panelStillExists || currentFolderPath !== folderPathAtMount) {
-        const isolatedPath = workspaceAtCleanup?.panels.find((panel) => panel.id === sessionId)?.worktreePath
         const finish = async (): Promise<void> => {
           if (cli) await finalizeAgentSession(sessionId, null, 'closed')
           await window.api.pty.kill({ sessionId })
-          if (isolatedPath && folderPathAtMount && window.api.git?.removeWorktree) {
-            await window.api.git.removeWorktree({
-              projectRoot: folderPathAtMount,
-              worktreePath: isolatedPath
-            })
-            useWorkspaceStore.getState().setPanelWorktree(sessionId, null)
-          }
         }
         void finish()
       }

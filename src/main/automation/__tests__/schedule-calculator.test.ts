@@ -101,6 +101,14 @@ describe('ScheduleCalculator — cron', () => {
   })
 })
 
+describe('ScheduleCalculator — malformed input', () => {
+  it('does not throw when a daily schedule is missing localTime', () => {
+    const schedule = { kind: 'daily', timeZone: 'UTC' } as AutomationSchedule
+    expect(calc.nextOccurrenceAfter(schedule, Date.now())).toBeNull()
+    expect(calc.latestOccurrenceAtOrBefore(schedule, Date.now())).toBeNull()
+  })
+})
+
 describe('ScheduleCalculator — DST', () => {
   it('keeps the local wall-clock time across a US DST transition', () => {
     const schedule: AutomationSchedule = {

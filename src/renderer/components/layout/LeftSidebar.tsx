@@ -10,6 +10,7 @@ import { TimerPanel } from '@renderer/components/timer/TimerPanel'
 import { SidebarTimerDock } from '@renderer/components/timer/SidebarTimerDock'
 import { cn } from '@renderer/lib/utils'
 import { Button } from '@renderer/components/ui/Button'
+import { ErrorBoundary } from '@renderer/components/ui/ErrorBoundary'
 import type { LeftSidebarView } from '@shared/types'
 
 interface LeftSidebarProps {
@@ -62,7 +63,9 @@ export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Eleme
           <ProfilePanel visible={view === 'profile'} />
         </div>
         <div className={cn('h-full', view !== 'automation' && 'hidden')}>
-          <AutomationPanel />
+          <ErrorBoundary variant="section">
+            <AutomationPanel />
+          </ErrorBoundary>
         </div>
         <div className={cn('h-full', view !== 'music' && 'hidden')}>
           <MusicPanel />

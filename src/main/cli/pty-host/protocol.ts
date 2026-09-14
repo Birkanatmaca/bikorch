@@ -18,6 +18,7 @@ export type PtyHostClientMessage =
   | { v: 1; id: string; type: 'write'; payload: { sessionId: string; data: string } }
   | { v: 1; id: string; type: 'resize'; payload: { sessionId: string; cols: number; rows: number } }
   | { v: 1; id: string; type: 'kill'; payload: { sessionId: string } }
+  | { v: 1; id: string; type: 'replay'; payload: { sessionId: string } }
   | { v: 1; id: string; type: 'list' }
 
 export type PtyHostServerMessage =
@@ -52,7 +53,6 @@ export type PtyHostServerMessage =
           kind: string
           accountId?: string
           status: 'running' | 'stopped'
-          outputBuffer: string
         }>
       }
     }

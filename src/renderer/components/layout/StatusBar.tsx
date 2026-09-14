@@ -9,6 +9,8 @@ import { Button } from '@renderer/components/ui/Button'
 import { StatusChip } from '@renderer/components/ui/StatusChip'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { LayoutModeMenu } from '@renderer/components/layout/LayoutModeMenu'
+import { currentResourceLimits } from '@renderer/lib/resource-limits'
+import { isDocumentHidden, onDocumentVisibility, visibilityScaledInterval } from '@renderer/lib/visibility'
 import {
   WORKSPACE_SCALE_MAX,
   WORKSPACE_SCALE_MIN,
@@ -33,18 +35,29 @@ export function StatusBar(): React.JSX.Element {
   useEffect(() => {
     if (!projectId || !projectRoot) return
 
-    const refreshQuietly = (): void => {
-      if (document.visibilityState === 'visible') {
-        void refresh(projectId, projectRoot, { quiet: true })
-        void inspectIsolation(projectId, projectRoot)
-      }
+    let timer: number | null = null
+    const tick = (): void => {
+      if (isDocumentHidden()) return
+      void refresh(projectId, projectRoot, { quiet: true })
+      void inspectIsolation(projectId, projectRoot)
+    }
+    const arm = (hidden: boolean): void => {
+      if (timer !== null) window.clearInterval(timer)
+      timer = window.setInterval(
+        tick,
+        visibilityScaledInterval(2500, currentResourceLimits().hiddenPollMultiplier, hidden)
+      )
     }
 
-    const timer = window.setInterval(refreshQuietly, 2500)
-    document.addEventListener('visibilitychange', refreshQuietly)
+    arm(isDocumentHidden())
+    const stopVisibility = onDocumentVisibility((hidden) => {
+      if (!hidden) tick()
+      arm(hidden)
+    })
+
     return () => {
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', refreshQuietly)
+      if (timer !== null) window.clearInterval(timer)
+      stopVisibility()
     }
   }, [projectId, projectRoot, refresh, inspectIsolation])
 

@@ -42,6 +42,8 @@ import { parseTaskStatus, type ProjectTask, type TaskPriority } from '@shared/co
 import { initMusicSchema } from '../music/store'
 import { initDownloadSchema } from '../music/downloader/job-store'
 import { initAutomationSchema } from '../automation/store'
+import { setIsolationPersistSink } from '../git/agent-run-store'
+import { hashRepoRoot } from '../git/worktree-paths'
 import { v4 as uuidv4 } from 'uuid'
 
 let db: Database | null = null
@@ -86,8 +88,10 @@ function getWasmPath(file: string): string {
 
 function persistToDisk(): void {
   if (!db || !dbFilePath) return
+  // sql.js keeps the whole DB in RAM. export() allocates a second Uint8Array;
+  // write it directly to avoid an extra Buffer copy of the same bytes.
   const data = db.export()
-  writeFileSync(dbFilePath, Buffer.from(data))
+  writeFileSync(dbFilePath, data)
 }
 
 function initSchema(database: Database): void {
@@ -211,6 +215,19 @@ export function getPersistenceDatabase(): Database | null {
   return db
 }
 
+export function listPersistedProjectFolders(): string[] {
+  if (!db) return []
+  try {
+    const result = db.exec('SELECT folder_path FROM projects')
+    if (result.length === 0) return []
+    return result[0].values
+      .map((row) => row[0])
+      .filter((value): value is string => typeof value === 'string' && value.length > 0)
+  } catch {
+    return []
+  }
+}
+
 export function readMetaValue(key: string): string | null {
   if (!db) return null
   const result = db.exec('SELECT value FROM meta WHERE key = ?', [key])
@@ -242,7 +259,23 @@ export async function initPersistenceDatabase(): Promise<void> {
     initMusicSchema(db)
     initDownloadSchema(db)
     initAutomationSchema(db)
+    db.run(`
+      CREATE TABLE IF NOT EXISTS agent_isolation_state (
+        repo_hash TEXT PRIMARY KEY,
+        repo_root TEXT NOT NULL,
+        state_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    `)
     persistToDisk()
+    setIsolationPersistSink((state) => {
+      if (!db) return
+      db.run(
+        'INSERT OR REPLACE INTO agent_isolation_state (repo_hash, repo_root, state_json, updated_at) VALUES (?, ?, ?, ?)',
+        [hashRepoRoot(state.repoRoot), state.repoRoot, JSON.stringify(state), Date.now()]
+      )
+      schedulePersistToDisk()
+    })
   } catch (error) {
     console.error('Failed to initialize persistence database:', error)
     throw error
@@ -258,6 +291,7 @@ export function closePersistenceDatabase(): void {
     persistToDisk()
     db.close()
     db = null
+    setIsolationPersistSink(null)
   }
 }
 

@@ -7,6 +7,7 @@ import { recordDeveloperEvent } from '@renderer/lib/developer-events'
 import { useAiAccountsStore } from '@renderer/stores/ai-accounts-store'
 import { useUsageStore } from '@renderer/stores/usage-store'
 import type { CliUsageKind } from '@shared/contracts/usage'
+import { isDocumentHidden, onDocumentVisibility } from '@renderer/lib/visibility'
 
 const CHECK_INTERVAL_MS = 60_000
 const TICK_MS = 5_000
@@ -112,6 +113,7 @@ function enqueue(accounts: AiAccount[]): Promise<void> {
 }
 
 function tick(force = false): void {
+  if (!force && isDocumentHidden()) return
   void enqueue(dueAccounts(force))
 }
 
@@ -147,6 +149,9 @@ export function startUsageSync(): () => void {
 
   window.addEventListener(AI_ACCOUNT_AUTHENTICATED_EVENT, handleAuthenticated)
   window.addEventListener(AI_ACCOUNTS_REFRESH_EVENT, onRefresh)
+  const stopVisibility = onDocumentVisibility((hidden) => {
+    if (!hidden) tick()
+  })
 
   startTimer = setTimeout(() => {
     tick(true)
@@ -165,6 +170,7 @@ export function startUsageSync(): () => void {
     }
     window.removeEventListener(AI_ACCOUNT_AUTHENTICATED_EVENT, handleAuthenticated)
     window.removeEventListener(AI_ACCOUNTS_REFRESH_EVENT, onRefresh)
+    stopVisibility()
   }
 }
 

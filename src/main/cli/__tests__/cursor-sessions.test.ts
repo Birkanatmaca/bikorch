@@ -19,7 +19,12 @@ vi.mock('../pty-host/client', () => ({
     write: vi.fn(),
     resize: vi.fn(),
     kill: vi.fn(),
-    disconnect: vi.fn()
+    replay: vi.fn(),
+    disconnect: vi.fn(),
+    isConnected: () => false,
+    isHostAlive: () => false,
+    hostPid: () => null,
+    runningSessionCount: () => 0
   }
 }))
 vi.mock('../../logs', () => ({ recordLog: vi.fn() }))

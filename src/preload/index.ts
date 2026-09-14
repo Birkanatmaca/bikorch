@@ -32,6 +32,8 @@ import {
   type IsolationInspectRequest,
   type IsolationInspectResponse,
   type IsolationProjectRequest,
+  type IsolationRunRequest,
+  type GitAgentSessionNote,
   GIT_IPC
 } from '@shared/contracts/git'
 import {
@@ -127,6 +129,15 @@ import {
   type AutomationSettings,
   type AutomationStatusSummary
 } from '@shared/contracts/automation'
+import {
+  NOTIFICATION_IPC,
+  type CliTaskNotification
+} from '@shared/contracts/notifications'
+import {
+  RESOURCES_IPC,
+  type ResourceProcessSnapshot,
+  type ResourceProfile
+} from '@shared/contracts/resources'
 
 export interface MusicApi {
   library: {
@@ -248,6 +259,9 @@ export interface GitApi {
   acceptIsolation: (request: IsolationProjectRequest) => Promise<{ ok: true } | { ok: false; error: string }>
   abortIsolation: (request: IsolationProjectRequest) => Promise<{ ok: true }>
   isolationDiff: (request: IsolationDiffRequest) => Promise<GitDiffResponse>
+  checkpointIsolation: (request: IsolationRunRequest) => Promise<{ ok: true; sha: string | null } | { ok: false; error: string }>
+  discardIsolation: (request: IsolationRunRequest) => Promise<{ ok: true } | { ok: false; error: string }>
+  noteAgentSession: (request: GitAgentSessionNote) => Promise<{ ok: true }>
 }
 
 export interface PersistenceApi {
@@ -327,6 +341,17 @@ export interface AutomationApi {
   onEvent: (callback: (event: AutomationEvent) => void) => () => void
 }
 
+export interface NotificationsApi {
+  showCliTask: (payload: CliTaskNotification) => Promise<{ ok: true } | { ok: false; error: string }>
+  onClicked: (callback: (payload: CliTaskNotification) => void) => () => void
+}
+
+export interface ResourcesApi {
+  getProfile: () => Promise<ResourceProfile>
+  setProfile: (profile: ResourceProfile) => Promise<ResourceProfile>
+  snapshot: () => Promise<ResourceProcessSnapshot>
+}
+
 export interface AppApi {
   platform: NodeJS.Platform
   selectFolder: () => Promise<string | null>
@@ -342,6 +367,8 @@ export interface AppApi {
   developerIntelligence: DeveloperIntelligenceApi
   music: MusicApi
   automation: AutomationApi
+  notifications: NotificationsApi
+  resources: ResourcesApi
 }
 
 const ptyApi: PtyApi = {
@@ -391,7 +418,10 @@ const gitApi: GitApi = {
   syncIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_SYNC, request),
   acceptIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_ACCEPT, request),
   abortIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_ABORT, request),
-  isolationDiff: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_DIFF, request)
+  isolationDiff: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_DIFF, request),
+  checkpointIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_CHECKPOINT, request),
+  discardIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_DISCARD, request),
+  noteAgentSession: (request) => ipcRenderer.invoke(GIT_IPC.AGENT_SESSION_NOTE, request)
 }
 
 const persistenceApi: PersistenceApi = {
@@ -580,6 +610,25 @@ const automationApi: AutomationApi = {
   }
 }
 
+const notificationsApi: NotificationsApi = {
+  showCliTask: (payload) => ipcRenderer.invoke(NOTIFICATION_IPC.SHOW_CLI_TASK, payload),
+  onClicked: (callback) => {
+    const listener = (_event: IpcRendererEvent, payload: CliTaskNotification): void => {
+      callback(payload)
+    }
+    ipcRenderer.on(NOTIFICATION_IPC.CLICKED, listener)
+    return () => {
+      ipcRenderer.removeListener(NOTIFICATION_IPC.CLICKED, listener)
+    }
+  }
+}
+
+const resourcesApi: ResourcesApi = {
+  getProfile: () => ipcRenderer.invoke(RESOURCES_IPC.GET_PROFILE),
+  setProfile: (profile) => ipcRenderer.invoke(RESOURCES_IPC.SET_PROFILE, profile),
+  snapshot: () => ipcRenderer.invoke(RESOURCES_IPC.SNAPSHOT)
+}
+
 const api: AppApi = {
   platform: process.platform,
   selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),
@@ -594,7 +643,9 @@ const api: AppApi = {
   window: windowApi,
   developerIntelligence: developerIntelligenceApi,
   music: musicApi,
-  automation: automationApi
+  automation: automationApi,
+  notifications: notificationsApi,
+  resources: resourcesApi
 }
 
 contextBridge.exposeInMainWorld('api', api)
