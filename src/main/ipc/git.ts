@@ -1,5 +1,6 @@
-import { ipcMain } from 'electron'
+import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import {
+  type AgentApplyPhase,
   type GitDiffRequest,
   type GitDiscardRequest,
   type GitFileRequest,
@@ -27,6 +28,7 @@ import {
   foldFileDiff,
   inspectIsolation,
   prepareFold,
+  retryWorktreeSetup,
   syncFold,
   updateWorktreeProvision
 } from '../git/isolation'
@@ -178,6 +180,11 @@ function validateWorktreeProvisionRequest(payload: unknown): payload is Worktree
   )
 }
 
+function emitApplyPhase(event: IpcMainInvokeEvent, phase: AgentApplyPhase, panelId: string): void {
+  if (event.sender.isDestroyed()) return
+  event.sender.send(GIT_IPC.APPLY_PHASE, { phase, panelId })
+}
+
 function validateIsolationInspectRequest(payload: unknown): payload is IsolationInspectRequest {
   if (!payload || typeof payload !== 'object') return false
   const req = payload as IsolationInspectRequest
@@ -326,25 +333,34 @@ export function registerGitHandlers(): void {
     return inspectIsolation({ projectRoot: payload.projectRoot, lanes: payload.lanes })
   })
 
-  ipcMain.handle(GIT_IPC.ISOLATION_FOLD, async (_event, payload: unknown) => {
+  ipcMain.handle(GIT_IPC.ISOLATION_FOLD, async (event, payload: unknown) => {
     if (!validateIsolationFoldRequest(payload)) {
       throw new Error('Invalid isolation fold request')
     }
-    return prepareFold(payload)
+    return prepareFold({
+      ...payload,
+      onPhase: (phase, panelId) => emitApplyPhase(event, phase, panelId)
+    })
   })
 
-  ipcMain.handle(GIT_IPC.ISOLATION_SYNC, async (_event, payload: unknown) => {
+  ipcMain.handle(GIT_IPC.ISOLATION_SYNC, async (event, payload: unknown) => {
     if (!validateIsolationProjectRequest(payload)) {
       throw new Error('Invalid isolation sync request')
     }
-    return syncFold(payload)
+    return syncFold({
+      ...payload,
+      onPhase: (phase, panelId) => emitApplyPhase(event, phase, panelId)
+    })
   })
 
-  ipcMain.handle(GIT_IPC.ISOLATION_ACCEPT, async (_event, payload: unknown) => {
+  ipcMain.handle(GIT_IPC.ISOLATION_ACCEPT, async (event, payload: unknown) => {
     if (!validateIsolationProjectRequest(payload)) {
       throw new Error('Invalid isolation accept request')
     }
-    return acceptFold(payload)
+    return acceptFold({
+      ...payload,
+      onPhase: (phase, panelId) => emitApplyPhase(event, phase, panelId)
+    })
   })
 
   ipcMain.handle(GIT_IPC.ISOLATION_ABORT, async (_event, payload: unknown) => {
@@ -398,5 +414,12 @@ export function registerGitHandlers(): void {
       throw new Error('Invalid worktree provision request')
     }
     return updateWorktreeProvision(payload)
+  })
+
+  ipcMain.handle(GIT_IPC.WORKTREE_SETUP_RETRY, async (_event, payload: unknown) => {
+    if (!validateIsolationProjectRequest(payload)) {
+      throw new Error('Invalid worktree setup retry request')
+    }
+    return retryWorktreeSetup(payload)
   })
 }

@@ -239,6 +239,7 @@ export interface IsolationLane {
   worktreePath: string
   branch: string
   files: string[]
+  summary: string[]
   targetBranch: string
   baseSha: string
   isolationPolicy: WorkspaceIsolation
@@ -316,6 +317,36 @@ export interface IsolationInspectResponse {
   targetSha: string
   provision: WorktreeProvisionSettings
   availableLocalFiles: WorktreeLocalFileName[]
+  setupError: WorktreeSetupFailure | null
+}
+
+export type AgentApplyPhase = 'preparing' | 'combining' | 'validating' | 'applying'
+
+export interface AgentApplyPhaseEvent {
+  phase: AgentApplyPhase
+  panelId: string
+}
+
+export interface WorktreeSetupFailure {
+  command: string
+  args: string[]
+  output: string
+  exitCode?: number | null
+}
+
+export function parseWorktreeSetupFailure(value: unknown): WorktreeSetupFailure | null {
+  if (!value || typeof value !== 'object') return null
+  const row = value as Partial<WorktreeSetupFailure>
+  if (typeof row.command !== 'string' || row.command.length === 0) return null
+  const args = Array.isArray(row.args)
+    ? row.args.filter((item): item is string => typeof item === 'string' && item.length > 0).slice(0, 8)
+    : []
+  return {
+    command: row.command.slice(0, 80),
+    args: args.map((item) => item.slice(0, 80)),
+    output: typeof row.output === 'string' ? row.output.slice(0, 8_000) : '',
+    exitCode: typeof row.exitCode === 'number' ? row.exitCode : row.exitCode === null ? null : undefined
+  }
 }
 
 export interface WorktreeProvisionRequest {
@@ -377,7 +408,9 @@ export const GIT_IPC = {
   ISOLATION_CHECKPOINT: 'git:isolation-checkpoint',
   ISOLATION_DISCARD: 'git:isolation-discard',
   AGENT_SESSION_NOTE: 'git:agent-session-note',
-  WORKTREE_PROVISION: 'git:worktree-provision'
+  WORKTREE_PROVISION: 'git:worktree-provision',
+  WORKTREE_SETUP_RETRY: 'git:worktree-setup-retry',
+  APPLY_PHASE: 'git:apply-phase'
 } as const
 
 export const GIT_STATUS_LABELS: Record<GitChangeStatus, string> = {

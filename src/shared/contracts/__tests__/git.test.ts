@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_WORKTREE_PROVISION,
-  parseWorktreeProvision
+  parseWorktreeProvision,
+  parseWorktreeSetupFailure
 } from '../git'
 
 describe('worktree provision settings', () => {
@@ -23,5 +24,22 @@ describe('worktree provision settings', () => {
       copyLocalFiles: ['.env', '.npmrc'],
       dependencyMode: 'share'
     })
+  })
+
+  it('parses a workspace setup failure', () => {
+    expect(
+      parseWorktreeSetupFailure({
+        command: 'pnpm',
+        args: ['install'],
+        output: 'boom',
+        exitCode: 1
+      })
+    ).toEqual({
+      command: 'pnpm',
+      args: ['install'],
+      output: 'boom',
+      exitCode: 1
+    })
+    expect(parseWorktreeSetupFailure({ command: '' })).toBeNull()
   })
 })

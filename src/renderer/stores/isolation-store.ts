@@ -32,6 +32,7 @@ interface IsolationStore {
     projectRoot: string,
     next: WorktreeProvisionSettings
   ) => Promise<void>
+  retrySetup: (projectId: string, projectRoot: string) => Promise<boolean>
   evictInactive: (activeProjectId: string, profile?: ResourceProfile) => void
 }
 
@@ -45,6 +46,7 @@ const EMPTY: IsolationProjectState = {
   targetSha: '',
   provision: { ...DEFAULT_WORKTREE_PROVISION },
   availableLocalFiles: [],
+  setupError: null,
   loading: false,
   error: null,
   notice: null
@@ -111,6 +113,7 @@ export const useIsolationStore = create<IsolationStore>((set, get) => ({
             availableLocalFiles: Array.isArray(snapshot.availableLocalFiles)
               ? snapshot.availableLocalFiles
               : [],
+            setupError: snapshot.setupError ?? null,
             loading: false,
             error: null,
             notice: null
@@ -305,6 +308,42 @@ export const useIsolationStore = create<IsolationStore>((set, get) => ({
           })
         }
       }))
+    }
+  },
+
+  retrySetup: async (projectId, projectRoot) => {
+    if (!window.api.git?.retryWorktreeSetup) return false
+    set((state) => ({
+      byProject: {
+        ...state.byProject,
+        [projectId]: patch(projectId, { loading: true, error: null })
+      }
+    }))
+    try {
+      const result = await window.api.git.retryWorktreeSetup({ projectRoot })
+      set((state) => ({
+        byProject: {
+          ...state.byProject,
+          [projectId]: patch(projectId, {
+            loading: false,
+            setupError: result.setupError,
+            error: null
+          })
+        }
+      }))
+      await get().inspect(projectId, projectRoot)
+      return result.ok
+    } catch (error) {
+      set((state) => ({
+        byProject: {
+          ...state.byProject,
+          [projectId]: patch(projectId, {
+            loading: false,
+            error: error instanceof Error ? error.message : 'Could not retry workspace setup'
+          })
+        }
+      }))
+      return false
     }
   },
 

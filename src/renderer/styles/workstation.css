@@ -827,6 +827,10 @@ kbd {
   border-color: rgb(240 93 104 / 0.28);
   background: rgb(240 93 104 / 0.06);
 }
+.agent-work-card.is-review {
+  border-color: rgb(242 184 75 / 0.35);
+  background: rgb(242 184 75 / 0.07);
+}
 .agent-work-card.is-ready {
   border-color: rgb(139 124 248 / 0.18);
 }
@@ -866,7 +870,8 @@ kbd {
 }
 .agent-work-status.is-ready { color: #c8c0f8; }
 .agent-work-status.is-working { color: var(--color-text-secondary); }
-.agent-work-status.is-attention { color: #f2b84b; }
+.agent-work-status.is-review { color: #f2b84b; }
+.agent-work-status.is-attention { color: #f05d68; }
 .agent-work-detail,
 .agent-work-copy,
 .agent-work-applied {
@@ -874,6 +879,30 @@ kbd {
   color: var(--color-text-muted);
   font-size: 11px;
   line-height: 1.4;
+}
+.agent-work-summary {
+  margin: 2px 0 0;
+  padding-left: 16px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.agent-work-setup-error {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 4px;
+  padding: 8px;
+  border: 1px solid rgb(240 93 104 / 0.28);
+  border-radius: 8px;
+  background: rgb(240 93 104 / 0.06);
+}
+.agent-work-setup-error pre {
+  max-height: 160px;
+  overflow: auto;
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  color: var(--color-text-secondary);
+  font-size: 10px;
 }
 .agent-work-applied { color: #86efac; }
 .agent-work-body {

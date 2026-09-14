@@ -38,6 +38,26 @@ describe('worktree setup', () => {
     expect(await missing(join(worktree, 'node_modules'))).toBe(true)
   })
 
+  it('does not run install in isolated mode', async () => {
+    const repo = await mkdtemp(join(tmpdir(), 'bikorch-setup-src-'))
+    const worktree = await mkdtemp(join(tmpdir(), 'bikorch-setup-wt-'))
+    trash.push(repo, worktree)
+    await writeFile(join(worktree, 'package.json'), '{"name":"demo"}\n')
+    await writeFile(join(worktree, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n')
+    let ran = 0
+    setWorktreeSetupRunner(async () => {
+      ran += 1
+      return { ok: true, output: '' }
+    })
+
+    await provisionWorktree(repo, worktree, {
+      copyLocalFiles: [],
+      dependencyMode: 'isolated'
+    })
+
+    expect(ran).toBe(0)
+  })
+
   it('copies only allowlisted local files', async () => {
     const repo = await mkdtemp(join(tmpdir(), 'bikorch-setup-src-'))
     const worktree = await mkdtemp(join(tmpdir(), 'bikorch-setup-wt-'))
@@ -91,5 +111,24 @@ describe('worktree setup', () => {
     })
 
     expect(ran).toEqual([{ cwd: worktree, command: 'npm', args: ['install'] }])
+  })
+
+  it('returns a setup failure when the install command fails', async () => {
+    const repo = await mkdtemp(join(tmpdir(), 'bikorch-setup-src-'))
+    const worktree = await mkdtemp(join(tmpdir(), 'bikorch-setup-wt-'))
+    trash.push(repo, worktree)
+    await writeFile(join(worktree, 'package.json'), '{"name":"demo"}\n')
+    await writeFile(join(worktree, 'package-lock.json'), '{}\n')
+    setWorktreeSetupRunner(async () => ({ ok: false, output: 'ERR\n', exitCode: 1 }))
+
+    const result = await provisionWorktree(repo, worktree, {
+      copyLocalFiles: [],
+      dependencyMode: 'setup'
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      failure: { command: 'npm', args: ['install'], output: 'ERR\n', exitCode: 1 }
+    })
   })
 })

@@ -7,7 +7,8 @@ import {
   WORKTREE_LOCAL_FILE_CATALOG,
   parseWorktreeProvision,
   type WorktreeLocalFileName,
-  type WorktreeProvisionSettings
+  type WorktreeProvisionSettings,
+  type WorktreeSetupFailure
 } from '@shared/contracts/git'
 import { pathExists } from './git-exec'
 
@@ -17,7 +18,11 @@ export type WorktreeSetupRunner = (
   cwd: string,
   command: string,
   args: string[]
-) => Promise<{ ok: boolean; output: string }>
+) => Promise<{ ok: boolean; output: string; exitCode?: number | null }>
+
+export type WorktreeProvisionResult =
+  | { ok: true }
+  | { ok: false; failure: WorktreeSetupFailure }
 
 let setupRunner: WorktreeSetupRunner | null = null
 
@@ -76,7 +81,7 @@ function runSetupCommand(
   cwd: string,
   command: string,
   args: string[]
-): Promise<{ ok: boolean; output: string }> {
+): Promise<{ ok: boolean; output: string; exitCode?: number | null }> {
   if (setupRunner) return setupRunner(cwd, command, args)
   return new Promise((resolve) => {
     const child = spawn(command, args, {
@@ -87,7 +92,10 @@ function runSetupCommand(
     let output = ''
     const timer = setTimeout(() => {
       child.kill('SIGTERM')
-      resolve({ ok: false, output: output || `timed out running ${command} ${args.join(' ')}` })
+      resolve({
+        ok: false,
+        output: output || `timed out running ${command} ${args.join(' ')}`
+      })
     }, SETUP_TIMEOUT_MS)
     child.stdout?.on('data', (chunk: Buffer) => {
       output += chunk.toString()
@@ -101,38 +109,49 @@ function runSetupCommand(
     })
     child.on('close', (code) => {
       clearTimeout(timer)
-      resolve({ ok: code === 0, output })
+      resolve({ ok: code === 0, output, exitCode: code })
     })
   })
 }
 
-async function runSetupInstall(worktreePath: string): Promise<void> {
+async function runSetupInstall(worktreePath: string): Promise<WorktreeProvisionResult> {
   const spec = await detectWorktreeSetupCommand(worktreePath)
-  if (!spec) return
-  await runSetupCommand(worktreePath, spec.command, spec.args)
+  if (!spec) return { ok: true }
+  const result = await runSetupCommand(worktreePath, spec.command, spec.args)
+  if (result.ok) return { ok: true }
+  return {
+    ok: false,
+    failure: {
+      command: spec.command,
+      args: spec.args,
+      output: result.output,
+      exitCode: result.exitCode ?? null
+    }
+  }
 }
 
 /**
  * Copy only the files this repo explicitly allowed, then apply the dependency
  * mode. Secrets (.env, .npmrc) are off by default. Sharing node_modules is
- * a speed option, not an isolation guarantee.
+ * a speed option, not an isolation guarantee. Isolated mode does not install.
  */
 export async function provisionWorktree(
   repoRoot: string,
   worktreePath: string,
   settings: WorktreeProvisionSettings = DEFAULT_WORKTREE_PROVISION
-): Promise<void> {
-  if (repoRoot === worktreePath) return
+): Promise<WorktreeProvisionResult> {
+  if (repoRoot === worktreePath) return { ok: true }
   const provision = parseWorktreeProvision(settings)
   for (const name of provision.copyLocalFiles) {
     await copyAllowedFile(repoRoot, worktreePath, name)
   }
   if (provision.dependencyMode === 'share') {
     await linkNodeModules(repoRoot, worktreePath)
-    return
+    return { ok: true }
   }
   await dropSharedNodeModulesLink(worktreePath)
   if (provision.dependencyMode === 'setup') {
-    await runSetupInstall(worktreePath)
+    return runSetupInstall(worktreePath)
   }
+  return { ok: true }
 }

@@ -15,10 +15,9 @@ import {
   agentKindLabel,
   applyPhaseIndex,
   buildAgentWorkCards,
-  fileCountLabel,
   friendlyAgentWorkError,
   groupAgentWork,
-  validationSummary,
+  setupFailureDetail,
   type AgentWorkCard,
   type ApplyPhase
 } from '@renderer/lib/agent-work'
@@ -31,8 +30,8 @@ const DEPENDENCY_MODES: Array<{
 }> = [
   {
     id: 'isolated',
-    label: 'Separate install',
-    hint: 'Each agent copy installs its own dependencies.'
+    label: 'Isolated',
+    hint: 'Do not share dependencies.'
   },
   {
     id: 'share',
@@ -81,6 +80,7 @@ export function AgentIsolationBlock({
   const cancelReview = useIsolationStore((state) => state.abort)
   const discardRun = useIsolationStore((state) => state.discard)
   const updateProvision = useIsolationStore((state) => state.updateProvision)
+  const retrySetup = useIsolationStore((state) => state.retrySetup)
   const openFoldReview = useEditorStore((state) => state.openFoldReview)
   const reopenAgentRun = useWorkspaceStore((state) => state.reopenAgentRun)
   const openResolverPanel = useWorkspaceStore((state) => state.openResolverPanel)
@@ -109,7 +109,7 @@ export function AgentIsolationBlock({
     snapshot.provision.copyLocalFiles.length > 0 ||
     Boolean(snapshot.targetBranch)
 
-  if (!hasInbox && !hasSetup && !snapshot.error && !snapshot.notice) {
+  if (!hasInbox && !hasSetup && !snapshot.error && !snapshot.notice && !snapshot.setupError) {
     return null
   }
 
@@ -148,8 +148,18 @@ export function AgentIsolationBlock({
   const handleApply = async (card: AgentWorkCard): Promise<void> => {
     const lane = laneFor(card)
     if (!lane || apply) return
+    const current = useIsolationStore.getState().byProject[projectId]?.fold ?? fold
+    const alreadyPrepared =
+      Boolean(current) &&
+      current?.panelId === lane.panelId &&
+      current.status !== 'empty' &&
+      !current.stale
     setExpandedId(card.id)
-    setApply({ id: card.id, phase: 'preparing' })
+    setApply({ id: card.id, phase: alreadyPrepared ? 'applying' : 'preparing' })
+    const stop = window.api.git?.onApplyPhase?.((event) => {
+      if (event.panelId !== lane.panelId) return
+      setApply({ id: card.id, phase: event.phase })
+    })
     try {
       const session = await ensurePrepared(lane)
       if (!session || session.status === 'empty') {
@@ -161,23 +171,22 @@ export function AgentIsolationBlock({
         setReviewingId(card.id)
         return
       }
-      setApply({ id: card.id, phase: 'validating' })
-      await new Promise((resolve) => window.setTimeout(resolve, 280))
-      setApply({ id: card.id, phase: 'applying' })
       const ok = await applyChanges(projectId, projectRoot)
       if (ok) {
         void useGitStore.getState().refresh(projectId, projectRoot)
         setApply({ id: card.id, phase: 'done' })
         setReviewingId(null)
         window.setTimeout(() => {
-          setApply((current) => (current?.id === card.id ? null : current))
-          setExpandedId((current) => (current === card.id ? null : current))
+          setApply((item) => (item?.id === card.id ? null : item))
+          setExpandedId((item) => (item === card.id ? null : item))
         }, 1600)
         return
       }
       setApply({ id: card.id, phase: 'failed' })
     } catch {
       setApply({ id: card.id, phase: 'failed' })
+    } finally {
+      stop?.()
     }
   }
 
@@ -233,7 +242,6 @@ export function AgentIsolationBlock({
     const expanded = expandedId === card.id || reviewingId === card.id || apply?.id === card.id
     const session = fold?.panelId === card.panelId && fold.status !== 'empty' ? fold : null
     const reviewFiles = session?.files.length ? session.files : card.files
-    const checks = validationSummary(session?.validation)
     const applying = apply?.id === card.id
     const phase = applying ? apply.phase : null
     const otherKinds = [...new Set(snapshot.lanes.map((item) => item.kind))]
@@ -245,6 +253,7 @@ export function AgentIsolationBlock({
         className={cn(
           'agent-work-card',
           card.tone === 'attention' && 'is-attention',
+          card.tone === 'review' && 'is-review',
           card.tone === 'ready' && 'is-ready',
           phase === 'done' && 'is-applied'
         )}
@@ -263,6 +272,13 @@ export function AgentIsolationBlock({
               {phase === 'done' ? 'Applied to project' : card.statusLabel}
             </p>
           </header>
+          {card.summary.length > 0 && (
+            <ul className="agent-work-summary">
+              {card.summary.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          )}
           <p className="agent-work-detail">{card.detail}</p>
         </button>
 
@@ -298,10 +314,6 @@ export function AgentIsolationBlock({
 
             {!phase && card.tone === 'ready' && (
               <>
-                <p className="agent-work-copy">
-                  {fileCountLabel(reviewFiles.length)}
-                  {checks ? ` · ${checks}` : ''}
-                </p>
                 {reviewingId === card.id && reviewFiles.length > 0 && (
                   <ul className="agent-work-files">
                     {reviewFiles.map((file) => (
@@ -334,15 +346,33 @@ export function AgentIsolationBlock({
               </>
             )}
 
+            {!phase && card.tone === 'review' && (
+              <>
+                {card.overlapPaths.length > 0 && (
+                  <ul className="agent-work-files">
+                    {card.overlapPaths.slice(0, 8).map((file) => (
+                      <li key={file}>{file}</li>
+                    ))}
+                  </ul>
+                )}
+                <div className="iso-actions">
+                  <button type="button" className="iso-btn" onClick={() => void handleReview(card)}>
+                    Review
+                  </button>
+                  <button
+                    type="button"
+                    className="iso-btn iso-btn-primary"
+                    disabled={snapshot.loading}
+                    onClick={() => void handleApply(card)}
+                  >
+                    Apply to Project
+                  </button>
+                </div>
+              </>
+            )}
+
             {!phase && card.tone === 'attention' && (
               <>
-                <p className="agent-work-copy">
-                  {card.overlapLabels.length > 0
-                    ? `Another agent also changed ${card.conflictPaths[0] ?? 'the same files'}.`
-                    : card.conflictPaths.length > 0
-                      ? `${card.conflictPaths.length === 1 ? '1 file needs' : `${card.conflictPaths.length} files need`} attention.`
-                      : 'These changes need a closer look.'}
-                </p>
                 {card.conflictPaths.length > 0 && (
                   <ul className="agent-work-files">
                     {card.conflictPaths.slice(0, 8).map((file) => (
@@ -424,6 +454,26 @@ export function AgentIsolationBlock({
   return (
     <section className="iso-block agent-work">
       <p className="iso-heading">Agent work</p>
+      {snapshot.setupError && (
+        <div className="agent-work-setup-error">
+          <p className="iso-error">Agent workspace setup failed</p>
+          <p className="agent-work-copy">{setupFailureDetail(snapshot.setupError)}</p>
+          <details>
+            <summary>View Details</summary>
+            <pre>{snapshot.setupError.output.trim() || 'No extra output.'}</pre>
+          </details>
+          <div className="iso-actions">
+            <button
+              type="button"
+              className="iso-btn iso-btn-primary"
+              disabled={snapshot.loading}
+              onClick={() => void retrySetup(projectId, projectRoot)}
+            >
+              {snapshot.loading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Retry'}
+            </button>
+          </div>
+        </div>
+      )}
       {groups.ready.length > 0 && (
         <div className="iso-section">
           <p className="agent-work-group">
@@ -438,6 +488,14 @@ export function AgentIsolationBlock({
             Working <span>{groups.working.length}</span>
           </p>
           {groups.working.map(renderCard)}
+        </div>
+      )}
+      {groups.review.length > 0 && (
+        <div className="iso-section">
+          <p className="agent-work-group">
+            Review recommended <span>{groups.review.length}</span>
+          </p>
+          {groups.review.map(renderCard)}
         </div>
       )}
       {groups.attention.length > 0 && (

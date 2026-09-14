@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { mkdir, readFile, rm } from 'fs/promises'
 import { dirname, join, resolve } from 'path'
 import type {
+  AgentApplyPhase,
   AgentRunRecord,
   AgentRunRecovery,
   GitDiffResponse,
@@ -11,11 +12,14 @@ import type {
   IsolationInspectResponse,
   IsolationLane,
   IsolationOverlap,
+  IsolationProjectRequest,
   MergeQueueItem,
   WorktreeProvisionRequest,
-  WorktreeProvisionSettings
+  WorktreeProvisionSettings,
+  WorktreeSetupFailure
 } from '@shared/contracts/git'
 import { parseWorktreeProvision } from '@shared/contracts/git'
+import { summarizeChangedWork } from '@shared/lib/agent-work-summary'
 import { detectLanguage } from '@shared/lib/languages'
 import {
   buildConflictResolvePrompt,
@@ -45,7 +49,7 @@ import {
 } from './agent-lifecycle'
 import { reconcileAgentRuns } from './reconcile'
 import { runIsolationValidation } from './validation'
-import { listPresentWorktreeLocalFiles } from './worktree-setup'
+import { listPresentWorktreeLocalFiles, provisionWorktree } from './worktree-setup'
 import {
   agentBranchName,
   buildIntegrationWorktreePath,
@@ -57,6 +61,8 @@ import {
 const MAX_SNIPPET = 1_500
 const MAX_WORKING_BYTES = 2 * 1024 * 1024
 const foldByRepo = new Map<string, IsolationFoldSession>()
+
+export type ApplyProgressCallback = (phase: AgentApplyPhase, panelId: string) => void
 
 function worktreeBaseDir(override?: string): string {
   return override ?? app.getPath('userData')
@@ -94,6 +100,12 @@ async function listChangedFiles(worktreePath: string, mainHead: string): Promise
   const staged = await runGit(worktreePath, ['diff', '--name-only', '--cached']).catch(() => '')
   const untracked = await runGit(worktreePath, ['ls-files', '--others', '--exclude-standard']).catch(() => '')
   return uniqueSorted(lines([committed, unstaged, staged, untracked].join('\n')))
+}
+
+async function listCommitSubjects(worktreePath: string, baseSha: string): Promise<string[]> {
+  if (!baseSha) return []
+  const raw = await runGit(worktreePath, ['log', '--format=%s', '-n', '8', `${baseSha}..HEAD`]).catch(() => '')
+  return lines(raw)
 }
 
 async function listUnmerged(cwd: string): Promise<string[]> {
@@ -251,6 +263,7 @@ async function describeLane(input: {
       worktreePath: input.worktreePath,
       branch: input.run.branch,
       files: [],
+      summary: [],
       targetBranch: input.run.targetBranch,
       baseSha: input.run.baseSha,
       isolationPolicy: input.run.isolationPolicy,
@@ -262,6 +275,8 @@ async function describeLane(input: {
   }
   const files = input.targetSha ? await listChangedFiles(input.worktreePath, input.targetSha) : []
   const branch = (await currentBranch(input.worktreePath)) ?? agentBranchName(input.kind, input.panelId)
+  const baseSha = input.run?.baseSha ?? input.targetSha
+  const subjects = await listCommitSubjects(input.worktreePath, baseSha)
   return {
     panelId: input.panelId,
     runId: input.run?.id ?? input.panelId,
@@ -270,8 +285,9 @@ async function describeLane(input: {
     worktreePath: input.worktreePath,
     branch,
     files,
+    summary: summarizeChangedWork(files, subjects),
     targetBranch: input.run?.targetBranch ?? input.targetBranch,
-    baseSha: input.run?.baseSha ?? input.targetSha,
+    baseSha,
     isolationPolicy: input.run?.isolationPolicy ?? 'isolated',
     isolationState: input.attached ? 'ready' : 'parked',
     attached: input.attached,
@@ -412,7 +428,8 @@ export async function inspectIsolation(
     targetBranch: target.branch,
     targetSha: target.sha,
     provision: state.provision,
-    availableLocalFiles: await listPresentWorktreeLocalFiles(repoRoot)
+    availableLocalFiles: await listPresentWorktreeLocalFiles(repoRoot),
+    setupError: state.setupError
   }
 }
 
@@ -430,12 +447,34 @@ export async function updateWorktreeProvision(
     copyLocalFiles: request.copyLocalFiles,
     dependencyMode: request.dependencyMode
   })
+  if (state.provision.dependencyMode !== 'setup') {
+    state.setupError = null
+  }
   await saveRepoIsolation(state, baseDir)
   return {
     ok: true,
     provision: state.provision,
     availableLocalFiles: await listPresentWorktreeLocalFiles(repoRoot)
   }
+}
+
+export async function retryWorktreeSetup(
+  request: IsolationProjectRequest & { baseDir?: string }
+): Promise<{ ok: boolean; setupError: WorktreeSetupFailure | null }> {
+  const repoRoot = await repoKey(request.projectRoot)
+  const baseDir = worktreeBaseDir(request.baseDir)
+  const state = await loadRepoIsolation(repoRoot, baseDir)
+  const provision = parseWorktreeProvision(state.provision)
+  let failure: WorktreeSetupFailure | null = null
+  for (const run of state.runs) {
+    if (isTerminalAgentRunStatus(run.status)) continue
+    if (!(await pathExists(run.worktreePath))) continue
+    const result = await provisionWorktree(repoRoot, run.worktreePath, provision)
+    if (!result.ok && !failure) failure = result.failure
+  }
+  state.setupError = failure
+  await saveRepoIsolation(state, baseDir)
+  return { ok: !failure, setupError: failure }
 }
 
 export async function prepareFold(input: {
@@ -445,6 +484,7 @@ export async function prepareFold(input: {
   title: string
   worktreePath: string
   baseDir?: string
+  onPhase?: ApplyProgressCallback
 }): Promise<IsolationFoldSession> {
   const repoRoot = await repoKey(input.projectRoot)
   const baseDir = worktreeBaseDir(input.baseDir)
@@ -452,6 +492,7 @@ export async function prepareFold(input: {
     throw new Error('Worktree path is not managed by Bikorch')
   }
 
+  input.onPhase?.('preparing', input.panelId)
   const target = await resolveTarget(repoRoot)
   await commitIfDirty(input.worktreePath, input.title)
   const branch = (await currentBranch(input.worktreePath)) ?? agentBranchName(input.kind, input.panelId)
@@ -494,6 +535,7 @@ export async function prepareFold(input: {
   await mkdir(dirname(integrationPath), { recursive: true })
   await runGit(repoRoot, ['worktree', 'add', '-b', integrationBranch, integrationPath, target.branch])
 
+  input.onPhase?.('combining', input.panelId)
   let status: IsolationFoldSession['status'] = 'clean'
   try {
     await runGit(integrationPath, ['merge', '--no-edit', branch])
@@ -551,6 +593,7 @@ export async function prepareFold(input: {
     conflictsVerified: status !== 'conflict'
   }
   if (status === 'clean' && session.integrationPath) {
+    input.onPhase?.('validating', input.panelId)
     session.validation = await runIsolationValidation(session.integrationPath)
   }
   foldByRepo.set(repoRoot, session)
@@ -579,6 +622,7 @@ export async function prepareFold(input: {
 export async function syncFold(input: {
   projectRoot: string
   baseDir?: string
+  onPhase?: ApplyProgressCallback
 }): Promise<IsolationFoldSession> {
   const repoRoot = await repoKey(input.projectRoot)
   const session = foldByRepo.get(repoRoot) ?? (await loadRepoIsolation(repoRoot, worktreeBaseDir(input.baseDir))).fold
@@ -591,7 +635,8 @@ export async function syncFold(input: {
     kind: session.kind,
     title: session.title,
     worktreePath: session.agentWorktreePath,
-    baseDir: input.baseDir
+    baseDir: input.baseDir,
+    onPhase: input.onPhase
   })
 }
 
@@ -641,6 +686,7 @@ async function finishIntegrationMerge(session: IsolationFoldSession): Promise<{ 
 export async function acceptFold(input: {
   projectRoot: string
   baseDir?: string
+  onPhase?: ApplyProgressCallback
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const repoRoot = await repoKey(input.projectRoot)
   const baseDir = worktreeBaseDir(input.baseDir)
@@ -648,6 +694,7 @@ export async function acceptFold(input: {
   if (!session || !session.integrationPath || !session.integrationBranch) {
     return { ok: false, error: 'Nothing to accept' }
   }
+  input.onPhase?.('applying', session.panelId)
   foldByRepo.set(repoRoot, session)
 
   const liveSha = await headSha(repoRoot)

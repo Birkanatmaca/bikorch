@@ -111,7 +111,7 @@ export function SidebarActivityBar({
           conflict
             ? 'Needs attention'
             : overlapCount > 0
-              ? 'Agent work needs attention'
+              ? 'Review recommended'
               : changesActive
                 ? 'Hide changes'
                 : 'Show changes'
@@ -120,7 +120,7 @@ export function SidebarActivityBar({
           conflict
             ? 'Show changes, needs attention'
             : overlapCount > 0
-              ? 'Show changes, agent work needs attention'
+              ? 'Show changes, review recommended'
               : changesActive
                 ? 'Hide changes'
                 : 'Show changes'

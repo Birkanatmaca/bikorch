@@ -37,6 +37,8 @@ import {
   type WorktreeProvisionRequest,
   type WorktreeProvisionSettings,
   type WorktreeLocalFileName,
+  type WorktreeSetupFailure,
+  type AgentApplyPhaseEvent,
   GIT_IPC
 } from '@shared/contracts/git'
 import {
@@ -272,6 +274,10 @@ export interface GitApi {
     provision: WorktreeProvisionSettings
     availableLocalFiles: WorktreeLocalFileName[]
   }>
+  retryWorktreeSetup: (
+    request: IsolationProjectRequest
+  ) => Promise<{ ok: boolean; setupError: WorktreeSetupFailure | null }>
+  onApplyPhase: (callback: (event: AgentApplyPhaseEvent) => void) => () => void
 }
 
 export interface PersistenceApi {
@@ -432,7 +438,17 @@ const gitApi: GitApi = {
   checkpointIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_CHECKPOINT, request),
   discardIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_DISCARD, request),
   noteAgentSession: (request) => ipcRenderer.invoke(GIT_IPC.AGENT_SESSION_NOTE, request),
-  updateWorktreeProvision: (request) => ipcRenderer.invoke(GIT_IPC.WORKTREE_PROVISION, request)
+  updateWorktreeProvision: (request) => ipcRenderer.invoke(GIT_IPC.WORKTREE_PROVISION, request),
+  retryWorktreeSetup: (request) => ipcRenderer.invoke(GIT_IPC.WORKTREE_SETUP_RETRY, request),
+  onApplyPhase: (callback) => {
+    const listener = (_event: IpcRendererEvent, payload: AgentApplyPhaseEvent): void => {
+      callback(payload)
+    }
+    ipcRenderer.on(GIT_IPC.APPLY_PHASE, listener)
+    return () => {
+      ipcRenderer.removeListener(GIT_IPC.APPLY_PHASE, listener)
+    }
+  }
 }
 
 const persistenceApi: PersistenceApi = {

@@ -4,7 +4,7 @@ import { dirname } from 'path'
 import type { AgentWorktreeKind } from '@shared/contracts/git'
 import { upsertAgentRun, loadRepoIsolation, saveRepoIsolation } from './agent-run-store'
 import { commitIfDirty, currentBranch, headSha, isWorkingTreeDirty, pathExists, tryRepoRoot, runGit } from './git-exec'
-import { provisionWorktree } from './worktree-setup'
+import { provisionWorktree, type WorktreeProvisionResult } from './worktree-setup'
 import { buildResumeContext } from './agent-lifecycle'
 import { agentBranchName, buildAgentWorktreePath, isManagedWorktreePath } from './worktree-paths'
 
@@ -18,6 +18,20 @@ function listWorktreePaths(porcelain: string): string[] {
     .filter((line) => line.startsWith('worktree '))
     .map((line) => line.slice('worktree '.length).trim())
     .filter(Boolean)
+}
+
+async function applyWorktreeProvision(
+  repoRoot: string,
+  worktreePath: string,
+  baseDir: string
+): Promise<WorktreeProvisionResult> {
+  const state = await loadRepoIsolation(repoRoot, baseDir)
+  const result = await provisionWorktree(repoRoot, worktreePath, state.provision)
+  if (!result.ok) {
+    state.setupError = result.failure
+    await saveRepoIsolation(state, baseDir)
+  }
+  return result
 }
 
 async function unlinkWorktree(repoRoot: string, worktreePath: string, force: boolean): Promise<void> {
@@ -131,7 +145,7 @@ export async function ensureAgentWorktree(input: {
     const listed = listWorktreePaths(await runGit(repoRoot, ['worktree', 'list', '--porcelain']))
     const alreadyLinked = listed.some((path) => path.toLowerCase() === worktreePath.toLowerCase())
     if (alreadyLinked && (await pathExists(worktreePath))) {
-      await provisionWorktree(repoRoot, worktreePath, (await loadRepoIsolation(repoRoot, baseDir)).provision)
+      await applyWorktreeProvision(repoRoot, worktreePath, baseDir)
       const remembered = await rememberRun({
         projectRoot: input.projectRoot,
         repoRoot,
@@ -151,11 +165,7 @@ export async function ensureAgentWorktree(input: {
       if (!(await isWorkingTreeDirty(worktreePath))) {
         await unlinkWorktree(repoRoot, worktreePath, true)
       } else {
-        await provisionWorktree(
-          repoRoot,
-          worktreePath,
-          (await loadRepoIsolation(repoRoot, baseDir)).provision
-        )
+        await applyWorktreeProvision(repoRoot, worktreePath, baseDir)
         const remembered = await rememberRun({
           projectRoot: input.projectRoot,
           repoRoot,
@@ -178,7 +188,7 @@ export async function ensureAgentWorktree(input: {
     } else {
       await runGit(repoRoot, ['worktree', 'add', '-b', branch, worktreePath])
     }
-    await provisionWorktree(repoRoot, worktreePath, (await loadRepoIsolation(repoRoot, baseDir)).provision)
+    await applyWorktreeProvision(repoRoot, worktreePath, baseDir)
     const remembered = await rememberRun({
       projectRoot: input.projectRoot,
       repoRoot,

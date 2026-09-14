@@ -3,11 +3,12 @@ import type {
   IsolationFoldSession,
   IsolationLane,
   IsolationOverlap,
-  IsolationValidation
+  IsolationValidation,
+  WorktreeSetupFailure
 } from '@shared/contracts/git'
 import type { PtySessionStatus } from '@shared/contracts/pty'
 
-export type AgentWorkTone = 'working' | 'ready' | 'attention'
+export type AgentWorkTone = 'working' | 'ready' | 'review' | 'attention'
 
 export type ApplyPhase = 'preparing' | 'combining' | 'validating' | 'applying' | 'done' | 'failed'
 
@@ -20,8 +21,10 @@ export interface AgentWorkCard {
   tone: AgentWorkTone
   statusLabel: string
   detail: string
+  summary: string[]
   files: string[]
   conflictPaths: string[]
+  overlapPaths: string[]
   overlapLabels: string[]
   attached: boolean
   branch: string
@@ -70,6 +73,17 @@ export function validationSummary(validation?: IsolationValidation): string | nu
   return null
 }
 
+export function setupFailureCommand(failure: WorktreeSetupFailure): string {
+  return [failure.command, ...failure.args].filter(Boolean).join(' ')
+}
+
+export function setupFailureDetail(failure: WorktreeSetupFailure): string {
+  const command = setupFailureCommand(failure)
+  if (typeof failure.exitCode === 'number') return `${command} exited with code ${failure.exitCode}`
+  const first = failure.output.trim().split(/\r?\n/)[0]
+  return first || `${command} failed`
+}
+
 export function friendlyAgentWorkError(message: string): string {
   const text = message.trim()
   if (!text) return 'Could not apply these changes.'
@@ -91,6 +105,35 @@ function sessionOf(lane: IsolationLane, sessions: Record<string, PtySessionStatu
   return sessions[lane.panelId] ?? (lane.writerLocked ? undefined : sessions[lane.runId])
 }
 
+function unique(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))]
+}
+
+function overlapAgentNames(hit: IsolationOverlap, lanes: IsolationLane[]): string[] {
+  return unique(
+    hit.panelIds
+      .map((id) => lanes.find((lane) => lane.panelId === id)?.kind)
+      .filter((kind): kind is AgentWorktreeKind => Boolean(kind))
+      .map(agentKindLabel)
+  )
+}
+
+export function overlapChangedLine(names: string[], path: string): string {
+  if (names.length <= 1) {
+    const who = names[0] ?? 'Another agent'
+    return `${who} also changed ${path}`
+  }
+  if (names.length === 2) return `Both ${names[0]} and ${names[1]} changed ${path}`
+  const last = names[names.length - 1]
+  return `${names.slice(0, -1).join(', ')}, and ${last} changed ${path}`
+}
+
+function conflictDetail(count: number): string {
+  if (count <= 0) return 'These changes could not be combined'
+  if (count === 1) return '1 change could not be combined'
+  return `${count} changes could not be combined`
+}
+
 export function buildAgentWorkCards(input: {
   lanes: IsolationLane[]
   overlaps: IsolationOverlap[]
@@ -103,37 +146,37 @@ export function buildAgentWorkCards(input: {
     const session = sessionOf(lane, input.sessions)
     const conflictPaths = fold?.status === 'conflict' ? fold.conflicts.map((file) => file.path) : []
     const overlapPaths = hits.map((item) => item.path)
-    const overlapLabels = [...new Set(hits.flatMap((item) => item.labels.filter((label) => label !== lane.title)))]
+    const overlapNames = hits[0] ? overlapAgentNames(hits[0], input.lanes) : []
     const files = fold?.files.length ? fold.files : lane.files
     const busy = session === 'busy' || session === 'starting'
     const live = session === 'running' || session === 'waiting' || busy
-    const needsAttention =
-      Boolean(fold?.status === 'conflict') || hits.length > 0 || lane.runStatus === 'conflict'
+    const hasConflict = Boolean(fold?.status === 'conflict') || lane.runStatus === 'conflict'
+    const hasOverlap = hits.length > 0 && !hasConflict
+    const checks = validationSummary(fold?.validation)
 
     let tone: AgentWorkTone = 'ready'
-    if (needsAttention) tone = 'attention'
+    if (hasConflict) tone = 'attention'
+    else if (hasOverlap) tone = 'review'
     else if (busy || (lane.attached && live && files.length === 0)) tone = 'working'
     else if (files.length > 0) tone = 'ready'
     else if (lane.attached && live) tone = 'working'
     else tone = 'working'
 
-    const otherAgent = overlapLabels[0]
     let detail = fileCountLabel(files.length)
+    if (checks && (tone === 'ready' || tone === 'review')) {
+      detail = `${fileCountLabel(files.length)} · ${checks}`
+    }
     if (tone === 'working' && files.length === 0) detail = 'Working…'
-    if (tone === 'attention' && conflictPaths.length > 0) {
-      detail =
-        conflictPaths.length === 1
-          ? `1 file needs attention`
-          : `${conflictPaths.length} files need attention`
-      if (otherAgent) detail = `Also changed by ${otherAgent}`
-    } else if (tone === 'attention' && overlapPaths.length > 0 && otherAgent) {
-      detail = `Also changed by ${otherAgent}`
+    if (tone === 'attention') detail = conflictDetail(conflictPaths.length)
+    else if (tone === 'review' && hits[0]) {
+      detail = overlapChangedLine(overlapNames, hits[0].path)
     }
 
     let statusLabel = 'Ready'
     if (tone === 'working') statusLabel = 'Working…'
+    if (tone === 'review') statusLabel = 'Review recommended'
     if (tone === 'attention') statusLabel = 'Needs attention'
-    if (fold?.status === 'clean') statusLabel = 'Ready to apply'
+    if (fold?.status === 'clean' && tone === 'ready') statusLabel = 'Ready to apply'
 
     return {
       id: lane.runId,
@@ -144,9 +187,11 @@ export function buildAgentWorkCards(input: {
       tone,
       statusLabel,
       detail,
+      summary: lane.summary ?? [],
       files,
-      conflictPaths: conflictPaths.length > 0 ? conflictPaths : overlapPaths,
-      overlapLabels,
+      conflictPaths,
+      overlapPaths,
+      overlapLabels: overlapNames,
       attached: lane.attached,
       branch: lane.branch,
       baseSha: lane.baseSha,
@@ -160,11 +205,13 @@ export function buildAgentWorkCards(input: {
 export function groupAgentWork(cards: AgentWorkCard[]): {
   ready: AgentWorkCard[]
   working: AgentWorkCard[]
+  review: AgentWorkCard[]
   attention: AgentWorkCard[]
 } {
   return {
     ready: cards.filter((card) => card.tone === 'ready'),
     working: cards.filter((card) => card.tone === 'working'),
+    review: cards.filter((card) => card.tone === 'review'),
     attention: cards.filter((card) => card.tone === 'attention')
   }
 }

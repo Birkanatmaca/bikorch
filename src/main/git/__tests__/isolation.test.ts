@@ -98,16 +98,19 @@ describe('agent isolation merge', { timeout: 20_000 }, () => {
     })
     expect(snapshot.overlaps).toEqual([])
 
+    const phases: string[] = []
     const fold = await prepareFold({
       projectRoot: repo,
       panelId: claudeId,
       kind: 'claude',
       title: 'Auth',
       worktreePath: claude.worktreePath,
-      baseDir
+      baseDir,
+      onPhase: (phase) => phases.push(phase)
     })
     expect(fold.status).toBe('clean')
     expect(fold.files).toContain('auth.ts')
+    expect(phases).toEqual(['preparing', 'combining', 'validating'])
     await abortFold({ projectRoot: repo, baseDir })
   })
 
@@ -136,15 +139,18 @@ describe('agent isolation merge', { timeout: 20_000 }, () => {
     const accepted = await acceptFold({ projectRoot: repo, baseDir })
     expect(accepted.ok).toBe(true)
 
+    const conflictPhases: string[] = []
     const second = await prepareFold({
       projectRoot: repo,
       panelId: cursorId,
       kind: 'cursor',
       title: 'UI',
       worktreePath: cursor.worktreePath,
-      baseDir
+      baseDir,
+      onPhase: (phase) => conflictPhases.push(phase)
     })
     expect(second.status).toBe('conflict')
+    expect(conflictPhases).toEqual(['preparing', 'combining'])
     expect(second.conflicts.some((file) => file.path === 'shared.ts')).toBe(true)
     expect(second.conflicts[0]?.hunks).toContain('<<<<<<<')
     expect(second.integrationPath).toBeTruthy()
@@ -390,6 +396,7 @@ describe('agent isolation merge', { timeout: 20_000 }, () => {
     const snapshot = await inspectIsolation({ projectRoot: repo, baseDir, lanes: [] })
     expect(snapshot.provision).toEqual({ copyLocalFiles: [], dependencyMode: 'isolated' })
     expect(snapshot.availableLocalFiles).toContain('.env')
+    expect(snapshot.setupError).toBeNull()
     const saved = await updateWorktreeProvision({
       projectRoot: repo,
       baseDir,
