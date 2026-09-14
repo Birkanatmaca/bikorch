@@ -11,8 +11,11 @@ import type {
   IsolationInspectResponse,
   IsolationLane,
   IsolationOverlap,
-  MergeQueueItem
+  MergeQueueItem,
+  WorktreeProvisionRequest,
+  WorktreeProvisionSettings
 } from '@shared/contracts/git'
+import { parseWorktreeProvision } from '@shared/contracts/git'
 import { detectLanguage } from '@shared/lib/languages'
 import {
   buildConflictResolvePrompt,
@@ -42,6 +45,7 @@ import {
 } from './agent-lifecycle'
 import { reconcileAgentRuns } from './reconcile'
 import { runIsolationValidation } from './validation'
+import { listPresentWorktreeLocalFiles } from './worktree-setup'
 import {
   agentBranchName,
   buildIntegrationWorktreePath,
@@ -396,6 +400,7 @@ export async function inspectIsolation(
   state.targetBranch = target.branch
   state.targetSha = target.sha
   state.fold = fold
+  state.provision = parseWorktreeProvision(state.provision)
   await saveRepoIsolation(state, baseDir)
 
   return {
@@ -405,7 +410,31 @@ export async function inspectIsolation(
     queue: queueFrom(lanes, fold),
     recoveries: recoveriesFrom(lanes, fold),
     targetBranch: target.branch,
-    targetSha: target.sha
+    targetSha: target.sha,
+    provision: state.provision,
+    availableLocalFiles: await listPresentWorktreeLocalFiles(repoRoot)
+  }
+}
+
+export async function updateWorktreeProvision(
+  request: WorktreeProvisionRequest & { baseDir?: string }
+): Promise<{
+  ok: true
+  provision: WorktreeProvisionSettings
+  availableLocalFiles: IsolationInspectResponse['availableLocalFiles']
+}> {
+  const repoRoot = await repoKey(request.projectRoot)
+  const baseDir = worktreeBaseDir(request.baseDir)
+  const state = await loadRepoIsolation(repoRoot, baseDir)
+  state.provision = parseWorktreeProvision({
+    copyLocalFiles: request.copyLocalFiles,
+    dependencyMode: request.dependencyMode
+  })
+  await saveRepoIsolation(state, baseDir)
+  return {
+    ok: true,
+    provision: state.provision,
+    availableLocalFiles: await listPresentWorktreeLocalFiles(repoRoot)
   }
 }
 

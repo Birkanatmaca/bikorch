@@ -9,7 +9,7 @@ vi.mock('electron', () => ({
 }))
 
 import { ensureAgentWorktree, removeAgentWorktree } from '../worktrees'
-import { abortFold, clearFoldSessions, inspectIsolation, prepareFold } from '../isolation'
+import { abortFold, clearFoldSessions, inspectIsolation, prepareFold, updateWorktreeProvision } from '../isolation'
 import { buildConflictResolvePrompt } from '@shared/lib/isolation-prompt'
 
 function run(cwd: string, command: string, args: string[]): Promise<string> {
@@ -380,5 +380,22 @@ describe('agent isolation merge', { timeout: 20_000 }, () => {
     expect(second.ok).toBe(false)
     if (second.ok) throw new Error('expected writer lock')
     expect(second.error).toMatch(/active CLI/i)
+  })
+
+  it('defaults worktree provision to no secret copy and isolated installs', async () => {
+    const repo = await initRepo()
+    const baseDir = await mkdtemp(join(tmpdir(), 'bikorch-iso-base-'))
+    trash.push(repo, baseDir)
+    await writeFile(join(repo, '.env'), 'SECRET=1\n')
+    const snapshot = await inspectIsolation({ projectRoot: repo, baseDir, lanes: [] })
+    expect(snapshot.provision).toEqual({ copyLocalFiles: [], dependencyMode: 'isolated' })
+    expect(snapshot.availableLocalFiles).toContain('.env')
+    const saved = await updateWorktreeProvision({
+      projectRoot: repo,
+      baseDir,
+      copyLocalFiles: ['.env'],
+      dependencyMode: 'share'
+    })
+    expect(saved.provision).toEqual({ copyLocalFiles: ['.env'], dependencyMode: 'share' })
   })
 })

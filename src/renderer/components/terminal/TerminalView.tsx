@@ -15,6 +15,7 @@ import {
   TERMINAL_LAYOUT_LOCK_EVENT
 } from '@renderer/lib/app-events'
 import { getTerminalOptions } from '@renderer/lib/terminal-theme'
+import { registerLiveTerminal, unregisterLiveTerminal } from '@renderer/lib/live-terminals'
 import { Button } from '@renderer/components/ui/Button'
 import {
   inferCliActivity,
@@ -209,6 +210,7 @@ export function TerminalView({
     const folderPathAtMount = project?.folderPath ?? null
 
     const terminal = new Terminal(getTerminalOptions(kind))
+    registerLiveTerminal(sessionId, kind, terminal)
 
     const fitAddon = new FitAddon()
     terminal.loadAddon(fitAddon)
@@ -504,7 +506,7 @@ export function TerminalView({
           cwd = isolated.worktreePath
           useWorkspaceStore.getState().setPanelWorktree(sessionId, isolated.worktreePath)
           term.writeln(
-            '\x1b[90m[Bikorch] Isolated copy — this agent edits its own folder, not the main project tree.\x1b[0m'
+            '\x1b[90m[Bikorch] Separate workspace — this agent edits its own copy until you apply it to the project.\x1b[0m'
           )
           if (isolated.resumeContext) {
             for (const line of isolated.resumeContext.split('\n')) {
@@ -512,8 +514,8 @@ export function TerminalView({
             }
           }
         } else if (!isolated.ok && isolated.error) {
-          term.writeln(`\x1b[33m[Bikorch] Could not isolate this agent: ${isolated.error}\x1b[0m`)
-          term.writeln('\x1b[33m[Bikorch] Falling back to the main project folder.\x1b[0m')
+          term.writeln(`\x1b[33m[Bikorch] Could not open a separate workspace: ${isolated.error}\x1b[0m`)
+          term.writeln('\x1b[33m[Bikorch] Falling back to the project folder.\x1b[0m')
         }
       }
       const projectIdNow = useWorkspaceStore.getState().activeProjectId
@@ -645,6 +647,7 @@ export function TerminalView({
       window.removeEventListener(FOCUS_TERMINAL_EVENT, onFocusRequest)
       window.removeEventListener(TERMINAL_LAYOUT_LOCK_EVENT, onLayoutLock)
       unsubscribe()
+      unregisterLiveTerminal(sessionId)
       terminal.dispose()
       terminalRef.current = null
       fitAddonRef.current = null

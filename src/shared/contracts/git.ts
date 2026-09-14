@@ -119,6 +119,58 @@ export interface GitSessionSnapshot {
   commits: Array<{ shortHash: string; subject: string }>
 }
 
+export const WORKTREE_LOCAL_FILE_CATALOG = [
+  '.env',
+  '.env.local',
+  '.env.development',
+  '.env.development.local',
+  '.npmrc',
+  '.yarnrc.yml',
+  '.pnpmfile.cjs',
+  '.nvmrc',
+  '.node-version',
+  '.python-version',
+  '.tool-versions'
+] as const
+
+export type WorktreeLocalFileName = (typeof WORKTREE_LOCAL_FILE_CATALOG)[number]
+export type WorktreeDependencyMode = 'isolated' | 'share' | 'setup'
+
+export interface WorktreeProvisionSettings {
+  /** Local files the user explicitly allowed this repo to copy into agent worktrees. */
+  copyLocalFiles: WorktreeLocalFileName[]
+  dependencyMode: WorktreeDependencyMode
+}
+
+export const DEFAULT_WORKTREE_PROVISION: WorktreeProvisionSettings = {
+  copyLocalFiles: [],
+  dependencyMode: 'isolated'
+}
+
+const WORKTREE_LOCAL_FILE_SET = new Set<string>(WORKTREE_LOCAL_FILE_CATALOG)
+
+export function isWorktreeLocalFileName(value: unknown): value is WorktreeLocalFileName {
+  return typeof value === 'string' && WORKTREE_LOCAL_FILE_SET.has(value)
+}
+
+export function isWorktreeDependencyMode(value: unknown): value is WorktreeDependencyMode {
+  return value === 'isolated' || value === 'share' || value === 'setup'
+}
+
+export function parseWorktreeProvision(value: unknown): WorktreeProvisionSettings {
+  if (!value || typeof value !== 'object') return { ...DEFAULT_WORKTREE_PROVISION }
+  const raw = value as Partial<WorktreeProvisionSettings>
+  const copyLocalFiles = Array.isArray(raw.copyLocalFiles)
+    ? [...new Set(raw.copyLocalFiles.filter(isWorktreeLocalFileName))]
+    : []
+  return {
+    copyLocalFiles,
+    dependencyMode: isWorktreeDependencyMode(raw.dependencyMode)
+      ? raw.dependencyMode
+      : DEFAULT_WORKTREE_PROVISION.dependencyMode
+  }
+}
+
 export type WorkspaceIsolation = 'isolated' | 'shared'
 export type IsolationActiveState = 'ready' | 'parked' | 'missing' | 'inactive'
 export type AgentRunStatus =
@@ -262,6 +314,14 @@ export interface IsolationInspectResponse {
   recoveries: AgentRunRecovery[]
   targetBranch: string
   targetSha: string
+  provision: WorktreeProvisionSettings
+  availableLocalFiles: WorktreeLocalFileName[]
+}
+
+export interface WorktreeProvisionRequest {
+  projectRoot: string
+  copyLocalFiles: string[]
+  dependencyMode: WorktreeDependencyMode
 }
 
 export interface IsolationFoldRequest {
@@ -316,7 +376,8 @@ export const GIT_IPC = {
   ISOLATION_DIFF: 'git:isolation-diff',
   ISOLATION_CHECKPOINT: 'git:isolation-checkpoint',
   ISOLATION_DISCARD: 'git:isolation-discard',
-  AGENT_SESSION_NOTE: 'git:agent-session-note'
+  AGENT_SESSION_NOTE: 'git:agent-session-note',
+  WORKTREE_PROVISION: 'git:worktree-provision'
 } as const
 
 export const GIT_STATUS_LABELS: Record<GitChangeStatus, string> = {

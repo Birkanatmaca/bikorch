@@ -13,7 +13,8 @@
     "dist:win": "npm run clean:release && npm run build && electron-builder --win",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:smoke:webchat": "electron scripts/webchat-lifecycle-smoke.cjs"
   },
   "build": {
     "appId": "com.bikorch.app",

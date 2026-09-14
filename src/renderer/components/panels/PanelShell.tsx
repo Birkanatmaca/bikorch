@@ -438,8 +438,8 @@ export function PanelShell({
           )}
           <div className="panel-header-actions flex shrink-0 items-center gap-1">
             {panelRole === 'resolver' && (
-              <span className="iso-mode-chip is-shared" title="This session edits the integration worktree">
-                Integration
+              <span className="iso-mode-chip is-shared" title="This session is combining agent changes">
+                Resolving
               </span>
             )}
             {canIsolate && (
@@ -449,17 +449,17 @@ export function PanelShell({
                 aria-pressed={isolationMode === 'isolated'}
                 title={
                   terminalRunning
-                    ? 'Policy applies on next launch. Existing agent work stays parked.'
+                    ? 'Applies the next time this agent starts. Current work stays parked.'
                     : isolationMode === 'isolated'
-                      ? 'Policy: isolated copy'
-                      : 'Policy: main project tree'
+                      ? 'Separate workspace — this agent edits its own copy'
+                      : 'Project workspace — this agent edits the project directly'
                 }
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={() => {
                   setPanelIsolation(id, isolationMode === 'isolated' ? 'shared' : 'isolated')
                 }}
               >
-                {isolationMode === 'shared' ? 'Shared' : 'Isolated'}
+                {isolationMode === 'shared' ? 'Project' : 'Separate'}
               </button>
             )}
             {accountKind && (

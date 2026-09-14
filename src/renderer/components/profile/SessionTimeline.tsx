@@ -247,7 +247,7 @@ export function SessionTimeline(): React.JSX.Element {
 
       <SectionCard
         title="Sessions"
-        description="Agent runs: kind, prompts, injected memory, files, commits, and how the panel closed. Agent output is never stored."
+        description="Agent tasks: kind, prompts, injected memory, files, commits, and how the panel closed. Agent output is never stored."
       >
         <div className="profile-filter-grid">
           <select

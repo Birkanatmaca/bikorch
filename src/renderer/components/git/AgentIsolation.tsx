@@ -1,9 +1,7 @@
 import { useMemo, useState } from 'react'
-import type { AgentWorktreeKind, IsolationLane } from '@shared/contracts/git'
-import { AGENT_WORKTREE_KINDS } from '@shared/contracts/git'
+import type { AgentWorktreeKind, IsolationFoldSession, IsolationLane } from '@shared/contracts/git'
 import { buildConflictResolvePrompt } from '@shared/lib/isolation-prompt'
 import { submitCliPrompt } from '@renderer/lib/submit-cli-prompt'
-import { PANEL_TYPE_LABELS, type PanelType } from '@shared/types'
 import { focusTerminal, focusWorkspacePanel } from '@renderer/lib/app-events'
 import { cn } from '@renderer/lib/utils'
 import { useEditorStore } from '@renderer/stores/editor-store'
@@ -12,17 +10,47 @@ import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useGitStore } from '@renderer/stores/git-store'
 import { Loader2 } from 'lucide-react'
+import {
+  APPLY_PHASES,
+  agentKindLabel,
+  applyPhaseIndex,
+  buildAgentWorkCards,
+  fileCountLabel,
+  friendlyAgentWorkError,
+  groupAgentWork,
+  validationSummary,
+  type AgentWorkCard,
+  type ApplyPhase
+} from '@renderer/lib/agent-work'
+import type { WorktreeDependencyMode, WorktreeLocalFileName } from '@shared/contracts/git'
 
-const SHORT_KIND: Record<AgentWorktreeKind, string> = {
-  claude: 'Claude',
-  cursor: 'Cursor',
-  gemini: 'Gemini',
-  antigravity: 'Antigravity',
-  codex: 'Codex'
-}
+const DEPENDENCY_MODES: Array<{
+  id: WorktreeDependencyMode
+  label: string
+  hint: string
+}> = [
+  {
+    id: 'isolated',
+    label: 'Separate install',
+    hint: 'Each agent copy installs its own dependencies.'
+  },
+  {
+    id: 'share',
+    label: 'Share existing node_modules',
+    hint: 'Faster, but two agents can change the same tree.'
+  },
+  {
+    id: 'setup',
+    label: 'Run setup command',
+    hint: 'Installs from the project lockfile inside this copy.'
+  }
+]
 
-function kindLabel(kind: AgentWorktreeKind): string {
-  return SHORT_KIND[kind] ?? PANEL_TYPE_LABELS[kind as PanelType] ?? kind
+function visibleLocalFiles(
+  available: WorktreeLocalFileName[],
+  selected: WorktreeLocalFileName[]
+): WorktreeLocalFileName[] {
+  return [...new Set([...available, ...selected])]
 }
 
 async function waitForSession(sessionId: string, timeoutMs = 12_000): Promise<boolean> {
@@ -35,6 +63,10 @@ async function waitForSession(sessionId: string, timeoutMs = 12_000): Promise<bo
   return false
 }
 
+function shortSha(value: string): string {
+  return value.slice(0, 7)
+}
+
 export function AgentIsolationBlock({
   projectId,
   projectRoot
@@ -43,335 +75,431 @@ export function AgentIsolationBlock({
   projectRoot: string
 }): React.JSX.Element | null {
   const snapshot = useIsolationStore((state) => selectIsolationState(state.byProject, projectId))
-  const foldLane = useIsolationStore((state) => state.fold)
-  const syncFold = useIsolationStore((state) => state.sync)
-  const acceptFold = useIsolationStore((state) => state.accept)
-  const abortFold = useIsolationStore((state) => state.abort)
+  const prepareChanges = useIsolationStore((state) => state.fold)
+  const syncChanges = useIsolationStore((state) => state.sync)
+  const applyChanges = useIsolationStore((state) => state.accept)
+  const cancelReview = useIsolationStore((state) => state.abort)
   const discardRun = useIsolationStore((state) => state.discard)
+  const updateProvision = useIsolationStore((state) => state.updateProvision)
   const openFoldReview = useEditorStore((state) => state.openFoldReview)
   const reopenAgentRun = useWorkspaceStore((state) => state.reopenAgentRun)
   const openResolverPanel = useWorkspaceStore((state) => state.openResolverPanel)
-  const [busyLane, setBusyLane] = useState<string | null>(null)
-  const [resolving, setResolving] = useState(false)
+  const sessions = useTerminalStore((state) => state.sessions)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [reviewingId, setReviewingId] = useState<string | null>(null)
+  const [apply, setApply] = useState<{ id: string; phase: ApplyPhase } | null>(null)
+  const [resolving, setResolving] = useState<AgentWorktreeKind | null>(null)
 
-  const overlapByPanel = useMemo(() => {
-    const map = new Set<string>()
-    for (const overlap of snapshot.overlaps) {
-      for (const id of overlap.panelIds) map.add(id)
-    }
-    return map
-  }, [snapshot.overlaps])
+  const cards = useMemo(
+    () =>
+      buildAgentWorkCards({
+        lanes: snapshot.lanes,
+        overlaps: snapshot.overlaps,
+        fold: snapshot.fold,
+        sessions
+      }),
+    [snapshot.lanes, snapshot.overlaps, snapshot.fold, sessions]
+  )
+  const groups = useMemo(() => groupAgentWork(cards), [cards])
+  const fold = snapshot.fold
+  const localFiles = visibleLocalFiles(snapshot.availableLocalFiles, snapshot.provision.copyLocalFiles)
+  const hasInbox = cards.length > 0 || Boolean(fold && fold.status !== 'empty')
+  const hasSetup =
+    localFiles.length > 0 ||
+    snapshot.provision.copyLocalFiles.length > 0 ||
+    Boolean(snapshot.targetBranch)
 
-  if (
-    snapshot.lanes.length === 0 &&
-    !snapshot.fold &&
-    snapshot.recoveries.length === 0 &&
-    !snapshot.error &&
-    !snapshot.notice
-  ) {
+  if (!hasInbox && !hasSetup && !snapshot.error && !snapshot.notice) {
     return null
   }
 
-  const fold = snapshot.fold
-  const reviewing = fold && fold.status !== 'empty' && fold.files.length > 0
-  const acceptBlocked = Boolean(fold?.stale) || snapshot.loading
+  const laneFor = (card: AgentWorkCard): IsolationLane | undefined =>
+    snapshot.lanes.find((item) => item.runId === card.runId)
 
-  const handleFold = async (lane: IsolationLane): Promise<void> => {
-    setBusyLane(lane.panelId)
-    try {
-      await foldLane(projectId, projectRoot, {
-        panelId: lane.panelId,
-        kind: lane.kind,
-        title: lane.title,
-        worktreePath: lane.worktreePath
-      })
-    } finally {
-      setBusyLane(null)
+  const ensurePrepared = async (lane: IsolationLane): Promise<IsolationFoldSession | null> => {
+    const current = useIsolationStore.getState().byProject[projectId]?.fold ?? fold
+    if (current && current.panelId === lane.panelId && current.status !== 'empty') {
+      if (current.stale) return syncChanges(projectId, projectRoot)
+      return current
     }
+    return prepareChanges(projectId, projectRoot, {
+      panelId: lane.panelId,
+      kind: lane.kind,
+      title: lane.title,
+      worktreePath: lane.worktreePath
+    })
   }
 
-  const handleReview = (filePath?: string): void => {
-    if (!fold) return
-    const files = fold.status === 'conflict' ? fold.conflicts.map((file) => file.path) : fold.files
+  const openReviewDiff = (session: IsolationFoldSession, filePath?: string): void => {
+    const files = session.status === 'conflict' ? session.conflicts.map((file) => file.path) : session.files
     if (files.length === 0) return
     void openFoldReview(projectId, projectRoot, files, filePath)
   }
 
-  const handleAccept = async (): Promise<void> => {
-    const ok = await acceptFold(projectId, projectRoot)
-    if (ok) {
-      void useGitStore.getState().refresh(projectId, projectRoot)
+  const handleReview = async (card: AgentWorkCard): Promise<void> => {
+    const lane = laneFor(card)
+    if (!lane) return
+    setExpandedId(card.id)
+    setReviewingId(card.id)
+    const session = await ensurePrepared(lane)
+    if (session && session.status !== 'empty') openReviewDiff(session)
+  }
+
+  const handleApply = async (card: AgentWorkCard): Promise<void> => {
+    const lane = laneFor(card)
+    if (!lane || apply) return
+    setExpandedId(card.id)
+    setApply({ id: card.id, phase: 'preparing' })
+    try {
+      const session = await ensurePrepared(lane)
+      if (!session || session.status === 'empty') {
+        setApply({ id: card.id, phase: 'failed' })
+        return
+      }
+      if (session.status === 'conflict') {
+        setApply(null)
+        setReviewingId(card.id)
+        return
+      }
+      setApply({ id: card.id, phase: 'validating' })
+      await new Promise((resolve) => window.setTimeout(resolve, 280))
+      setApply({ id: card.id, phase: 'applying' })
+      const ok = await applyChanges(projectId, projectRoot)
+      if (ok) {
+        void useGitStore.getState().refresh(projectId, projectRoot)
+        setApply({ id: card.id, phase: 'done' })
+        setReviewingId(null)
+        window.setTimeout(() => {
+          setApply((current) => (current?.id === card.id ? null : current))
+          setExpandedId((current) => (current === card.id ? null : current))
+        }, 1600)
+        return
+      }
+      setApply({ id: card.id, phase: 'failed' })
+    } catch {
+      setApply({ id: card.id, phase: 'failed' })
     }
   }
 
-  const handleResolve = async (): Promise<void> => {
-    if (!fold || fold.status !== 'conflict' || !fold.integrationPath || fold.conflicts.length === 0) return
-    const others = snapshot.lanes.filter((lane) => lane.panelId !== fold.panelId).map((lane) => lane.title)
+  const handleResolve = async (card: AgentWorkCard, kind: AgentWorktreeKind): Promise<void> => {
+    const session = fold && fold.panelId === card.panelId ? fold : null
+    const lane = laneFor(card)
+    if (!lane) return
+    let active = session
+    if (!active || active.status !== 'conflict') {
+      active = await ensurePrepared(lane)
+    }
+    if (!active || active.status !== 'conflict' || !active.integrationPath || active.conflicts.length === 0) {
+      return
+    }
+    const others = snapshot.lanes.filter((item) => item.panelId !== card.panelId).map((item) => item.title)
     const prompt = buildConflictResolvePrompt({
-      task: fold.title,
-      resolverLabel: kindLabel(fold.kind),
+      task: card.title,
+      resolverLabel: agentKindLabel(kind),
       otherLabels: others,
-      files: fold.conflicts,
-      integrationPath: fold.integrationPath
+      files: active.conflicts,
+      integrationPath: active.integrationPath
     })
-    setResolving(true)
+    setResolving(kind)
     try {
-      const panelId = openResolverPanel(fold.kind, `Resolver · ${fold.title}`, fold.integrationPath)
+      const panelId = openResolverPanel(kind, `Resolve · ${card.title}`, active.integrationPath)
       focusWorkspacePanel(panelId)
       focusTerminal(panelId)
       const ready = await waitForSession(panelId)
       if (ready) await submitCliPrompt(panelId, prompt)
     } finally {
-      setResolving(false)
+      setResolving(null)
     }
   }
 
   const handleDiscard = async (runId: string): Promise<void> => {
-    if (
-      !window.confirm(
-        'Discard this agent copy? The Git branch is kept. The worktree is removed only if it is clean after a checkpoint.'
-      )
-    ) {
+    if (!window.confirm('Discard this agent task? Finished work stays in its copy until the copy is clean.')) {
       return
     }
     await discardRun(projectId, projectRoot, runId)
   }
 
-  return (
-    <section className="iso-block">
-      {snapshot.lanes.length > 0 && (
-        <div className="iso-section">
-          <p className="iso-heading">
-            Agent runs <span>{snapshot.lanes.length}</span>
-          </p>
-          <div className="iso-lanes">
-            {snapshot.lanes.map((lane) => {
-              const overlapping = overlapByPanel.has(lane.panelId)
-              const folding = busyLane === lane.panelId || (snapshot.loading && fold?.panelId === lane.panelId)
-              return (
-                <div key={lane.panelId} className="iso-lane">
-                  <div className="iso-lane-meta">
-                    <span className="iso-lane-title" title={lane.title}>
-                      {lane.title}
-                    </span>
-                    <span className="iso-lane-kind">{kindLabel(lane.kind)}</span>
-                    <span className={cn('iso-lane-files', overlapping && 'is-overlap')}>
-                      {lane.isolationState === 'parked'
-                        ? 'parked'
-                        : overlapping
-                          ? 'overlap'
-                          : `${lane.files.length} file${lane.files.length === 1 ? '' : 's'}`}
-                    </span>
-                  </div>
-                  <div className="iso-lane-actions">
-                    {!lane.attached && (
-                      <button
-                        type="button"
-                        className="iso-btn"
-                        onClick={() => reopenAgentRun(lane.runId, lane.kind, lane.title)}
-                      >
-                        Reopen
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="iso-btn"
-                      disabled={Boolean(busyLane) || snapshot.loading}
-                      onClick={() => void handleFold(lane)}
-                    >
-                      {folding ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Fold'}
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
+  const toggleLocalFile = (name: WorktreeLocalFileName, enabled: boolean): void => {
+    const selected = new Set(snapshot.provision.copyLocalFiles)
+    if (enabled) selected.add(name)
+    else selected.delete(name)
+    void updateProvision(projectId, projectRoot, {
+      copyLocalFiles: [...selected],
+      dependencyMode: snapshot.provision.dependencyMode
+    })
+  }
 
-      {snapshot.recoveries.length > 0 && (
-        <div className="iso-section">
-          <p className="iso-heading">
-            Recover <span>{snapshot.recoveries.length}</span>
-          </p>
-          <div className="iso-lanes">
-            {snapshot.recoveries.map((recovery) => (
-              <div key={recovery.runId} className="iso-lane">
-                <div className="iso-lane-meta">
-                  <span className="iso-lane-title" title={recovery.reason}>
-                    {recovery.title}
-                  </span>
-                  <span className="iso-lane-kind">{kindLabel(recovery.kind)}</span>
-                  <span className="iso-lane-files">{recovery.status}</span>
+  const renderCard = (card: AgentWorkCard): React.JSX.Element => {
+    const expanded = expandedId === card.id || reviewingId === card.id || apply?.id === card.id
+    const session = fold?.panelId === card.panelId && fold.status !== 'empty' ? fold : null
+    const reviewFiles = session?.files.length ? session.files : card.files
+    const checks = validationSummary(session?.validation)
+    const applying = apply?.id === card.id
+    const phase = applying ? apply.phase : null
+    const otherKinds = [...new Set(snapshot.lanes.map((item) => item.kind))]
+    const notice = snapshot.error ? friendlyAgentWorkError(snapshot.error) : snapshot.notice
+
+    return (
+      <article
+        key={card.id}
+        className={cn(
+          'agent-work-card',
+          card.tone === 'attention' && 'is-attention',
+          card.tone === 'ready' && 'is-ready',
+          phase === 'done' && 'is-applied'
+        )}
+      >
+        <button
+          type="button"
+          className="agent-work-hit"
+          onClick={() => setExpandedId((current) => (current === card.id ? null : card.id))}
+        >
+          <header className="agent-work-head">
+            <p className="agent-work-title">
+              {agentKindLabel(card.kind)}
+              {card.title ? ` · ${card.title}` : ''}
+            </p>
+            <p className={cn('agent-work-status', `is-${card.tone}`)}>
+              {phase === 'done' ? 'Applied to project' : card.statusLabel}
+            </p>
+          </header>
+          <p className="agent-work-detail">{card.detail}</p>
+        </button>
+
+        {expanded && (
+          <div className="agent-work-body">
+            {phase && phase !== 'failed' && phase !== 'done' && (
+              <ol className="agent-apply-steps">
+                {APPLY_PHASES.map((item) => {
+                  const current = applyPhaseIndex(phase)
+                  const index = applyPhaseIndex(item.id)
+                  const done = current > index
+                  const active = current === index
+                  return (
+                    <li key={item.id} className={cn(done && 'is-done', active && 'is-active')}>
+                      {active ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                      <span>{item.label}</span>
+                      {done ? <span className="agent-apply-check">✓</span> : null}
+                    </li>
+                  )
+                })}
+              </ol>
+            )}
+
+            {phase === 'done' && <p className="agent-work-applied">Applied to project</p>}
+
+            {phase === 'failed' && (
+              <p className="iso-error">{notice ?? 'Could not apply automatically'}</p>
+            )}
+
+            {!phase && card.tone === 'working' && (
+              <p className="agent-work-copy">This agent is still working.</p>
+            )}
+
+            {!phase && card.tone === 'ready' && (
+              <>
+                <p className="agent-work-copy">
+                  {fileCountLabel(reviewFiles.length)}
+                  {checks ? ` · ${checks}` : ''}
+                </p>
+                {reviewingId === card.id && reviewFiles.length > 0 && (
+                  <ul className="agent-work-files">
+                    {reviewFiles.map((file) => (
+                      <li key={file}>
+                        <button type="button" className="agent-work-file" onClick={() => session && openReviewDiff(session, file)}>
+                          {file}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="iso-actions">
+                  <button type="button" className="iso-btn" onClick={() => void handleReview(card)}>
+                    Review
+                  </button>
+                  <button
+                    type="button"
+                    className="iso-btn iso-btn-primary"
+                    disabled={snapshot.loading}
+                    onClick={() => void handleApply(card)}
+                  >
+                    Apply to Project
+                  </button>
+                  {session && (
+                    <button type="button" className="iso-btn" onClick={() => void cancelReview(projectId, projectRoot)}>
+                      Cancel Review
+                    </button>
+                  )}
                 </div>
-                <div className="iso-lane-actions">
-                  {recovery.actions.includes('resume') && (
+              </>
+            )}
+
+            {!phase && card.tone === 'attention' && (
+              <>
+                <p className="agent-work-copy">
+                  {card.overlapLabels.length > 0
+                    ? `Another agent also changed ${card.conflictPaths[0] ?? 'the same files'}.`
+                    : card.conflictPaths.length > 0
+                      ? `${card.conflictPaths.length === 1 ? '1 file needs' : `${card.conflictPaths.length} files need`} attention.`
+                      : 'These changes need a closer look.'}
+                </p>
+                {card.conflictPaths.length > 0 && (
+                  <ul className="agent-work-files">
+                    {card.conflictPaths.slice(0, 8).map((file) => (
+                      <li key={file}>{file}</li>
+                    ))}
+                  </ul>
+                )}
+                {session?.status === 'conflict' ? (
+                  <>
+                    <p className="agent-work-copy">Bikorch can try to combine both versions.</p>
+                    <div className="iso-actions">
+                      {otherKinds.map((kind) => (
+                        <button
+                          key={kind}
+                          type="button"
+                          className="iso-btn iso-btn-primary"
+                          disabled={resolving !== null}
+                          onClick={() => void handleResolve(card, kind)}
+                        >
+                          {resolving === kind ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            `Let ${agentKindLabel(kind)} Resolve`
+                          )}
+                        </button>
+                      ))}
+                      <button type="button" className="iso-btn" onClick={() => void handleReview(card)}>
+                        Review
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="iso-actions">
+                    <button type="button" className="iso-btn" onClick={() => void handleReview(card)}>
+                      Review
+                    </button>
                     <button
                       type="button"
                       className="iso-btn iso-btn-primary"
-                      onClick={() => reopenAgentRun(recovery.runId, recovery.kind, recovery.title)}
+                      disabled={snapshot.loading}
+                      onClick={() => void handleApply(card)}
                     >
-                      Resume
+                      Apply to Project
                     </button>
-                  )}
-                  {recovery.actions.includes('review') && (
-                    <button type="button" className="iso-btn" onClick={() => handleReview()}>
-                      Review
-                    </button>
-                  )}
-                  {recovery.actions.includes('discard') && (
-                    <button type="button" className="iso-btn" onClick={() => void handleDiscard(recovery.runId)}>
-                      Discard
-                    </button>
-                  )}
-                </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {card.canResume && (
+              <div className="iso-actions">
+                <button
+                  type="button"
+                  className="iso-btn"
+                  onClick={() => reopenAgentRun(card.runId, card.kind, card.title)}
+                >
+                  Resume
+                </button>
+                <button type="button" className="iso-btn" onClick={() => void handleDiscard(card.runId)}>
+                  Discard
+                </button>
               </div>
+            )}
+
+            <details className="agent-work-advanced">
+              <summary>Advanced details</summary>
+              <p>
+                Branch: {card.branch}
+                {card.baseSha ? ` · Base: ${shortSha(card.baseSha)}` : ''}
+                {card.targetBranch ? ` · Project branch: ${card.targetBranch}` : ''}
+              </p>
+            </details>
+          </div>
+        )}
+      </article>
+    )
+  }
+
+  return (
+    <section className="iso-block agent-work">
+      <p className="iso-heading">Agent work</p>
+      {groups.ready.length > 0 && (
+        <div className="iso-section">
+          <p className="agent-work-group">
+            Ready <span>{groups.ready.length}</span>
+          </p>
+          {groups.ready.map(renderCard)}
+        </div>
+      )}
+      {groups.working.length > 0 && (
+        <div className="iso-section">
+          <p className="agent-work-group">
+            Working <span>{groups.working.length}</span>
+          </p>
+          {groups.working.map(renderCard)}
+        </div>
+      )}
+      {groups.attention.length > 0 && (
+        <div className="iso-section">
+          <p className="agent-work-group">
+            Needs attention <span>{groups.attention.length}</span>
+          </p>
+          {groups.attention.map(renderCard)}
+        </div>
+      )}
+
+      {snapshot.notice && !snapshot.error && <p className="iso-notice">{snapshot.notice}</p>}
+      {snapshot.error && <p className="iso-error">{friendlyAgentWorkError(snapshot.error)}</p>}
+
+      {hasSetup && (
+        <details className="agent-work-advanced agent-work-setup">
+          <summary>Agent copy setup</summary>
+          {localFiles.length > 0 && (
+            <>
+              <p className="iso-provision-hint">
+                Local files stay in the project unless you allow a copy. Tokens in .env / .npmrc are off by default.
+              </p>
+              <ul className="iso-file-list">
+                {localFiles.map((name) => (
+                  <li key={name}>
+                    <label className="iso-check">
+                      <input
+                        type="checkbox"
+                        checked={snapshot.provision.copyLocalFiles.includes(name)}
+                        onChange={(event) => toggleLocalFile(name, event.target.checked)}
+                      />
+                      <span>{name}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          <p className="iso-heading">Dependencies</p>
+          <div className="iso-radio-list">
+            {DEPENDENCY_MODES.map((mode) => (
+              <label key={mode.id} className="iso-radio">
+                <input
+                  type="radio"
+                  name={`worktree-deps-${projectId}`}
+                  checked={snapshot.provision.dependencyMode === mode.id}
+                  onChange={() =>
+                    void updateProvision(projectId, projectRoot, {
+                      copyLocalFiles: snapshot.provision.copyLocalFiles,
+                      dependencyMode: mode.id
+                    })
+                  }
+                />
+                <span>
+                  <span className="iso-radio-label">{mode.label}</span>
+                  <span className="iso-radio-hint">{mode.hint}</span>
+                </span>
+              </label>
             ))}
           </div>
-        </div>
+        </details>
       )}
-
-      {snapshot.queue.length > 0 && (
-        <div className="iso-section">
-          <p className="iso-heading">
-            Merge queue <span>{snapshot.queue.length}</span>
-          </p>
-          <ul className="iso-overlap-list">
-            {snapshot.queue.map((item) => (
-              <li key={item.runId}>
-                <span className="iso-overlap-path">{item.title}</span>
-                <span className="iso-overlap-owners">
-                  {item.status}
-                  {item.fileCount > 0 ? ` · ${item.fileCount}` : ''}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {snapshot.overlaps.length > 0 && (
-        <div className="iso-section">
-          <p className="iso-heading">
-            Overlap <span>{snapshot.overlaps.length}</span>
-          </p>
-          <ul className="iso-overlap-list">
-            {snapshot.overlaps.slice(0, 12).map((overlap) => (
-              <li key={overlap.path}>
-                <span className="iso-overlap-path">{overlap.path}</span>
-                <span className="iso-overlap-owners">{overlap.labels.join(' · ')}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {fold && fold.status !== 'empty' && (
-        <div className={cn('iso-fold', fold.status === 'conflict' && 'is-conflict', fold.stale && 'is-stale')}>
-          {fold.validation && (
-            <p className="iso-notice">
-              Validation
-              {fold.validation.typecheck
-                ? ` · typecheck ${fold.validation.typecheck.skipped ? 'skipped' : fold.validation.typecheck.ok ? 'ok' : 'fail'}`
-                : ''}
-              {fold.validation.test
-                ? ` · test ${fold.validation.test.ok ? 'ok' : 'fail'}`
-                : ''}
-              {fold.validation.build
-                ? ` · build ${fold.validation.build.ok ? 'ok' : 'fail'}`
-                : ''}
-            </p>
-          )}
-          {fold.status === 'conflict' ? (
-            <>
-              <p className="iso-heading">Merge conflict</p>
-              <p className="iso-fold-title">
-                {fold.title}
-                {fold.conflicts.length > 0 ? ` · ${fold.conflicts.map((file) => file.path).join(', ')}` : ''}
-              </p>
-              <div className="iso-actions">
-                <button type="button" className="iso-btn" onClick={() => handleReview()} disabled={!reviewing}>
-                  Review Conflict
-                </button>
-                <button
-                  type="button"
-                  className="iso-btn iso-btn-primary"
-                  disabled={resolving || !fold.integrationPath}
-                  onClick={() => void handleResolve()}
-                >
-                  {resolving ? <Loader2 className="h-3 w-3 animate-spin" /> : `Resolve in ${kindLabel(fold.kind)}`}
-                </button>
-                <button type="button" className="iso-btn" onClick={() => handleReview()}>
-                  Resolve Manually
-                </button>
-              </div>
-              <div className="iso-actions">
-                {fold.stale && (
-                  <button
-                    type="button"
-                    className="iso-btn iso-btn-primary"
-                    disabled={snapshot.loading}
-                    onClick={() => void syncFold(projectId, projectRoot)}
-                  >
-                    Sync target
-                  </button>
-                )}
-                <button type="button" className="iso-btn" onClick={() => handleReview()}>
-                  Review Diff
-                </button>
-                <button
-                  type="button"
-                  className="iso-btn iso-btn-primary"
-                  disabled={acceptBlocked}
-                  onClick={() => void handleAccept()}
-                >
-                  Accept squash
-                </button>
-                <button type="button" className="iso-btn" onClick={() => void abortFold(projectId, projectRoot)}>
-                  Abort
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="iso-heading">Ready to fold</p>
-              <p className="iso-fold-title">
-                {fold.title}
-                {fold.files.length > 0 ? ` · ${fold.files.join(', ')}` : ''}
-              </p>
-              <div className="iso-actions">
-                {fold.stale && (
-                  <button
-                    type="button"
-                    className="iso-btn iso-btn-primary"
-                    disabled={snapshot.loading}
-                    onClick={() => void syncFold(projectId, projectRoot)}
-                  >
-                    Sync target
-                  </button>
-                )}
-                <button type="button" className="iso-btn" onClick={() => handleReview()} disabled={!reviewing}>
-                  Review Diff
-                </button>
-                <button
-                  type="button"
-                  className="iso-btn iso-btn-primary"
-                  disabled={acceptBlocked}
-                  onClick={() => void handleAccept()}
-                >
-                  Accept squash
-                </button>
-                <button type="button" className="iso-btn" onClick={() => void abortFold(projectId, projectRoot)}>
-                  Abort
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {snapshot.notice && <p className="iso-notice">{snapshot.notice}</p>}
-      {snapshot.error && <p className="iso-error">{snapshot.error}</p>}
     </section>
   )
 }

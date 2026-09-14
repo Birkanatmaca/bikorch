@@ -627,6 +627,48 @@ kbd {
   border-bottom: 1px solid rgb(255 255 255 / 0.045);
 }
 .iso-section { margin-bottom: 10px; }
+.iso-provision-hint {
+  margin: 0 0 6px;
+  padding: 0 1px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.iso-file-list,
+.iso-radio-list {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.iso-check,
+.iso-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+  padding: 3px 2px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.iso-check input,
+.iso-radio input {
+  margin-top: 2px;
+  accent-color: #8b7cf8;
+}
+.iso-radio span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.iso-radio-label { color: var(--color-text-primary); }
+.iso-radio-hint {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  line-height: 1.3;
+}
 .iso-heading {
   margin-bottom: 4px;
   padding: 0 1px;
@@ -762,6 +804,140 @@ kbd {
 }
 .iso-notice { color: var(--color-text-muted); }
 .iso-error { color: var(--color-error, #f05d68); }
+.agent-work-group {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0 0 6px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.agent-work-group span { color: var(--color-text-secondary); }
+.agent-work-card {
+  margin-bottom: 6px;
+  padding: 8px 8px 7px;
+  border: 1px solid rgb(255 255 255 / 0.06);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.02);
+}
+.agent-work-card.is-attention {
+  border-color: rgb(240 93 104 / 0.28);
+  background: rgb(240 93 104 / 0.06);
+}
+.agent-work-card.is-ready {
+  border-color: rgb(139 124 248 / 0.18);
+}
+.agent-work-card.is-applied {
+  border-color: rgb(74 222 128 / 0.28);
+  background: rgb(74 222 128 / 0.06);
+}
+.agent-work-hit {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-work-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.agent-work-title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-primary);
+  font-size: 12px;
+}
+.agent-work-status {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+.agent-work-status.is-ready { color: #c8c0f8; }
+.agent-work-status.is-working { color: var(--color-text-secondary); }
+.agent-work-status.is-attention { color: #f2b84b; }
+.agent-work-detail,
+.agent-work-copy,
+.agent-work-applied {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.agent-work-applied { color: #86efac; }
+.agent-work-body {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+.agent-work-files {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.agent-work-files li,
+.agent-work-file {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-work-file {
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.agent-work-file:hover { color: var(--color-text-primary); }
+.agent-apply-steps {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.agent-apply-steps li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+.agent-apply-steps li.is-active { color: var(--color-text-primary); }
+.agent-apply-steps li.is-done { color: #86efac; }
+.agent-apply-check { margin-left: auto; }
+.agent-work-advanced {
+  margin-top: 4px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+.agent-work-advanced summary {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+}
+.agent-work-advanced p {
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+  line-height: 1.4;
+}
+.agent-work-setup { margin-top: 10px; }
 .task-rail-counts {
   position: absolute;
   right: -5px;

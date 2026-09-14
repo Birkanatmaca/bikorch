@@ -3,13 +3,15 @@ import type {
   AgentWorktreeKind,
   IsolationFoldSession,
   IsolationInspectResponse,
-  IsolationLaneInput
+  IsolationLaneInput,
+  WorktreeProvisionSettings
 } from '@shared/contracts/git'
-import { AGENT_WORKTREE_KINDS } from '@shared/contracts/git'
+import { AGENT_WORKTREE_KINDS, DEFAULT_WORKTREE_PROVISION, parseWorktreeProvision } from '@shared/contracts/git'
 import { useWorkspaceStore } from './workspace-store'
 import { evictRecordKeys, keysToKeep } from '@renderer/lib/inactive-cache'
 import { resourceLimitsFor, type ResourceProfile } from '@shared/contracts/resources'
 import { currentRendererResourceProfile } from '@renderer/lib/resource-limits'
+import { friendlyAgentWorkError } from '@renderer/lib/agent-work'
 
 export interface IsolationProjectState extends IsolationInspectResponse {
   loading: boolean
@@ -25,6 +27,11 @@ interface IsolationStore {
   accept: (projectId: string, projectRoot: string) => Promise<boolean>
   abort: (projectId: string, projectRoot: string) => Promise<void>
   discard: (projectId: string, projectRoot: string, runId: string) => Promise<boolean>
+  updateProvision: (
+    projectId: string,
+    projectRoot: string,
+    next: WorktreeProvisionSettings
+  ) => Promise<void>
   evictInactive: (activeProjectId: string, profile?: ResourceProfile) => void
 }
 
@@ -36,6 +43,8 @@ const EMPTY: IsolationProjectState = {
   recoveries: [],
   targetBranch: '',
   targetSha: '',
+  provision: { ...DEFAULT_WORKTREE_PROVISION },
+  availableLocalFiles: [],
   loading: false,
   error: null,
   notice: null
@@ -98,6 +107,10 @@ export const useIsolationStore = create<IsolationStore>((set, get) => ({
           [projectId]: {
             ...EMPTY,
             ...snapshot,
+            provision: parseWorktreeProvision(snapshot.provision),
+            availableLocalFiles: Array.isArray(snapshot.availableLocalFiles)
+              ? snapshot.availableLocalFiles
+              : [],
             loading: false,
             error: null,
             notice: null
@@ -112,7 +125,7 @@ export const useIsolationStore = create<IsolationStore>((set, get) => ({
           [projectId]: {
             ...(state.byProject[projectId] ?? EMPTY),
             loading: false,
-            error: error instanceof Error ? error.message : 'Could not inspect agent copies'
+            error: friendlyAgentWorkError(error instanceof Error ? error.message : 'Could not load agent work')
           }
         }
       }))
@@ -142,7 +155,7 @@ export const useIsolationStore = create<IsolationStore>((set, get) => ({
             ...state.byProject,
             [projectId]: patch(projectId, {
               loading: false,
-              notice: 'Nothing to fold'
+              notice: 'Nothing to apply'
             })
           }
         }))
@@ -168,7 +181,7 @@ export const useIsolationStore = create<IsolationStore>((set, get) => ({
           ...state.byProject,
           [projectId]: patch(projectId, {
             loading: false,
-            error: error instanceof Error ? error.message : 'Fold failed'
+            error: friendlyAgentWorkError(error instanceof Error ? error.message : 'Could not prepare these changes')
           })
         }
       }))
@@ -194,7 +207,7 @@ export const useIsolationStore = create<IsolationStore>((set, get) => ({
             fold: session,
             loading: false,
             error: null,
-            notice: session.stale ? 'Target moved — review the updated fold' : null
+            notice: session.stale ? 'The project changed — review these updates' : null
           }))
         }
       }))
@@ -206,7 +219,7 @@ export const useIsolationStore = create<IsolationStore>((set, get) => ({
           ...state.byProject,
           [projectId]: patch(projectId, {
             loading: false,
-            error: error instanceof Error ? error.message : 'Sync failed'
+            error: error instanceof Error ? error.message : 'Could not refresh project changes'
           })
         }
       }))
@@ -228,7 +241,7 @@ export const useIsolationStore = create<IsolationStore>((set, get) => ({
         set((state) => ({
           byProject: {
             ...state.byProject,
-            [projectId]: patch(projectId, { loading: false, error: result.error })
+            [projectId]: patch(projectId, { loading: false, error: friendlyAgentWorkError(result.error) })
           }
         }))
         return false
@@ -241,7 +254,7 @@ export const useIsolationStore = create<IsolationStore>((set, get) => ({
           ...state.byProject,
           [projectId]: patch(projectId, {
             loading: false,
-            error: error instanceof Error ? error.message : 'Accept failed'
+            error: error instanceof Error ? error.message : 'Could not apply to project'
           })
         }
       }))
@@ -255,6 +268,43 @@ export const useIsolationStore = create<IsolationStore>((set, get) => ({
       await window.api.git.abortIsolation({ projectRoot })
     } finally {
       await get().inspect(projectId, projectRoot)
+    }
+  },
+
+  updateProvision: async (projectId, projectRoot, next) => {
+    if (!window.api.git?.updateWorktreeProvision) return
+    const provision = parseWorktreeProvision(next)
+    set((state) => ({
+      byProject: {
+        ...state.byProject,
+        [projectId]: patch(projectId, { provision, error: null })
+      }
+    }))
+    try {
+      const result = await window.api.git.updateWorktreeProvision({
+        projectRoot,
+        copyLocalFiles: provision.copyLocalFiles,
+        dependencyMode: provision.dependencyMode
+      })
+      set((state) => ({
+        byProject: {
+          ...state.byProject,
+          [projectId]: patch(projectId, {
+            provision: parseWorktreeProvision(result.provision),
+            availableLocalFiles: result.availableLocalFiles,
+            error: null
+          })
+        }
+      }))
+    } catch (error) {
+      set((state) => ({
+        byProject: {
+          ...state.byProject,
+          [projectId]: patch(projectId, {
+            error: error instanceof Error ? error.message : 'Could not save worktree setup'
+          })
+        }
+      }))
     }
   },
 

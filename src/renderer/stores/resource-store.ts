@@ -8,6 +8,7 @@ import {
   type ResourceProfileLimits
 } from '@shared/contracts/resources'
 import { applyRendererResourceProfile } from '@renderer/lib/resource-limits'
+import { applyLiveTerminalScrollback } from '@renderer/lib/live-terminals'
 import { isMonacoLoaded } from '@renderer/lib/monaco-status'
 import { countWebChatGuests } from '@renderer/lib/web-chat-runtime'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
@@ -63,15 +64,18 @@ export const useResourceStore = create<ResourceStore>((set, get) => ({
     const api = window.api?.resources
     if (!api) {
       applyRendererResourceProfile(DEFAULT_RESOURCE_PROFILE)
+      applyLiveTerminalScrollback()
       set({ loaded: true, census: collectCensus() })
       return
     }
     try {
       const profile = parseResourceProfile(await api.getProfile())
       applyRendererResourceProfile(profile)
+      applyLiveTerminalScrollback()
       set({ profile, loaded: true, census: collectCensus() })
     } catch {
       applyRendererResourceProfile(DEFAULT_RESOURCE_PROFILE)
+      applyLiveTerminalScrollback()
       set({ loaded: true, census: collectCensus() })
     }
   },
@@ -79,11 +83,13 @@ export const useResourceStore = create<ResourceStore>((set, get) => ({
   setProfile: async (next) => {
     const profile = parseResourceProfile(next)
     applyRendererResourceProfile(profile)
+    applyLiveTerminalScrollback()
     set({ profile })
     const api = window.api?.resources
     if (!api) return
     const saved = parseResourceProfile(await api.setProfile(profile))
     applyRendererResourceProfile(saved)
+    applyLiveTerminalScrollback()
     set({ profile: saved })
   },
 
@@ -98,6 +104,7 @@ export const useResourceStore = create<ResourceStore>((set, get) => ({
       const snapshot = await api.snapshot()
       set({ snapshot, census, profile: snapshot.profile })
       applyRendererResourceProfile(snapshot.profile)
+      applyLiveTerminalScrollback()
     } catch {
       set({ census })
     }

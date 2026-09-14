@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { flushPersistence, hydrateFromDisk, startPersistenceSync } from '@renderer/lib/persistence-sync'
 import { useWorkspaceStore, createFallbackWorkspace } from '@renderer/stores/workspace-store'
+import { useResourceStore } from '@renderer/stores/resource-store'
 
 const BOOTSTRAP_TIMEOUT_MS = 8000
 
@@ -31,6 +32,8 @@ export function usePersistenceBootstrap(): {
 
         await withTimeout(hydrateFromDisk(), BOOTSTRAP_TIMEOUT_MS)
         if (!mounted) return
+        await withTimeout(useResourceStore.getState().hydrate(), 4000).catch(() => undefined)
+        if (!mounted) return
         startPersistenceSync()
         setIsReady(true)
       } catch (err) {
@@ -40,6 +43,7 @@ export function usePersistenceBootstrap(): {
 
         // Fallback so the app still opens
         useWorkspaceStore.getState().hydrate(createFallbackWorkspace())
+        await useResourceStore.getState().hydrate().catch(() => undefined)
         startPersistenceSync()
         setError(message)
         setIsReady(true)

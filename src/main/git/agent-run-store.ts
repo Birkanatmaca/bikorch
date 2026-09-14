@@ -4,8 +4,10 @@ import type {
   AgentRunRecord,
   AgentWorktreeKind,
   IsolationFoldSession,
+  WorktreeProvisionSettings,
   WorkspaceIsolation
 } from '@shared/contracts/git'
+import { parseWorktreeProvision } from '@shared/contracts/git'
 import { AGENT_WORKTREE_KINDS } from '@shared/contracts/git'
 import { normalizeAgentRunStatus, isTerminalAgentRunStatus } from './agent-lifecycle'
 import { canonicalRepoRoot, hashRepoRoot } from './worktree-paths'
@@ -16,6 +18,7 @@ export interface RepoIsolationState {
   targetSha: string
   runs: AgentRunRecord[]
   fold: IsolationFoldSession | null
+  provision: WorktreeProvisionSettings
 }
 
 const memory = new Map<string, RepoIsolationState>()
@@ -107,7 +110,8 @@ function emptyState(repoRoot: string): RepoIsolationState {
     targetBranch: '',
     targetSha: '',
     runs: [],
-    fold: null
+    fold: null,
+    provision: parseWorktreeProvision(undefined)
   }
 }
 
@@ -126,7 +130,8 @@ export async function loadRepoIsolation(repoRoot: string, baseDir: string): Prom
       targetBranch: typeof parsed.targetBranch === 'string' ? parsed.targetBranch : '',
       targetSha: typeof parsed.targetSha === 'string' ? parsed.targetSha : '',
       runs: Array.isArray(parsed.runs) ? parsed.runs.map(parseRun).filter((run): run is AgentRunRecord => Boolean(run)) : [],
-      fold: parsed.fold && typeof parsed.fold === 'object' ? (parsed.fold as IsolationFoldSession) : null
+      fold: parsed.fold && typeof parsed.fold === 'object' ? (parsed.fold as IsolationFoldSession) : null,
+      provision: parseWorktreeProvision(parsed.provision)
     }
     memory.set(key, state)
     touch(key)

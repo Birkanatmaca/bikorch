@@ -3,9 +3,12 @@ import { useIsolationStore } from '@renderer/stores/isolation-store'
 import { useResourceStore } from '@renderer/stores/resource-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { applyRendererResourceProfile } from '@renderer/lib/resource-limits'
+import { applyLiveTerminalScrollback } from '@renderer/lib/live-terminals'
 
 export function startResourcePolicies(): () => void {
-  void useResourceStore.getState().hydrate()
+  if (!useResourceStore.getState().loaded) {
+    void useResourceStore.getState().hydrate()
+  }
 
   const unsubWorkspace = useWorkspaceStore.subscribe((state, prev) => {
     if (!state.activeProjectId || state.activeProjectId === prev.activeProjectId) return
@@ -17,6 +20,7 @@ export function startResourcePolicies(): () => void {
   const unsubProfile = useResourceStore.subscribe((state, prev) => {
     if (state.profile === prev.profile) return
     applyRendererResourceProfile(state.profile)
+    applyLiveTerminalScrollback()
     const activeId = useWorkspaceStore.getState().activeProjectId
     if (!activeId) return
     useEditorStore.getState().evictInactiveDiffs(activeId, state.profile)

@@ -1,0 +1,74 @@
+<!doctype html>
+<html>
+  <body>
+    <div id="active" style="width:320px;height:240px;margin:20px"></div>
+    <script>
+      const { ipcRenderer } = require('electron')
+      const smokeDone = (payload) => ipcRenderer.send('webchat-smoke', payload)
+      const IDLE_MS = Number(new URLSearchParams(location.search).get('idle') || 800)
+
+      const active = document.getElementById('active')
+      const park = document.createElement('div')
+      park.setAttribute('data-web-chat-park', 'chatgpt')
+      const place = (visible) => {
+        if (visible) {
+          const rect = active.getBoundingClientRect()
+          park.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;overflow:hidden`
+          return
+        }
+        park.style.cssText = 'position:fixed;left:-10000px;top:0;width:1px;height:1px;overflow:hidden'
+      }
+      place(false)
+      document.body.appendChild(park)
+
+      const guest = document.createElement('webview')
+      guest.setAttribute('src', 'about:blank')
+      guest.style.cssText = 'width:100%;height:100%'
+      park.appendChild(guest)
+
+      const fail = (reason) => smokeDone({ ok: false, reason })
+      const timer = setTimeout(() => fail('timed out waiting for webview'), 15000)
+
+      guest.addEventListener('dom-ready', () => {
+        let idWhileActive
+        try {
+          idWhileActive = guest.getWebContentsId()
+        } catch (error) {
+          clearTimeout(timer)
+          fail('active webview has no guest: ' + error)
+          return
+        }
+        place(true)
+        requestAnimationFrame(() => {
+          place(false)
+          let idWhileParked
+          try {
+            idWhileParked = guest.getWebContentsId()
+          } catch (error) {
+            clearTimeout(timer)
+            fail('parked webview lost its guest: ' + error)
+            return
+          }
+          setTimeout(() => {
+            guest.remove()
+            park.remove()
+            let destroyed = false
+            try {
+              guest.getWebContentsId()
+            } catch {
+              destroyed = true
+            }
+            clearTimeout(timer)
+            smokeDone({
+              ok: destroyed && idWhileActive === idWhileParked && Number.isFinite(idWhileParked),
+              idWhileActive,
+              idWhileParked,
+              destroyed,
+              reason: destroyed ? 'ok' : 'guest still reachable after remove()'
+            })
+          }, IDLE_MS)
+        })
+      })
+    </script>
+  </body>
+</html>

@@ -109,21 +109,21 @@ export function SidebarActivityBar({
         aria-pressed={changesActive}
         title={
           conflict
-            ? 'Merge conflict'
+            ? 'Needs attention'
             : overlapCount > 0
-              ? `${overlapCount} overlapping path${overlapCount === 1 ? '' : 's'}`
+              ? 'Agent work needs attention'
               : changesActive
-                ? 'Hide git'
-                : 'Show git'
+                ? 'Hide changes'
+                : 'Show changes'
         }
         aria-label={
           conflict
-            ? 'Show git, merge conflict'
+            ? 'Show changes, needs attention'
             : overlapCount > 0
-              ? `Show git, ${overlapCount} overlapping paths`
+              ? 'Show changes, agent work needs attention'
               : changesActive
-                ? 'Hide git'
-                : 'Show git'
+                ? 'Hide changes'
+                : 'Show changes'
         }
         className={cn('glass-icon-btn relative h-9 w-9', changesActive && 'glass-icon-btn-active')}
       >

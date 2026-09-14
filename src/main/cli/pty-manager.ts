@@ -380,6 +380,7 @@ class PtyManager {
       ...(kind !== 'terminal' ? { code: 'CLI_MISSING' as const, kind } : {})
     })
     recordLog('error', message, 'pty')
+    if (useHost) this.scheduleHostRelease()
 
     return {
       sessionId,

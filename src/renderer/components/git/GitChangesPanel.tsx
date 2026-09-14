@@ -47,6 +47,7 @@ export function GitChangesPanel({
   const gitState = useGitStore((s) => selectGitState(s.stateByProject, projectId))
   const refresh = useGitStore((s) => s.refresh)
   const inspectIsolation = useIsolationStore((s) => s.inspect)
+  const agentWork = useIsolationStore((s) => (projectId ? s.byProject[projectId] : undefined))
   const selectRepo = useGitStore((s) => s.selectRepo)
   const checkoutBranch = useGitStore((s) => s.checkoutBranch)
   const discardChange = useGitStore((s) => s.discardChange)
@@ -70,6 +71,13 @@ export function GitChangesPanel({
   )
   const stagedChanges = gitState.changes.filter((change) => change.staged)
   const unstagedChanges = gitState.changes.filter((change) => !change.staged)
+  const hasAgentWork = Boolean(
+    agentWork &&
+      (agentWork.lanes.length > 0 ||
+        agentWork.fold ||
+        agentWork.recoveries.length > 0 ||
+        agentWork.queue.length > 0)
+  )
 
   useEffect(() => {
     if (!projectId || !projectRoot) return
@@ -273,15 +281,11 @@ export function GitChangesPanel({
 
         {projectId && <AgentIsolationBlock projectId={projectId} projectRoot={projectRoot} />}
 
-        {gitState.changes.length === 0 && !bundle.loading && (
+        {gitState.changes.length === 0 && !bundle.loading && !hasAgentWork && (
           <EmptyState
             icon={GitBranch}
             title="No changes"
-            description={
-              gitState.remoteUrl
-                ? `Remote ${gitState.remoteName ?? 'repository'} · working tree is clean`
-                : 'Local repository · working tree is clean'
-            }
+            description="Nothing to apply, and no edits in the project."
             className="py-8"
           />
         )}
@@ -289,7 +293,7 @@ export function GitChangesPanel({
         {gitState.changes.length > 0 && (
           <>
             <ChangeSection
-              title="Staged changes"
+              title={hasAgentWork ? 'Your staged edits' : 'Staged changes'}
               count={stagedChanges.length}
               changes={stagedChanges}
               activePath={activeDiff?.filePath ?? null}
@@ -303,7 +307,7 @@ export function GitChangesPanel({
               onDiscard={(change) => void handleDiscard(change)}
             />
             <ChangeSection
-              title="Changes"
+              title={hasAgentWork ? 'Your edits' : 'Changes'}
               count={unstagedChanges.length}
               changes={unstagedChanges}
               activePath={activeDiff?.filePath ?? null}

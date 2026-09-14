@@ -32,6 +32,11 @@ async function unlinkWorktree(repoRoot: string, worktreePath: string, force: boo
   })
 }
 
+/**
+ * Persists the AgentRun for this panel. Today `run.id` is still the panel id
+ * so parked work can reopen with the same UI identity. Longer term these
+ * should split: AgentRun ID (domain) ≠ Session ID (process) ≠ Panel ID (UI).
+ */
 async function rememberRun(input: {
   projectRoot: string
   repoRoot: string
@@ -126,7 +131,7 @@ export async function ensureAgentWorktree(input: {
     const listed = listWorktreePaths(await runGit(repoRoot, ['worktree', 'list', '--porcelain']))
     const alreadyLinked = listed.some((path) => path.toLowerCase() === worktreePath.toLowerCase())
     if (alreadyLinked && (await pathExists(worktreePath))) {
-      await provisionWorktree(repoRoot, worktreePath)
+      await provisionWorktree(repoRoot, worktreePath, (await loadRepoIsolation(repoRoot, baseDir)).provision)
       const remembered = await rememberRun({
         projectRoot: input.projectRoot,
         repoRoot,
@@ -146,7 +151,11 @@ export async function ensureAgentWorktree(input: {
       if (!(await isWorkingTreeDirty(worktreePath))) {
         await unlinkWorktree(repoRoot, worktreePath, true)
       } else {
-        await provisionWorktree(repoRoot, worktreePath)
+        await provisionWorktree(
+          repoRoot,
+          worktreePath,
+          (await loadRepoIsolation(repoRoot, baseDir)).provision
+        )
         const remembered = await rememberRun({
           projectRoot: input.projectRoot,
           repoRoot,
@@ -169,7 +178,7 @@ export async function ensureAgentWorktree(input: {
     } else {
       await runGit(repoRoot, ['worktree', 'add', '-b', branch, worktreePath])
     }
-    await provisionWorktree(repoRoot, worktreePath)
+    await provisionWorktree(repoRoot, worktreePath, (await loadRepoIsolation(repoRoot, baseDir)).provision)
     const remembered = await rememberRun({
       projectRoot: input.projectRoot,
       repoRoot,

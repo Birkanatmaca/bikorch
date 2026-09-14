@@ -34,6 +34,9 @@ import {
   type IsolationProjectRequest,
   type IsolationRunRequest,
   type GitAgentSessionNote,
+  type WorktreeProvisionRequest,
+  type WorktreeProvisionSettings,
+  type WorktreeLocalFileName,
   GIT_IPC
 } from '@shared/contracts/git'
 import {
@@ -262,6 +265,13 @@ export interface GitApi {
   checkpointIsolation: (request: IsolationRunRequest) => Promise<{ ok: true; sha: string | null } | { ok: false; error: string }>
   discardIsolation: (request: IsolationRunRequest) => Promise<{ ok: true } | { ok: false; error: string }>
   noteAgentSession: (request: GitAgentSessionNote) => Promise<{ ok: true }>
+  updateWorktreeProvision: (
+    request: WorktreeProvisionRequest
+  ) => Promise<{
+    ok: true
+    provision: WorktreeProvisionSettings
+    availableLocalFiles: WorktreeLocalFileName[]
+  }>
 }
 
 export interface PersistenceApi {
@@ -421,7 +431,8 @@ const gitApi: GitApi = {
   isolationDiff: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_DIFF, request),
   checkpointIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_CHECKPOINT, request),
   discardIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_DISCARD, request),
-  noteAgentSession: (request) => ipcRenderer.invoke(GIT_IPC.AGENT_SESSION_NOTE, request)
+  noteAgentSession: (request) => ipcRenderer.invoke(GIT_IPC.AGENT_SESSION_NOTE, request),
+  updateWorktreeProvision: (request) => ipcRenderer.invoke(GIT_IPC.WORKTREE_PROVISION, request)
 }
 
 const persistenceApi: PersistenceApi = {

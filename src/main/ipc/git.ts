@@ -17,10 +17,19 @@ import {
   type IsolationProjectRequest,
   type IsolationRunRequest,
   type GitAgentSessionNote,
+  type WorktreeProvisionRequest,
   GIT_IPC
 } from '@shared/contracts/git'
 import { isAgentWorktreeKind } from '../git/worktree-paths'
-import { abortFold, acceptFold, foldFileDiff, inspectIsolation, prepareFold, syncFold } from '../git/isolation'
+import {
+  abortFold,
+  acceptFold,
+  foldFileDiff,
+  inspectIsolation,
+  prepareFold,
+  syncFold,
+  updateWorktreeProvision
+} from '../git/isolation'
 import { ensureAgentWorktree, removeAgentWorktree } from '../git/worktrees'
 import { checkpointAgentRun, discardAgentRun, noteAgentSessionEnded } from '../git/reconcile'
 import { snapshotAgentGit } from '../git/session-snapshot'
@@ -153,6 +162,19 @@ function validateIsolationLane(value: unknown): value is IsolationLaneInput {
     typeof lane.worktreePath === 'string' &&
     lane.worktreePath.length > 0 &&
     lane.worktreePath.length <= 1000
+  )
+}
+
+function validateWorktreeProvisionRequest(payload: unknown): payload is WorktreeProvisionRequest {
+  if (!payload || typeof payload !== 'object') return false
+  const req = payload as WorktreeProvisionRequest
+  return (
+    typeof req.projectRoot === 'string' &&
+    req.projectRoot.length > 0 &&
+    Array.isArray(req.copyLocalFiles) &&
+    req.copyLocalFiles.length <= 32 &&
+    req.copyLocalFiles.every((name) => typeof name === 'string' && name.length > 0 && name.length <= 80) &&
+    (req.dependencyMode === 'isolated' || req.dependencyMode === 'share' || req.dependencyMode === 'setup')
   )
 }
 
@@ -369,5 +391,12 @@ export function registerGitHandlers(): void {
       throw new Error('Invalid agent session note')
     }
     return noteAgentSessionEnded(req)
+  })
+
+  ipcMain.handle(GIT_IPC.WORKTREE_PROVISION, async (_event, payload: unknown) => {
+    if (!validateWorktreeProvisionRequest(payload)) {
+      throw new Error('Invalid worktree provision request')
+    }
+    return updateWorktreeProvision(payload)
   })
 }

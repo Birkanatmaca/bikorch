@@ -4,5 +4,6 @@ out
 release
 build/icon.iconset
 *.log
+*.tsbuildinfo
 .DS_Store
 Thumbs.db
