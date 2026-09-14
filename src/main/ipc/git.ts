@@ -18,7 +18,7 @@ import {
   GIT_IPC
 } from '@shared/contracts/git'
 import { isAgentWorktreeKind } from '../git/worktree-paths'
-import { abortFold, acceptFold, foldFileDiff, inspectIsolation, prepareFold } from '../git/isolation'
+import { abortFold, acceptFold, foldFileDiff, inspectIsolation, prepareFold, syncFold } from '../git/isolation'
 import { ensureAgentWorktree, removeAgentWorktree } from '../git/worktrees'
 import { snapshotAgentGit } from '../git/session-snapshot'
 import {
@@ -111,7 +111,8 @@ function validateEnsureWorktreeRequest(payload: unknown): payload is GitEnsureWo
     typeof req.panelId === 'string' &&
     req.panelId.length >= 8 &&
     req.panelId.length <= 80 &&
-    isAgentWorktreeKind(req.kind)
+    isAgentWorktreeKind(req.kind) &&
+    (req.title === undefined || (typeof req.title === 'string' && req.title.length <= 200))
   )
 }
 
@@ -295,7 +296,7 @@ export function registerGitHandlers(): void {
     if (!validateIsolationInspectRequest(payload)) {
       throw new Error('Invalid isolation inspect request')
     }
-    return inspectIsolation(payload)
+    return inspectIsolation({ projectRoot: payload.projectRoot, lanes: payload.lanes })
   })
 
   ipcMain.handle(GIT_IPC.ISOLATION_FOLD, async (_event, payload: unknown) => {
@@ -303,6 +304,13 @@ export function registerGitHandlers(): void {
       throw new Error('Invalid isolation fold request')
     }
     return prepareFold(payload)
+  })
+
+  ipcMain.handle(GIT_IPC.ISOLATION_SYNC, async (_event, payload: unknown) => {
+    if (!validateIsolationProjectRequest(payload)) {
+      throw new Error('Invalid isolation sync request')
+    }
+    return syncFold(payload)
   })
 
   ipcMain.handle(GIT_IPC.ISOLATION_ACCEPT, async (_event, payload: unknown) => {
