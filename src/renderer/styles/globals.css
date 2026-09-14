@@ -1159,59 +1159,6 @@ body {
   animation: scale-in var(--duration-slow) var(--ease-smooth);
 }
 
-.project-tab {
-  will-change: transform;
-}
-
-.project-tabs-reordering .project-tab:not(.project-tab-origin) {
-  transition: transform 180ms ease-out;
-}
-
-.project-tabs-reordering .project-tab-new {
-  transition: transform 180ms ease-out;
-}
-
-.project-tab-origin {
-  display: none !important;
-}
-
-.project-tab-slot {
-  border-radius: 9px;
-  border: 1px dashed rgb(167 139 250 / 0.45);
-  background: rgb(139 124 248 / 0.1);
-  transition: left 180ms ease-out;
-}
-
-.project-tab-float {
-  position: fixed;
-  left: 0;
-  top: 0;
-  z-index: 240;
-  height: 28px;
-  padding: 0 8px 0 11px;
-  border-radius: 9px;
-  transform-origin: center center;
-  color: var(--color-text-primary);
-  background:
-    linear-gradient(180deg, rgb(196 181 255 / 0.18), rgb(139 124 248 / 0.12)),
-    rgb(18 21 26 / 0.96);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.1),
-    0 10px 24px rgb(0 0 0 / 0.4),
-    0 0 0 1px rgb(139 124 248 / 0.35);
-  cursor: grabbing;
-}
-
-.project-tab-float-settle {
-  transition: transform 180ms ease-out, box-shadow 180ms ease-out;
-}
-
-body.project-tabs-grabbing,
-body.project-tabs-grabbing * {
-  cursor: grabbing !important;
-  user-select: none !important;
-}
-
 .orchestrator-grid {
   opacity: 0;
   background-color: transparent;

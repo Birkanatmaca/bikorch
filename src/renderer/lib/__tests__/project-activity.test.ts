@@ -55,7 +55,7 @@ describe('summarizeProjectTabActivity', () => {
         sessions: { 'cli-1': 'busy', 'cli-2': 'waiting' },
         attention: [{ panelId: 'cli-2', title: 'Claude Code', outcome: 'done', at: 1 }]
       })
-    ).toMatchObject({ signal: 'busy', busyCount: 1, label: 'Cursor CLI working' })
+    ).toMatchObject({ signal: 'busy', busyCount: 1, label: 'Working' })
   })
 
   it('counts multiple busy agents', () => {
@@ -65,7 +65,7 @@ describe('summarizeProjectTabActivity', () => {
         sessions: { 'cli-1': 'busy', 'cli-2': 'starting' },
         attention: []
       })
-    ).toMatchObject({ signal: 'busy', busyCount: 2, label: '2 agents working' })
+    ).toMatchObject({ signal: 'busy', busyCount: 2, label: '2 working' })
   })
 
   it('pings the tab after background work finishes', () => {
@@ -77,7 +77,7 @@ describe('summarizeProjectTabActivity', () => {
       })
     ).toMatchObject({
       signal: 'ready',
-      label: 'Cursor CLI finished — open to review'
+      label: 'Finished'
     })
   })
 
@@ -90,7 +90,7 @@ describe('summarizeProjectTabActivity', () => {
       })
     ).toMatchObject({
       signal: 'error',
-      label: 'Cursor CLI failed — open to review'
+      label: 'Needs attention'
     })
   })
 })

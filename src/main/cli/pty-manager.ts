@@ -19,12 +19,16 @@ import { withCursorAccountLock } from '../accounts/cursor-profile'
 import { logoutAntigravityCli } from '../accounts/antigravity-logout'
 import { markAntigravitySessionAccount } from '../accounts/antigravity-credential'
 import { recordLog } from '../logs'
+import { ptyHostClient } from './pty-host/client'
 
 interface PtySession {
   id: string
   kind: PtyCreateRequest['kind']
   accountId?: string
+  /** Present only for in-process (non-host) sessions. */
   process: IPty | null
+  /** True when the process lives in the durable PTY host. */
+  durable: boolean
   webContents: WebContents
   status: PtySessionStatus
   cols: number
@@ -36,16 +40,69 @@ const OUTPUT_BUFFER_LIMIT = 120_000
 
 class PtyManager {
   private sessions = new Map<string, PtySession>()
+  private hostEventsBound = false
 
   async create(request: PtyCreateRequest, webContents: WebContents): Promise<PtyCreateResponse> {
+    this.bindHostEvents()
     if (request.kind === 'cursor') {
-      if (!request.accountId) return { sessionId: request.sessionId, status: 'error', error: 'Accounts bölümünden bir Cursor hesabı seçin.' }
+      if (!request.accountId) {
+        return {
+          sessionId: request.sessionId,
+          status: 'error',
+          error: 'Accounts bölümünden bir Cursor hesabı seçin.'
+        }
+      }
       return withCursorAccountLock(request.accountId, () => this.createSession(request, webContents))
     }
     return this.createSession(request, webContents)
   }
 
-  private async createSession(request: PtyCreateRequest, webContents: WebContents): Promise<PtyCreateResponse> {
+  private bindHostEvents(): void {
+    if (this.hostEventsBound) return
+    this.hostEventsBound = true
+    ptyHostClient.onMessage((message) => {
+      if (message.type !== 'event') return
+      const event = message.payload
+      const session = this.sessions.get(event.sessionId)
+      if (!session?.durable) return
+
+      if (event.type === 'data') {
+        session.outputBuffer = `${session.outputBuffer}${event.data}`.slice(-OUTPUT_BUFFER_LIMIT)
+        this.emit(session.webContents, { type: 'data', sessionId: event.sessionId, data: event.data })
+        return
+      }
+      if (event.type === 'exit') {
+        session.status = 'stopped'
+        session.process = null
+        this.emit(session.webContents, {
+          type: 'exit',
+          sessionId: event.sessionId,
+          exitCode: event.exitCode
+        })
+        this.emit(session.webContents, {
+          type: 'status',
+          sessionId: event.sessionId,
+          status: 'stopped'
+        })
+        return
+      }
+      if (event.type === 'status') {
+        session.status = event.status
+        this.emit(session.webContents, {
+          type: 'status',
+          sessionId: event.sessionId,
+          status: event.status,
+          error: event.error,
+          kind: session.kind
+        })
+      }
+    })
+  }
+
+  private async createSession(
+    request: PtyCreateRequest,
+    webContents: WebContents
+  ): Promise<PtyCreateResponse> {
     const { sessionId, kind, cols = 80, rows = 24 } = request
 
     if (!isValidSessionId(sessionId)) {
@@ -58,7 +115,13 @@ class PtyManager {
       existing.webContents = webContents
       const nextCols = Math.max(20, Math.min(400, Math.floor(cols) || 80))
       const nextRows = Math.max(6, Math.min(200, Math.floor(rows) || 24))
-      if (existing.process && (existing.cols !== nextCols || existing.rows !== nextRows)) {
+      if (existing.durable) {
+        if (existing.cols !== nextCols || existing.rows !== nextRows) {
+          existing.cols = nextCols
+          existing.rows = nextRows
+          void ptyHostClient.resize(sessionId, nextCols, nextRows)
+        }
+      } else if (existing.process && (existing.cols !== nextCols || existing.rows !== nextRows)) {
         this.resize(sessionId, nextCols, nextRows)
       }
       this.emit(webContents, { type: 'status', sessionId, status: existing.status, kind })
@@ -115,7 +178,9 @@ class PtyManager {
         await withAntigravityCredentialLock(() => logoutAntigravityCli())
       } catch (error) {
         const message =
-          error instanceof Error ? error.message : 'Could not sign out the previous Antigravity account'
+          error instanceof Error
+            ? error.message
+            : 'Could not sign out the previous Antigravity account'
         this.emit(webContents, {
           type: 'status',
           sessionId,
@@ -161,14 +226,69 @@ class PtyManager {
     const launchArgs =
       request.launchMode === 'login' && (kind === 'codex' || kind === 'cursor') ? ['login'] : []
 
+    const useHost = await ptyHostClient.ensureConnected()
+
     for (const spawnConfig of candidates) {
       try {
-        const shellProcess = pty.spawn(spawnConfig.command, [...spawnConfig.args, ...launchArgs], {
+        const command = spawnConfig.command
+        const args = [...spawnConfig.args, ...launchArgs]
+        const env = { ...spawnEnv(), ...profileEnv, ...(spawnConfig.env ?? {}) }
+
+        if (useHost) {
+          const hosted = await ptyHostClient.spawn({
+            sessionId,
+            kind,
+            ...(request.accountId ? { accountId: request.accountId } : {}),
+            command,
+            args,
+            cwd,
+            cols: safeCols,
+            rows: safeRows,
+            env
+          })
+          if (hosted.status === 'error') {
+            lastError = hosted.error ?? `Failed to start ${getKindLabel(kind)}`
+            continue
+          }
+
+          const session: PtySession = {
+            id: sessionId,
+            kind,
+            ...(request.accountId ? { accountId: request.accountId } : {}),
+            process: null,
+            durable: true,
+            webContents,
+            status: hosted.status === 'stopped' ? 'stopped' : 'running',
+            cols: safeCols,
+            rows: safeRows,
+            outputBuffer: hosted.outputBuffer ?? ''
+          }
+          this.sessions.set(sessionId, session)
+          this.emit(webContents, { type: 'status', sessionId, status: session.status })
+          if (session.outputBuffer) {
+            this.emit(webContents, { type: 'data', sessionId, data: session.outputBuffer })
+          }
+          if (kind === 'antigravity') {
+            markAntigravitySessionAccount(request.accountId ?? null)
+          }
+          recordLog(
+            'info',
+            `${getKindLabel(kind)} session ${hosted.reattached ? 'reattached' : 'started'} via host (${sessionId})`,
+            'pty'
+          )
+          return {
+            sessionId,
+            status: session.status,
+            reattached: hosted.reattached
+          }
+        }
+
+        const shellProcess = pty.spawn(command, args, {
           name: 'xterm-256color',
           cols: safeCols,
           rows: safeRows,
           cwd,
-          env: { ...spawnEnv(), ...profileEnv, ...(spawnConfig.env ?? {}) },
+          env,
           ...(process.platform === 'win32' ? { useConpty: false } : {})
         })
 
@@ -177,6 +297,7 @@ class PtyManager {
           kind,
           ...(request.accountId ? { accountId: request.accountId } : {}),
           process: shellProcess,
+          durable: false,
           webContents,
           status: 'running',
           cols: safeCols,
@@ -197,12 +318,12 @@ class PtyManager {
         })
 
         shellProcess.onExit(({ exitCode }) => {
-          const existing = this.sessions.get(sessionId)
-          if (!existing || existing.process !== shellProcess) return
-          existing.status = 'stopped'
-          existing.process = null
-          this.emit(existing.webContents, { type: 'exit', sessionId, exitCode })
-          this.emit(existing.webContents, { type: 'status', sessionId, status: 'stopped' })
+          const current = this.sessions.get(sessionId)
+          if (!current || current.process !== shellProcess) return
+          current.status = 'stopped'
+          current.process = null
+          this.emit(current.webContents, { type: 'exit', sessionId, exitCode })
+          this.emit(current.webContents, { type: 'status', sessionId, status: 'stopped' })
           recordLog(
             exitCode === 0 ? 'info' : 'warn',
             `${getKindLabel(kind)} session exited with code ${exitCode ?? 'unknown'} (${sessionId})`,
@@ -213,9 +334,7 @@ class PtyManager {
         return { sessionId, status: 'running' }
       } catch (error) {
         lastError =
-          error instanceof Error
-            ? error.message
-            : `Failed to start ${getKindLabel(kind)}`
+          error instanceof Error ? error.message : `Failed to start ${getKindLabel(kind)}`
       }
     }
 
@@ -242,19 +361,27 @@ class PtyManager {
 
   write(sessionId: string, data: string): void {
     const session = this.sessions.get(sessionId)
-    if (!session?.process) return
-    session.process.write(data)
+    if (!session) return
+    if (session.durable) {
+      void ptyHostClient.write(sessionId, data)
+      return
+    }
+    session.process?.write(data)
   }
 
   resize(sessionId: string, cols: number, rows: number): void {
     const session = this.sessions.get(sessionId)
-    if (!session?.process) return
+    if (!session) return
     const nextCols = Math.max(20, Math.min(400, Math.floor(cols)))
     const nextRows = Math.max(6, Math.min(200, Math.floor(rows)))
     if (nextCols === session.cols && nextRows === session.rows) return
     session.cols = nextCols
     session.rows = nextRows
-    session.process.resize(nextCols, nextRows)
+    if (session.durable) {
+      void ptyHostClient.resize(sessionId, nextCols, nextRows)
+      return
+    }
+    session.process?.resize(nextCols, nextRows)
   }
 
   kill(sessionId: string): void {
@@ -262,6 +389,10 @@ class PtyManager {
     if (!session) return
 
     this.sessions.delete(sessionId)
+    if (session.durable) {
+      void ptyHostClient.kill(sessionId)
+      return
+    }
     if (!session.process) return
     try {
       session.process.kill()
@@ -275,7 +406,8 @@ class PtyManager {
       .filter(
         (session) =>
           session.kind === kind &&
-          (kind === 'antigravity' || session.accountId === accountId ||
+          (kind === 'antigravity' ||
+            session.accountId === accountId ||
             (kind !== 'cursor' && !session.accountId))
       )
       .map((session) => session.id)
@@ -286,6 +418,22 @@ class PtyManager {
     for (const sessionId of this.sessions.keys()) {
       this.kill(sessionId)
     }
+  }
+
+  /**
+   * App quit / update path: drop local UI bindings but leave durable host
+   * sessions running so the next launch can reattach.
+   */
+  releaseForAppQuit(): void {
+    for (const [sessionId, session] of [...this.sessions.entries()]) {
+      if (session.durable) {
+        this.sessions.delete(sessionId)
+        continue
+      }
+      this.kill(sessionId)
+    }
+    ptyHostClient.disconnect()
+    recordLog('info', 'Released durable PTY sessions for app quit/update', 'pty')
   }
 
   private emit(webContents: WebContents, event: PtyEvent): void {

@@ -57,7 +57,7 @@ export function AppHeader({
       {showWorkspaceControls && (
         <>
           <div className="mx-2 h-4 w-px shrink-0 bg-border" />
-          <div className="min-w-0 flex-1 overflow-hidden">
+          <div className="min-w-0 flex-1 overflow-hidden app-no-drag">
             <ProjectTabs />
           </div>
         </>
