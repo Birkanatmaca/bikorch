@@ -244,6 +244,7 @@ export interface GitApi {
   sessionSnapshot: (request: GitSessionSnapshotRequest) => Promise<GitSessionSnapshot>
   inspectIsolation: (request: IsolationInspectRequest) => Promise<IsolationInspectResponse>
   foldIsolation: (request: IsolationFoldRequest) => Promise<IsolationFoldSession>
+  syncIsolation: (request: IsolationProjectRequest) => Promise<IsolationFoldSession>
   acceptIsolation: (request: IsolationProjectRequest) => Promise<{ ok: true } | { ok: false; error: string }>
   abortIsolation: (request: IsolationProjectRequest) => Promise<{ ok: true }>
   isolationDiff: (request: IsolationDiffRequest) => Promise<GitDiffResponse>
@@ -387,6 +388,7 @@ const gitApi: GitApi = {
   sessionSnapshot: (request) => ipcRenderer.invoke(GIT_IPC.SESSION_SNAPSHOT, request),
   inspectIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_INSPECT, request),
   foldIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_FOLD, request),
+  syncIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_SYNC, request),
   acceptIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_ACCEPT, request),
   abortIsolation: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_ABORT, request),
   isolationDiff: (request) => ipcRenderer.invoke(GIT_IPC.ISOLATION_DIFF, request)

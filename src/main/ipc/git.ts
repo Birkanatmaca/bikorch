@@ -124,7 +124,9 @@ function validateRemoveWorktreeRequest(payload: unknown): payload is GitRemoveWo
     req.projectRoot.length > 0 &&
     typeof req.worktreePath === 'string' &&
     req.worktreePath.length > 0 &&
-    req.worktreePath.length <= 1000
+    req.worktreePath.length <= 1000 &&
+    (req.title === undefined || (typeof req.title === 'string' && req.title.length <= 200)) &&
+    (req.mode === undefined || req.mode === 'park' || req.mode === 'remove')
   )
 }
 

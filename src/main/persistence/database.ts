@@ -297,6 +297,19 @@ function parsePanels(raw: unknown): PanelDefinition[] {
           : {}),
         ...(panel.workspaceIsolation === 'shared' || panel.workspaceIsolation === 'isolated'
           ? { workspaceIsolation: panel.workspaceIsolation }
+          : {}),
+        ...(panel.panelRole === 'resolver' || panel.panelRole === 'agent'
+          ? { panelRole: panel.panelRole }
+          : {}),
+        ...(typeof panel.cwdOverride === 'string' &&
+        panel.cwdOverride.length > 0 &&
+        panel.cwdOverride.length <= 1000
+          ? { cwdOverride: panel.cwdOverride }
+          : {}),
+        ...(typeof panel.agentRunId === 'string' &&
+        panel.agentRunId.length >= 8 &&
+        panel.agentRunId.length <= 80
+          ? { agentRunId: panel.agentRunId }
           : {})
       })
     }

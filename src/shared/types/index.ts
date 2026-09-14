@@ -25,8 +25,12 @@ export interface PanelDefinition {
   accountId?: string
   /** Isolated git worktree for this agent on a local `bikorch/<kind>-<id>` branch. */
   worktreePath?: string
-  /** Isolated (own worktree) is the default. Shared uses the main project tree. */
+  /** Configured isolation. Isolated is the default. Shared uses the main project tree. */
   workspaceIsolation?: 'isolated' | 'shared'
+  /** Resolver sessions run in the integration worktree instead of an agent worktree. */
+  panelRole?: 'agent' | 'resolver'
+  cwdOverride?: string
+  agentRunId?: string
 }
 
 export type PanelZone = 'left' | 'center' | 'right' | 'bottom'
