@@ -182,6 +182,18 @@ export function PanelContent({ panelId, type, launchMode, accountId }: PanelCont
           <MobilePreviewPanel panelId={panelId} />
         </Suspense>
       )
+    case 'ios-preview':
+      return (
+        <Suspense fallback={<PanelLoading />}>
+          <MobilePreviewPanel panelId={panelId} deviceId="ios" />
+        </Suspense>
+      )
+    case 'android-preview':
+      return (
+        <Suspense fallback={<PanelLoading />}>
+          <MobilePreviewPanel panelId={panelId} deviceId="android" />
+        </Suspense>
+      )
     default:
       return <PlaceholderLines />
   }

@@ -157,12 +157,22 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
         }
       },
       {
-        id: 'add-mobile-preview',
-        label: 'Mobile Preview',
+        id: 'add-ios-preview',
+        label: 'iOS Device',
         group: 'Quick',
         keywords: 'add mobile preview iphone android phone device viewport',
         action: () => {
-          addPanel('mobile-preview')
+          addPanel('ios-preview')
+          onClose()
+        }
+      },
+      {
+        id: 'add-android-preview',
+        label: 'Android Device',
+        group: 'Quick',
+        keywords: 'add android pixel mobile device viewport',
+        action: () => {
+          addPanel('android-preview')
           onClose()
         }
       },

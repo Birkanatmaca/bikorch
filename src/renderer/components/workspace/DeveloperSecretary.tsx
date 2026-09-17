@@ -1,25 +1,27 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Bot, Check, ChevronDown, KeyRound, Loader2, Send, Settings2, ShieldCheck, Trash2, X } from 'lucide-react'
+import { ArrowUp, Check, Loader2, ShieldCheck, SlidersHorizontal, X } from 'lucide-react'
 import type { PanelDefinition, Project } from '@shared/types'
-import type { SecretaryPlan, SecretarySettings } from '@shared/contracts/secretary'
+import type { SecretaryPlan } from '@shared/contracts/secretary'
 import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
+import { AppLogo } from '@renderer/components/brand/AppLogo'
+import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
+import { useSecretaryStore } from '@renderer/stores/secretary-store'
 import { useUsageStore } from '@renderer/stores/usage-store'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
-import { cn } from '@renderer/lib/utils'
+import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 
 const CLI_TYPES = new Set(AI_ACCOUNT_KINDS)
 
 export function DeveloperSecretary({ project, panels }: { project: Project; panels: PanelDefinition[] }): React.JSX.Element {
   const usage = useUsageStore((state) => state.providers)
   const sessions = useTerminalStore((state) => state.sessions)
-  const [settings, setSettings] = useState<SecretarySettings | null>(null)
+  const selectLeftSidebar = useWorkspaceStore((state) => state.selectLeftSidebar)
+  const settings = useSecretaryStore((state) => state.settings)
+  const settingsLoaded = useSecretaryStore((state) => state.loaded)
+  const loadSettings = useSecretaryStore((state) => state.load)
   const [brief, setBrief] = useState('')
-  const [showKey, setShowKey] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
-  const [key, setKey] = useState('')
-  const [model, setModel] = useState('gpt-5')
   const [plan, setPlan] = useState<SecretaryPlan | null>(null)
-  const [lastDispatch, setLastDispatch] = useState<SecretaryPlan['assignments'] | null>(null)
+  const [feedback, setFeedback] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -33,51 +35,28 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   })), [panels, sessions])
 
   useEffect(() => {
-    void window.api.secretary.getSettings().then((next) => { setSettings(next); setModel(next.model) }).catch(() => setSettings({ configured: false, model: 'gpt-5' }))
-  }, [])
+    if (!settingsLoaded) void loadSettings()
+  }, [loadSettings, settingsLoaded])
 
-  const saveKey = async (): Promise<void> => {
-    setLoading(true)
-    setError(null)
-    try {
-      setSettings(await window.api.secretary.saveKey(key))
-      setKey('')
-      setShowKey(false)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not save API key')
-    } finally { setLoading(false) }
-  }
-
-  const saveSettings = async (): Promise<void> => {
-    setLoading(true)
-    setError(null)
-    try {
-      const next = await window.api.secretary.updateSettings({ model: model.trim() })
-      setSettings(next)
-      setModel(next.model)
-      setShowSettings(false)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not update Secretary settings')
-    } finally { setLoading(false) }
-  }
-
-  const clearKey = async (): Promise<void> => {
-    setLoading(true)
-    try { setSettings(await window.api.secretary.clearKey()); setPlan(null); setLastDispatch(null) } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not remove API key')
-    } finally { setLoading(false) }
+  const openSettings = (): void => {
+    useDeveloperIntelligenceStore.getState().setSection('secretary')
+    selectLeftSidebar(project.id, 'profile')
   }
 
   const createPlan = async (): Promise<void> => {
-    if (!brief.trim()) return
+    if (!brief.trim() || !settings.configured || cliPanels.length === 0) return
     setLoading(true)
+    setFeedback(null)
     setError(null)
     try {
       const nextPlan = await window.api.secretary.createPlan({ project, brief: brief.trim(), panels: cliPanels, usage })
       setPlan(nextPlan)
+      void loadSettings()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not prepare a plan')
-    } finally { setLoading(false) }
+    } finally {
+      setLoading(false)
+    }
   }
 
   const dispatch = async (): Promise<void> => {
@@ -85,34 +64,105 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     setSending(true)
     setError(null)
     try {
+      let sent = 0
       for (const assignment of plan.assignments) {
         if (!assignment.panelId) continue
         await window.api.pty.write({ sessionId: assignment.panelId, data: `${assignment.instruction}\r` })
+        sent += 1
       }
-      setLastDispatch(plan.assignments)
       setPlan(null)
       setBrief('')
+      setFeedback(`${sent} assignment${sent === 1 ? '' : 's'} sent`)
+      window.setTimeout(() => setFeedback(null), 3200)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not send one or more assignments')
-    } finally { setSending(false) }
+    } finally {
+      setSending(false)
+    }
   }
+
+  const placeholder = cliPanels.length === 0
+    ? 'Open a CLI agent to start delegating…'
+    : `Ask Developer Secretary to coordinate ${project.name}…`
 
   return (
     <section className="developer-secretary" aria-label="Developer Secretary">
-      <div className="secretary-identity"><div className="secretary-avatar"><Bot className="h-4 w-4" /></div><div><strong>Developer Secretary</strong><span>{project.name} · {cliPanels.length} CLI ready</span></div></div>
-      {!settings?.configured ? (
-        <button type="button" className="secretary-key-trigger" onClick={() => setShowKey((value) => !value)}><KeyRound className="h-3.5 w-3.5" /> Add OpenAI API key <ChevronDown className={cn('h-3 w-3', showKey && 'rotate-180')} /></button>
-      ) : <button type="button" className="secretary-ready" onClick={() => setShowSettings((value) => !value)}><ShieldCheck className="h-3.5 w-3.5" /> {settings.model} <Settings2 className="h-3 w-3" /></button>}
+      <div className="secretary-popover-stack" aria-live="polite">
+        {error ? (
+          <div className="secretary-inline-message is-error">
+            <span>{error}</span>
+            <button type="button" onClick={() => setError(null)} aria-label="Dismiss error"><X className="h-3.5 w-3.5" /></button>
+          </div>
+        ) : null}
+        {feedback ? (
+          <div className="secretary-inline-message is-success"><Check className="h-3.5 w-3.5" /><span>{feedback}</span></div>
+        ) : null}
+        {plan ? (
+          <div className="secretary-plan">
+            <div className="secretary-plan-heading">
+              <div>
+                <span>Ready for your approval</span>
+                <p>{plan.overview}</p>
+              </div>
+              <button type="button" className="secretary-dismiss" onClick={() => setPlan(null)} aria-label="Dismiss plan"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="secretary-assignments">
+              {plan.assignments.map((assignment) => (
+                <article key={assignment.id}>
+                  <div><span>{AI_ACCOUNT_LABELS[assignment.kind]}</span><small>{assignment.usageNote}</small></div>
+                  <strong>{assignment.title}</strong>
+                  <p>{assignment.instruction}</p>
+                </article>
+              ))}
+            </div>
+            <div className="secretary-plan-actions">
+              <span><ShieldCheck className="h-3.5 w-3.5" /> Nothing is sent without approval</span>
+              <button type="button" onClick={() => void dispatch()} disabled={sending || plan.assignments.every((item) => !item.panelId)}>
+                {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowUp className="h-3.5 w-3.5" />}
+                Approve & send
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
 
-      {showKey && !settings?.configured ? <div className="secretary-key-form"><input type="password" value={key} onChange={(event) => setKey(event.target.value)} placeholder="OpenAI API key" aria-label="OpenAI API key" autoComplete="off" /><button type="button" onClick={() => void saveKey()} disabled={loading || !key.trim()}>{loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save securely</button></div> : null}
-      {showSettings && settings?.configured ? <div className="secretary-key-form"><input value={model} onChange={(event) => setModel(event.target.value)} placeholder="OpenAI model identifier" aria-label="Secretary model" /><button type="button" onClick={() => void saveSettings()} disabled={loading || !model.trim()}>Save model</button><button type="button" className="secretary-danger" onClick={() => void clearKey()} disabled={loading} title="Remove API key"><Trash2 className="h-3.5 w-3.5" /></button></div> : null}
-
-      <div className="secretary-composer"><textarea value={brief} onChange={(event) => setBrief(event.target.value)} placeholder="Describe the project goal or work you want coordinated…" rows={1} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void createPlan() } }} /><button type="button" onClick={() => void createPlan()} disabled={loading || !brief.trim() || !settings?.configured || cliPanels.length === 0}>{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Plan</button></div>
-      {error ? <p className="secretary-error"><X className="h-3.5 w-3.5" />{error}</p> : null}
-      {!settings?.configured ? <p className="secretary-hint">The API key is encrypted by your operating system and is never exposed to the workspace or CLI panels.</p> : null}
-      {settings?.configured && cliPanels.length === 0 ? <p className="secretary-hint">Open a Codex, Claude, Cursor, Gemini, or Antigravity panel to receive assignments.</p> : null}
-      {plan ? <div className="secretary-plan"><div className="secretary-plan-heading"><div><span>Proposed plan · review before sending</span><p>{plan.overview}</p></div><button type="button" className="secretary-dismiss" onClick={() => setPlan(null)} aria-label="Dismiss plan"><X className="h-3.5 w-3.5" /></button></div><div className="secretary-assignments">{plan.assignments.map((assignment) => <article key={assignment.id}><span>{AI_ACCOUNT_LABELS[assignment.kind]}</span><strong>{assignment.title}</strong><p>{assignment.instruction}</p><small>{assignment.rationale} · {assignment.usageNote}</small></article>)}</div><div className="secretary-plan-actions"><span><ShieldCheck className="h-3.5 w-3.5" /> Sends only after your approval</span><button type="button" onClick={() => void dispatch()} disabled={sending || plan.assignments.every((item) => !item.panelId)}>{sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Approve & send</button></div></div> : null}
-      {lastDispatch ? <div className="secretary-dispatch-status"><span><Check className="h-3.5 w-3.5" /> Last delegation</span>{lastDispatch.map((item) => <small key={item.id}>{item.title} · {item.panelId ? (sessions[item.panelId] ?? 'sent') : 'not assigned'}</small>)}</div> : null}
+      {!settings.configured ? (
+        <button type="button" className="secretary-composer secretary-connect" onClick={openSettings}>
+          <span className="secretary-mark"><AppLogo size="xs" /></span>
+          <span>Connect Developer Secretary in Profile to start…</span>
+          <span className="secretary-settings-shortcut"><SlidersHorizontal className="h-3.5 w-3.5" /> Profile</span>
+        </button>
+      ) : (
+        <div className="secretary-composer">
+          <button type="button" className="secretary-mark" onClick={openSettings} title="Open Secretary settings" aria-label="Open Secretary settings">
+            <AppLogo size="xs" />
+          </button>
+          <textarea
+            value={brief}
+            onChange={(event) => setBrief(event.target.value)}
+            placeholder={placeholder}
+            rows={1}
+            disabled={cliPanels.length === 0}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault()
+                void createPlan()
+              }
+            }}
+          />
+          <span className="secretary-model-label">{settings.model}</span>
+          <button
+            type="button"
+            className="secretary-send"
+            onClick={() => void createPlan()}
+            disabled={loading || !brief.trim() || cliPanels.length === 0}
+            aria-label="Create delegation plan"
+            title="Create delegation plan"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
+          </button>
+        </div>
+      )}
     </section>
   )
 }

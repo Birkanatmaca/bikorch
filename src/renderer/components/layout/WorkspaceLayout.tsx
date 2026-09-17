@@ -7,6 +7,7 @@ import {
 import { useRef, useCallback, useState, useEffect } from 'react'
 import {
   type PanelDefinition,
+  isMobilePreviewPanel,
   type PanelZone,
   type WorkspaceLayout,
   WIDE_LEFT_SIDEBAR_VIEWS
@@ -168,6 +169,7 @@ function ZonePanels({
     }
     return { onClose: () => onClose(panel.id) }
   }
+  const isDirectDevice = (panel: PanelDefinition): boolean => isMobilePreviewPanel(panel.type)
 
   if (panels.length === 1) {
     const panel = panels[0]
@@ -181,6 +183,8 @@ function ZonePanels({
         onDragEnd={onDragEnd}
         launchMode={panel.launchMode}
         accountId={panel.accountId}
+        showHeader={!isDirectDevice(panel)}
+        flush={isDirectDevice(panel)}
       />
     )
   }
@@ -198,6 +202,8 @@ function ZonePanels({
             onDragEnd={onDragEnd}
             launchMode={panel.launchMode}
             accountId={panel.accountId}
+            showHeader={!isDirectDevice(panel)}
+            flush={isDirectDevice(panel)}
           />
         </div>
       ))}

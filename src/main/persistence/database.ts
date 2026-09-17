@@ -66,7 +66,9 @@ const VALID_PANEL_TYPES = new Set<PanelType>([
   'player',
   'timer',
   'browser',
-  'mobile-preview'
+  'mobile-preview',
+  'ios-preview',
+  'android-preview'
 ])
 
 function getDbPath(): string {

@@ -3,6 +3,17 @@ import type { CliUsageInfo, CliUsageKind } from './usage'
 export interface SecretarySettings {
   configured: boolean
   model: string
+  usage: SecretaryUsageStats
+}
+
+export interface SecretaryUsageStats {
+  requests: number
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+  totalTokens: number
+  estimatedCostUsd: number | null
+  lastRequestAt: number | null
 }
 
 export interface SecretaryPanelContext {
@@ -41,6 +52,7 @@ export const SECRETARY_IPC = {
   GET_SETTINGS: 'secretary:getSettings',
   SAVE_KEY: 'secretary:saveKey',
   CLEAR_KEY: 'secretary:clearKey',
+  RESET_USAGE: 'secretary:resetUsage',
   UPDATE_SETTINGS: 'secretary:updateSettings',
   CREATE_PLAN: 'secretary:createPlan'
 } as const

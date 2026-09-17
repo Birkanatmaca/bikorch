@@ -26,6 +26,7 @@ export type ProfileSection =
   | 'prompts'
   | 'sessions'
   | 'memory'
+  | 'secretary'
   | 'privacy'
   | 'runtime'
 

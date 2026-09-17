@@ -168,10 +168,16 @@ export function useOrchestratorContextMenu(
           action: () => addAtCursor('browser')
         },
         {
-          id: 'add-mobile-preview',
-          label: 'Mobile Preview',
+          id: 'add-ios-preview',
+          label: 'iOS Device',
           icon: Smartphone,
-          action: () => addAtCursor('mobile-preview')
+          action: () => addAtCursor('ios-preview')
+        },
+        {
+          id: 'add-android-preview',
+          label: 'Android Device',
+          icon: Smartphone,
+          action: () => addAtCursor('android-preview')
         },
         {
           id: 'add-git',

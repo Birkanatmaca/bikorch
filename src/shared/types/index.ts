@@ -16,6 +16,8 @@ export type PanelType =
   | 'timer'
   | 'browser'
   | 'mobile-preview'
+  | 'ios-preview'
+  | 'android-preview'
 
 export interface PanelDefinition {
   id: string
@@ -66,6 +68,10 @@ export function isLeftSidebarView(value: unknown): value is LeftSidebarView {
 
 export function isFloatingWidget(type: PanelType | undefined): boolean {
   return type === 'player' || type === 'timer'
+}
+
+export function isMobilePreviewPanel(type: PanelType | undefined): type is 'mobile-preview' | 'ios-preview' | 'android-preview' {
+  return type === 'mobile-preview' || type === 'ios-preview' || type === 'android-preview'
 }
 
 export function isWebChatPanel(type: PanelType | undefined): type is 'chatgpt' | 'claude-chat' {
@@ -220,7 +226,9 @@ export const PANEL_TYPE_LABELS: Record<PanelType, string> = {
   player: 'Player',
   timer: 'Timer',
   browser: 'Browser',
-  'mobile-preview': 'Mobile Preview'
+  'mobile-preview': 'Mobile Preview',
+  'ios-preview': 'iOS Preview',
+  'android-preview': 'Android Preview'
 }
 
 export const DEFAULT_LAYOUT: WorkspaceLayout = {

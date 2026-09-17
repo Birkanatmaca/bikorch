@@ -13,6 +13,8 @@ const icons: Partial<Record<PanelType, LucideIcon>> = {
   timer: Timer,
   browser: Globe,
   'mobile-preview': Smartphone,
+  'ios-preview': Smartphone,
+  'android-preview': Smartphone,
   chatgpt: MessageSquare,
   'claude-chat': MessageSquare
 }
