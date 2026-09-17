@@ -9,6 +9,7 @@ import {
   isFloatingWidget,
   panelMinLimits,
   isFullBleedOrchestratorRect,
+  isMobilePreviewPanel,
   type OrchestratorRect,
   type PanelDefinition,
   type PanelType,
@@ -244,6 +245,7 @@ function OrchestratorWindow({
         <div
           className={cn(
             'workstation-window relative h-full overflow-hidden border bg-panel-bg',
+            isMobilePreviewPanel(panel.type) && 'direct-device-window',
             isMac ? 'orchestrator-window-macos' : 'rounded-md shadow-lg shadow-black/25',
             showChrome ? cliFrameClass(phase) : 'border-border',
             !active && isMac && 'orchestrator-window-macos-inactive'
@@ -260,6 +262,7 @@ function OrchestratorWindow({
             accountId={panel.accountId}
             draggable={false}
             flush
+            showHeader={!isMobilePreviewPanel(panel.type)}
             windowActive={active}
             onHeaderPointerDown={(e) => {
               if ((e.target as HTMLElement).closest('button, .mac-traffic-lights')) return

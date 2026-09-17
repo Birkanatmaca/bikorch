@@ -20,7 +20,9 @@ const PANEL_MENU_LABELS: Partial<Record<PanelType, string>> = {
   player: 'Player',
   timer: 'Timer',
   browser: 'Browser',
-  'mobile-preview': 'Mobile Preview'
+  'mobile-preview': 'Mobile Preview',
+  'ios-preview': 'iOS Device',
+  'android-preview': 'Android Device'
 }
 
 const ADDABLE_PANEL_TYPES: PanelType[] = [
@@ -39,7 +41,8 @@ const ADDABLE_PANEL_TYPES: PanelType[] = [
   'player',
   'timer',
   'browser',
-  'mobile-preview'
+  'ios-preview',
+  'android-preview'
 ]
 
 export { ADD_PANEL_MENU_EVENT } from '@renderer/lib/app-events'

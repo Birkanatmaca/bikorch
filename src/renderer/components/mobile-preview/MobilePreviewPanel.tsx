@@ -342,7 +342,7 @@ function MobileDevice({ device, url, reloadVersion }: { device: DeviceSpec; url:
   )
 }
 
-export function MobilePreviewPanel({ panelId }: { panelId: string }): React.JSX.Element {
+export function MobilePreviewPanel({ panelId, deviceId }: { panelId: string; deviceId?: DeviceSpec['id'] }): React.JSX.Element {
   const panel = useBrowserStore((state) => state.panels[panelId])
   const ensure = useBrowserStore((state) => state.ensure)
   const rememberUrl = useBrowserStore((state) => state.rememberUrl)
@@ -371,12 +371,15 @@ export function MobilePreviewPanel({ panelId }: { panelId: string }): React.JSX.
 
   const url = panel?.url ?? ''
 
+  const devices = deviceId ? DEVICES.filter((device) => device.id === deviceId) : DEVICES
+  const direct = Boolean(deviceId)
+
   return (
-    <div className="mobile-preview-workbench">
+    <div className={cn('mobile-preview-workbench', direct && 'mobile-direct-workspace')}>
       <div className="mobile-preview-chrome">
         <div className="mobile-preview-heading">
           <Smartphone className="h-3.5 w-3.5 text-primary" aria-hidden />
-          <span>Mobile preview</span>
+          <span>{deviceId === 'ios' ? 'iOS device' : deviceId === 'android' ? 'Android device' : 'Mobile preview'}</span>
         </div>
         <form
           className="browser-omnibox"
@@ -400,8 +403,8 @@ export function MobilePreviewPanel({ panelId }: { panelId: string }): React.JSX.
           className="browser-icon-btn"
           onClick={() => setReloadVersion((value) => value + 1)}
           disabled={!url}
-          aria-label="Reload both device previews"
-          title="Reload both previews"
+          aria-label={direct ? 'Reload device preview' : 'Reload both device previews'}
+          title={direct ? 'Reload device' : 'Reload both previews'}
         >
           <RefreshCw className="h-3.5 w-3.5" />
         </button>
@@ -410,8 +413,8 @@ export function MobilePreviewPanel({ panelId }: { panelId: string }): React.JSX.
       {!url ? (
         <div className="mobile-preview-start">
           <Smartphone className="h-7 w-7 text-primary" aria-hidden />
-          <h3>Preview your app on two devices</h3>
-          <p>Both frames load the same URL with iPhone and Android viewport sizes.</p>
+          <h3>{direct ? `Preview your app on ${deviceId === 'ios' ? 'iOS' : 'Android'}` : 'Preview your app on two devices'}</h3>
+          <p>{direct ? 'Enter a URL to open it directly in this device view.' : 'Both frames load the same URL with iPhone and Android viewport sizes.'}</p>
           <div className="browser-presets">
             {LOCAL_BROWSER_PRESETS.map((preset) => (
               <Button key={preset.url} variant="secondary" onClick={() => navigate(preset.url)}>
@@ -422,7 +425,7 @@ export function MobilePreviewPanel({ panelId }: { panelId: string }): React.JSX.
         </div>
       ) : (
         <div className="mobile-preview-stage">
-          {DEVICES.map((device) => (
+          {devices.map((device) => (
             <MobileDevice key={device.id} device={device} url={url} reloadVersion={reloadVersion} />
           ))}
         </div>

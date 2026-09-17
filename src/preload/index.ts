@@ -367,6 +367,7 @@ export interface SecretaryApi {
   getSettings: () => Promise<SecretarySettings>
   saveKey: (key: string) => Promise<SecretarySettings>
   clearKey: () => Promise<SecretarySettings>
+  resetUsage: () => Promise<SecretarySettings>
   updateSettings: (settings: { model: string }) => Promise<SecretarySettings>
   createPlan: (request: SecretaryPlanRequest) => Promise<SecretaryPlan>
 }
@@ -656,6 +657,7 @@ const secretaryApi: SecretaryApi = {
   getSettings: () => ipcRenderer.invoke(SECRETARY_IPC.GET_SETTINGS),
   saveKey: (key) => ipcRenderer.invoke(SECRETARY_IPC.SAVE_KEY, key),
   clearKey: () => ipcRenderer.invoke(SECRETARY_IPC.CLEAR_KEY),
+  resetUsage: () => ipcRenderer.invoke(SECRETARY_IPC.RESET_USAGE),
   updateSettings: (settings) => ipcRenderer.invoke(SECRETARY_IPC.UPDATE_SETTINGS, settings),
   createPlan: (request) => ipcRenderer.invoke(SECRETARY_IPC.CREATE_PLAN, request)
 }

@@ -24,6 +24,8 @@ export function getPanelTypeIcon(type: string): string {
     timer: '◷',
     browser: '◎',
     'mobile-preview': '▣',
+    'ios-preview': '',
+    'android-preview': '▣',
     usage: '◷'
   }
   return icons[type] ?? '□'

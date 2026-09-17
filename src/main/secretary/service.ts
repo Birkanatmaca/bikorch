@@ -5,15 +5,83 @@ import type {
   SecretaryAssignment,
   SecretaryPlan,
   SecretaryPlanRequest,
-  SecretarySettings
+  SecretarySettings,
+  SecretaryUsageStats
 } from '@shared/contracts/secretary'
 import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import { readMetaValue, writeMetaValue } from '../persistence/database'
+import {
+  estimateSecretaryCostUsd,
+  type SecretaryResponseUsage
+} from './pricing'
 
 const DEFAULT_MODEL = 'gpt-5'
 const KEY_FILE = 'developer-secretary-key.bin'
 const MODEL_META_KEY = 'developer_secretary_model'
+const USAGE_META_KEY = 'developer_secretary_usage'
+
+const EMPTY_USAGE: SecretaryUsageStats = {
+  requests: 0,
+  inputTokens: 0,
+  cachedInputTokens: 0,
+  outputTokens: 0,
+  totalTokens: 0,
+  estimatedCostUsd: 0,
+  lastRequestAt: null
+}
+
+function safeCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0
+}
+
+function readUsage(): SecretaryUsageStats {
+  const saved = readMetaValue(USAGE_META_KEY)
+  if (!saved) return { ...EMPTY_USAGE }
+  try {
+    const value = JSON.parse(saved) as Partial<SecretaryUsageStats>
+    const requests = safeCount(value.requests)
+    return {
+      requests,
+      inputTokens: safeCount(value.inputTokens),
+      cachedInputTokens: safeCount(value.cachedInputTokens),
+      outputTokens: safeCount(value.outputTokens),
+      totalTokens: safeCount(value.totalTokens),
+      estimatedCostUsd: value.estimatedCostUsd === null
+        ? null
+        : typeof value.estimatedCostUsd === 'number' && Number.isFinite(value.estimatedCostUsd) && value.estimatedCostUsd >= 0
+          ? value.estimatedCostUsd
+          : requests === 0 ? 0 : null,
+      lastRequestAt: typeof value.lastRequestAt === 'number' && Number.isFinite(value.lastRequestAt)
+        ? value.lastRequestAt
+        : null
+    }
+  } catch {
+    return { ...EMPTY_USAGE }
+  }
+}
+
+function recordUsage(model: string, usage: SecretaryResponseUsage | undefined): void {
+  if (!usage) return
+  const current = readUsage()
+  const inputTokens = safeCount(usage.input_tokens)
+  const cachedInputTokens = Math.min(inputTokens, safeCount(usage.input_tokens_details?.cached_tokens))
+  const outputTokens = safeCount(usage.output_tokens)
+  const measuredTotal = safeCount(usage.total_tokens)
+  const requestCost = estimateSecretaryCostUsd(model, usage)
+  const estimatedCostUsd = current.estimatedCostUsd === null || requestCost === null
+    ? null
+    : current.estimatedCostUsd + requestCost
+  writeMetaValue(USAGE_META_KEY, JSON.stringify({
+    requests: current.requests + 1,
+    inputTokens: current.inputTokens + inputTokens,
+    cachedInputTokens: current.cachedInputTokens + cachedInputTokens,
+    outputTokens: current.outputTokens + outputTokens,
+    totalTokens: current.totalTokens + (measuredTotal || inputTokens + outputTokens),
+    estimatedCostUsd,
+    lastRequestAt: Date.now()
+  } satisfies SecretaryUsageStats))
+}
 
 function keyPath(): string {
   return join(app.getPath('userData'), KEY_FILE)
@@ -31,7 +99,11 @@ function readApiKey(): string | null {
 
 export function getSecretarySettings(): SecretarySettings {
   const savedModel = readMetaValue(MODEL_META_KEY)?.trim()
-  return { configured: Boolean(readApiKey()), model: savedModel && savedModel.length <= 100 ? savedModel : DEFAULT_MODEL }
+  return {
+    configured: Boolean(readApiKey()),
+    model: savedModel && savedModel.length <= 100 ? savedModel : DEFAULT_MODEL,
+    usage: readUsage()
+  }
 }
 
 export function updateSecretarySettings(payload: unknown): SecretarySettings {
@@ -57,6 +129,11 @@ export function saveSecretaryApiKey(value: unknown): SecretarySettings {
 
 export function clearSecretaryApiKey(): SecretarySettings {
   if (existsSync(keyPath())) unlinkSync(keyPath())
+  return getSecretarySettings()
+}
+
+export function resetSecretaryUsage(): SecretarySettings {
+  writeMetaValue(USAGE_META_KEY, JSON.stringify(EMPTY_USAGE))
   return getSecretarySettings()
 }
 
@@ -105,8 +182,9 @@ export async function createSecretaryPlan(payload: unknown): Promise<SecretaryPl
   }
   const apiKey = readApiKey()
   if (!apiKey) throw new Error('Add an OpenAI API key in Developer Secretary settings first')
+  const model = getSecretarySettings().model
   const body = {
-    model: getSecretarySettings().model,
+    model,
     store: false,
     input: [
       {
@@ -129,7 +207,8 @@ export async function createSecretaryPlan(payload: unknown): Promise<SecretaryPl
     const message = await response.text()
     throw new Error(`Planning request failed (${response.status}): ${message.slice(0, 240)}`)
   }
-  const result = await response.json() as { output_text?: unknown }
+  const result = await response.json() as { output_text?: unknown; usage?: SecretaryResponseUsage }
+  recordUsage(model, result.usage)
   if (typeof result.output_text !== 'string') throw new Error('The planning service returned no text')
   return parsePlan(result.output_text, request)
 }

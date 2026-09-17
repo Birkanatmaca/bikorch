@@ -9,6 +9,7 @@ import {
   ORCHESTRATOR_MIN_PX,
   parseCanvasMode,
   type PanelDefinition,
+  isMobilePreviewPanel,
   type PanelType,
   type WorkspaceGridNode
 } from '@shared/types'
@@ -117,6 +118,7 @@ function TiledWindow({
       <div
         className={cn(
           'workstation-window relative h-full overflow-hidden border bg-panel-bg',
+          isMobilePreviewPanel(panel.type) && 'direct-device-window',
           isMac ? 'orchestrator-window-macos' : 'rounded-md shadow-lg shadow-black/25',
           showChrome ? cliFrameClass(phase) : 'border-border',
           !active && isMac && 'orchestrator-window-macos-inactive'
@@ -132,6 +134,7 @@ function TiledWindow({
           accountId={panel.accountId}
           draggable
           flush
+          showHeader={!isMobilePreviewPanel(panel.type)}
           windowActive={active}
           onDragStart={(event) => {
             event.dataTransfer.setData(TILE_DRAG, panel.id)
