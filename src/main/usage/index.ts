@@ -707,7 +707,7 @@ function queryAntigravityUsage(
   if (!config) return Promise.reject(new Error('Antigravity CLI is not installed'))
 
   return new Promise((resolve, reject) => {
-    const process = spawn(config.command, [...config.args, '--print', '/usage'], {
+    const childProcess = spawn(config.command, [...config.args, '--print', '/usage'], {
       cwd: process.cwd(),
       env: { ...spawnEnv(), ...profileEnv },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -726,21 +726,21 @@ function queryAntigravityUsage(
       clearTimeout(timeout)
       callback()
       try {
-        process.kill()
+        childProcess.kill()
       } catch {
         // The command may already have exited.
       }
     }
     const finishError = (error: Error): void => finish(() => reject(error))
 
-    process.stdout.on('data', (chunk: Buffer | string) => {
+    childProcess.stdout.on('data', (chunk: Buffer | string) => {
       output = (output + chunk.toString()).slice(-INTERACTIVE_USAGE_OUTPUT_LIMIT)
     })
-    process.stderr.on('data', (chunk: Buffer | string) => {
+    childProcess.stderr.on('data', (chunk: Buffer | string) => {
       errorOutput = (errorOutput + chunk.toString()).slice(-2000)
     })
-    process.on('error', finishError)
-    process.on('exit', (code) => {
+    childProcess.on('error', finishError)
+    childProcess.on('exit', (code) => {
       if (settled) return
       const snapshot = parseAntigravityUsage(output)
       if (snapshot) {
