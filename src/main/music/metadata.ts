@@ -2,7 +2,10 @@ import { basename, extname } from 'path'
 
 /** Parse "Artist - Title" or use filename stem as title. */
 export function metadataFromFilename(filePath: string): { title: string; artist?: string } {
-  const stem = basename(filePath, extname(filePath)).trim()
+  // `path.basename` follows the host OS, so normalize Windows separators when
+  // reading filenames created on another platform.
+  const normalizedPath = filePath.replace(/\\/g, '/')
+  const stem = basename(normalizedPath, extname(normalizedPath)).trim()
   if (!stem) return { title: 'Untitled track' }
 
   const dashSplit = stem.match(/^(.+?)\s[-–—]\s(.+)$/)
