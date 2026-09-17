@@ -46,7 +46,7 @@ export function parseCursorDashboardUsage(
   usage: JsonRecord,
   planResponse: JsonRecord,
   hardLimit: JsonRecord
-): Pick<CliUsageInfo, 'status' | 'detail' | 'planType' | 'primary' | 'secondary' | 'breakdown'> {
+): Pick<CliUsageInfo, 'status' | 'detail' | 'planType' | 'subscriptionRenewsAt' | 'primary' | 'secondary' | 'breakdown'> {
   const plan = record(usage.planUsage)
   const planInfo = record(planResponse.planInfo)
   const planType = typeof planInfo?.planName === 'string' ? planInfo.planName : null
@@ -83,6 +83,7 @@ export function parseCursorDashboardUsage(
     status: 'available',
     detail: 'Bu hesabın doğrulanmış canlı Cursor kullanımı.',
     planType,
+    subscriptionRenewsAt: end && end > 0 ? Math.floor(end / 1000) : null,
     breakdown,
     primary,
     ...(secondary ? { secondary } : {})

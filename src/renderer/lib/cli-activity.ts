@@ -45,8 +45,10 @@ export function looksCliSignedIn(kind: PtyKind, buffer: string): boolean {
 export function inferCliActivity(buffer: string): 'waiting' | 'busy' | null {
   const tail = stripAnsi(buffer).replace(/\r/g, '').slice(-1200)
   if (!tail.trim()) return null
-  if (SPINNER_RE.test(tail) || BUSY_WORD_RE.test(tail)) return 'busy'
+  // A prompt at the end is definitive. The same retained terminal tail often still
+  // contains a spinner or a word such as "thinking" from the completed response.
   if (IDLE_PROMPT_RE.test(tail) || IDLE_BOX_RE.test(tail)) return 'waiting'
+  if (SPINNER_RE.test(tail) || BUSY_WORD_RE.test(tail)) return 'busy'
   return null
 }
 
@@ -59,60 +61,35 @@ export function isInterrupt(data: string): boolean {
 }
 
 const OUTPUT_TAIL_LIMIT = 8000
-export const CLI_IDLE_MS = 1800
 
 export class CliActivityTracker {
   private tail = ''
-  private idleTimer: ReturnType<typeof setTimeout> | null = null
-  private receivedSinceBusy = false
 
   constructor(
     private readonly options: {
       apply: (next: 'waiting' | 'busy') => void
       getStatus: () => PtySessionStatus | undefined
-      idleMs?: number
     }
   ) {}
 
   feed(chunk: string): void {
     this.tail = (this.tail + chunk).slice(-OUTPUT_TAIL_LIMIT)
     const inferred = inferCliActivity(this.tail)
-    const current = this.options.getStatus()
-    if (current === 'busy') this.receivedSinceBusy = true
-
     if (inferred === 'busy') {
       this.apply('busy')
-      this.clearIdle()
       return
     }
     if (inferred === 'waiting') {
       this.apply('waiting')
-      return
     }
-
-    if (current !== 'busy' || !this.receivedSinceBusy) return
-    this.clearIdle()
-    this.idleTimer = setTimeout(() => {
-      this.idleTimer = null
-      if (inferCliActivity(this.tail) !== 'busy') this.apply('waiting')
-    }, this.options.idleMs ?? CLI_IDLE_MS)
   }
 
-  dispose(): void {
-    this.clearIdle()
-  }
+  dispose(): void {}
 
   private apply(next: 'waiting' | 'busy'): void {
     const current = this.options.getStatus()
     if (current === 'stopped' || current === 'error') return
-    if (next === 'busy') this.receivedSinceBusy = current === 'busy' ? this.receivedSinceBusy : false
     if (current === next) return
     this.options.apply(next)
-  }
-
-  private clearIdle(): void {
-    if (this.idleTimer === null) return
-    clearTimeout(this.idleTimer)
-    this.idleTimer = null
   }
 }

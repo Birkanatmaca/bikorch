@@ -39,9 +39,7 @@ import {
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import {
   TERMINAL_FIT_SETTLE_MS,
-  measureTerminalGrid,
   pinViewportToBottom,
-  readXtermCellSize,
   shouldPinTerminalToBottom,
   terminalGridEquals,
   viewportIsAtBottom
@@ -86,6 +84,7 @@ export function TerminalView({
   const layoutLockedRef = useRef(false)
   const layoutLockGenRef = useRef(0)
   const lastSizeRef = useRef({ cols: 0, rows: 0 })
+  const lastPtySizeRef = useRef({ cols: 0, rows: 0 })
   const ptyResizeTimerRef = useRef<number | null>(null)
   const settleTimersRef = useRef<number[]>([])
   const cliKind = isCliKind(kind)
@@ -102,17 +101,28 @@ export function TerminalView({
   }, [cliKind])
 
   const sendPtyResize = useCallback((cols: number, rows: number, immediate: boolean) => {
+    const next = { cols, rows }
+    if (terminalGridEquals(lastPtySizeRef.current, next)) return
     if (ptyResizeTimerRef.current !== null) {
       window.clearTimeout(ptyResizeTimerRef.current)
       ptyResizeTimerRef.current = null
     }
     const flush = (): void => {
-      void window.api.pty.resize({ sessionId, cols, rows }).finally(() => {
-        window.setTimeout(() => {
-          if (disposedRef.current || layoutLockedRef.current) return
-          pinIfNeeded(cliKind)
-        }, 40)
-      })
+      lastPtySizeRef.current = next
+      void window.api.pty
+        .resize({ sessionId, cols, rows })
+        .catch(() => {
+          // Retry on the next grid change if the PTY was temporarily unavailable.
+          if (terminalGridEquals(lastPtySizeRef.current, next)) {
+            lastPtySizeRef.current = { cols: 0, rows: 0 }
+          }
+        })
+        .finally(() => {
+          window.setTimeout(() => {
+            if (disposedRef.current || layoutLockedRef.current) return
+            pinIfNeeded(cliKind)
+          }, 40)
+        })
     }
     if (immediate) {
       flush()
@@ -138,13 +148,13 @@ export function TerminalView({
       const viewport = container.querySelector('.xterm-viewport') as HTMLElement | null
       const wasAtBottom = viewport ? viewportIsAtBottom(viewport) : true
 
-      fitAddon.fit()
-      const next = measureTerminalGrid(
-        container,
-        readXtermCellSize(terminal),
-        fitAddon.proposeDimensions()
-      )
-      if (!next) return
+      // FitAddon already calculates the exact usable host area (including
+      // scrollbars). Calling fit() and then doing a second manual calculation
+      // can resize xterm twice to slightly different grids, which makes TUIs
+      // redraw and jump after a panel resize.
+      const proposed = fitAddon.proposeDimensions()
+      if (!proposed || proposed.cols <= 0 || proposed.rows <= 0) return
+      const next = { cols: proposed.cols, rows: proposed.rows }
       if (terminal.cols !== next.cols || terminal.rows !== next.rows) {
         terminal.resize(next.cols, next.rows)
       }
@@ -162,7 +172,7 @@ export function TerminalView({
       const changed = !terminalGridEquals(lastSizeRef.current, next)
       lastSizeRef.current = next
       if (!sendPty) return
-      if (!changed && !immediate) return
+      if (!changed) return
       sendPtyResize(next.cols, next.rows, immediate)
     } catch {
       // xterm can throw if the renderer is not ready yet
@@ -226,13 +236,11 @@ export function TerminalView({
     const composer = cli ? new PromptComposer() : null
     const agentKind = kind as Exclude<PtyKind, 'terminal'>
     let outputTail = ''
-    let idleTimer: number | null = null
     let authInspectTimer: number | null = null
     let authPollTimer: number | null = null
     let authCaptured = false
     let authCaptureInFlight = false
     let lastAuthCaptureError: string | null = null
-    let receivedSinceBusy = false
     const captureAfterLogin = launchMode === 'login'
     const shouldCaptureAccount =
       Boolean(accountId) && (captureAfterLogin || kind === 'antigravity')
@@ -318,7 +326,6 @@ export function TerminalView({
     const applyCliStatus = (next: 'waiting' | 'busy'): void => {
       const current = useTerminalStore.getState().getStatus(sessionId)
       if (current === 'stopped' || current === 'error') return
-      if (next === 'busy') receivedSinceBusy = current === 'busy' ? receivedSinceBusy : false
       if (current === next) return
       setStatus(sessionId, next)
     }
@@ -327,30 +334,13 @@ export function TerminalView({
       if (!cli) return
       outputTail = (outputTail + chunk).slice(-8000)
       const inferred = inferCliActivity(outputTail)
-      const current = useTerminalStore.getState().getStatus(sessionId)
-      if (current === 'busy') receivedSinceBusy = true
-
       if (inferred === 'busy') {
         applyCliStatus('busy')
-        if (idleTimer !== null) {
-          window.clearTimeout(idleTimer)
-          idleTimer = null
-        }
         return
       }
       if (inferred === 'waiting') {
         applyCliStatus('waiting')
-        return
       }
-
-      if (current !== 'busy' || !receivedSinceBusy) return
-      if (idleTimer !== null) window.clearTimeout(idleTimer)
-      idleTimer = window.setTimeout(() => {
-        idleTimer = null
-        if (inferCliActivity(outputTail) !== 'busy') {
-          applyCliStatus('waiting')
-        }
-      }, 1800)
     }
 
     const unsubscribe = window.api.pty.onEvent((event: PtyEvent) => {
@@ -374,10 +364,6 @@ export function TerminalView({
           }
           break
         case 'exit':
-          if (idleTimer !== null) {
-            window.clearTimeout(idleTimer)
-            idleTimer = null
-          }
           if (cli) endAgentSession(sessionId, event.exitCode, 'exited')
           if (cli && folderPathAtMount && window.api.git?.noteAgentSession) {
             void window.api.git.noteAgentSession({
@@ -532,6 +518,9 @@ export function TerminalView({
         launchMode: nextLaunchMode,
         accountId
       })
+      // The newly-created (or reattached) PTY starts with this grid. Keep the
+      // resize channel in sync so post-layout settling does not resend it.
+      lastPtySizeRef.current = { cols: term.cols, rows: term.rows }
       if (nextLaunchMode === 'login') {
         clearPanelLaunchMode(sessionId)
       }
@@ -638,7 +627,6 @@ export function TerminalView({
       }
       for (const timer of settleTimersRef.current) window.clearTimeout(timer)
       settleTimersRef.current = []
-      if (idleTimer !== null) window.clearTimeout(idleTimer)
       if (authInspectTimer !== null) window.clearTimeout(authInspectTimer)
       if (authPollTimer !== null) window.clearInterval(authPollTimer)
       resizeObserver.disconnect()

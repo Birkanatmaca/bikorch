@@ -505,6 +505,11 @@ function parseUsageProvider(raw: unknown): CliUsageInfo | null {
     ...(typeof provider.planType === 'string' || provider.planType === null
       ? { planType: provider.planType }
       : {}),
+    ...(typeof provider.subscriptionRenewsAt === 'number' && Number.isFinite(provider.subscriptionRenewsAt)
+      ? { subscriptionRenewsAt: provider.subscriptionRenewsAt }
+      : provider.subscriptionRenewsAt === null
+        ? { subscriptionRenewsAt: null }
+        : {}),
     ...(primary ? { primary } : {}),
     ...(secondary ? { secondary } : {}),
     ...(breakdown ? { breakdown } : {}),

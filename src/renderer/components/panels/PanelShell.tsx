@@ -12,6 +12,8 @@ import { isMacOS, isWindows } from '@renderer/lib/electron-api'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useAiAccountsStore } from '@renderer/stores/ai-accounts-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
+import { useUsageStore } from '@renderer/stores/usage-store'
+import { useSubscriptionStore } from '@renderer/stores/subscription-store'
 import { Info, X, GripVertical, PanelLeftClose, Pencil, UserRound } from 'lucide-react'
 import { PanelContent } from './PanelContent'
 import { Button } from '@renderer/components/ui/Button'
@@ -75,6 +77,14 @@ function formatAccountDate(timestamp: number | null): string {
   })
 }
 
+function formatPlanRenewal(timestamp: number | null | undefined): string | null {
+  if (!timestamp || !Number.isFinite(timestamp)) return null
+  return new Date(timestamp * 1000).toLocaleString([], {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  })
+}
+
 const ACCOUNT_INFO_WIDTH = 300
 const ACCOUNT_INFO_GAP = 8
 
@@ -121,6 +131,13 @@ function AccountInfoPopover({
   const logo = getCliLogo(accountKind)
   const isMac = isMacOS()
   const isWin = isWindows()
+  const provider = useUsageStore((state) =>
+    state.providers.find((item) => item.accountId === accountId && item.kind === accountKind)
+  )
+  const subscription = useSubscriptionStore((state) =>
+    state.subscriptions.find((item) => item.accountId === accountId)
+  )
+  const renewalDate = formatPlanRenewal(provider?.subscriptionRenewsAt ?? subscription?.renewalDate)
   onCloseRef.current = onClose
 
   useLayoutEffect(() => {
@@ -206,6 +223,7 @@ function AccountInfoPopover({
           <div className="account-info-group">
             <AccountInfoRow label="Email" value={account.email || 'Not provided'} />
             <AccountInfoRow label="Plan" value={account.plan || 'Not provided'} />
+            {renewalDate ? <AccountInfoRow label="Plan renews" value={renewalDate} /> : null}
             <AccountInfoRow label="Signed in" value={formatAccountDate(account.lastAuthenticatedAt)} />
           </div>
         ) : (

@@ -36,6 +36,8 @@ export interface CliUsageInfo {
   accountName?: string
   identityVerified?: boolean
   planType?: string | null
+  /** Subscription billing-cycle renewal, when the provider exposes it. Unix seconds. */
+  subscriptionRenewsAt?: number | null
   primary?: CliUsageWindow
   secondary?: CliUsageWindow
   breakdown?: CliUsageBreakdown[]

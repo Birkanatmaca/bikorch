@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CliActivityTracker } from '../cli-activity'
+import { CliActivityTracker, inferCliActivity } from '../cli-activity'
 import type { PtySessionStatus } from '@shared/contracts/pty'
 
 afterEach(() => {
@@ -7,16 +7,14 @@ afterEach(() => {
 })
 
 describe('CliActivityTracker', () => {
-  it('marks a spinner as busy, then waiting after idle output', () => {
-    vi.useFakeTimers()
+  it('keeps a CLI busy while output is temporarily quiet', () => {
     let status: PtySessionStatus | undefined
     const apply = vi.fn((next: 'waiting' | 'busy') => {
       status = next
     })
     const tracker = new CliActivityTracker({
       apply,
-      getStatus: () => status,
-      idleMs: 1800
+      getStatus: () => status
     })
 
     tracker.feed('⠋')
@@ -24,11 +22,8 @@ describe('CliActivityTracker', () => {
     expect(status).toBe('busy')
 
     tracker.feed(`\n${'ok '.repeat(500)}`)
-    vi.advanceTimersByTime(1799)
     expect(apply).toHaveBeenCalledTimes(1)
-
-    vi.advanceTimersByTime(1)
-    expect(apply).toHaveBeenCalledWith('waiting')
+    expect(status).toBe('busy')
     tracker.dispose()
   })
 
@@ -44,5 +39,9 @@ describe('CliActivityTracker', () => {
     tracker.feed('\n❯ ')
     expect(apply).toHaveBeenCalledWith('waiting')
     tracker.dispose()
+  })
+
+  it('recognizes a final prompt even if prior output contained a spinner', () => {
+    expect(inferCliActivity('⠋ thinking\nCompleted\n❯ ')).toBe('waiting')
   })
 })

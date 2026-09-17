@@ -578,6 +578,48 @@ function queryGeminiUsage(profileEnv: Record<string, string> = {}): Promise<Gemi
 
 function parseAntigravityUsage(output: string): AntigravityUsageSnapshot | null {
   const cleanOutput = stripTerminalControlCodes(output)
+
+  // Antigravity 1.2+ returns this compact, tab-delimited report for
+  // `agy --print /usage`:
+  //   Gemini Models\tWeekly Limit Remaining\t74%\t2026-09-18T14:18:37Z
+  // Unlike the interactive TUI, this is stable and does not require guessing
+  // when the prompt has finished rendering.
+  const printWindows: CliUsageWindow[] = []
+  const printBreakdown: CliUsageBreakdown[] = []
+  for (const line of cleanOutput.split('\n')) {
+    const columns = line.split('\t').map((value) => value.trim()).filter(Boolean)
+    if (columns.length < 3) continue
+    const percentIndex = columns.findIndex((value) => /^(\d+(?:\.\d+)?)%$/.test(value))
+    if (percentIndex < 1) continue
+    const remaining = Number(columns[percentIndex].slice(0, -1))
+    if (!Number.isFinite(remaining)) continue
+    const label = columns.slice(0, percentIndex).join(' · ')
+    const resetValue = columns[percentIndex + 1]
+    const resetTime = resetValue ? Date.parse(resetValue) : Number.NaN
+    const usedPercent = 100 - Math.min(100, Math.max(0, remaining))
+    printWindows.push({
+      label,
+      usedPercent,
+      windowDurationMins: /week/i.test(label) ? 10080 : 300,
+      resetsAt: Number.isFinite(resetTime) ? Math.floor(resetTime / 1000) : null,
+      resetLabel: null
+    })
+    printBreakdown.push({
+      label,
+      value: `${remaining.toFixed(2)}% remaining`,
+      usedPercent
+    })
+  }
+  if (printWindows.length > 0) {
+    return {
+      accountEmail: null,
+      planType: null,
+      primary: printWindows[0],
+      secondary: printWindows[1],
+      breakdown: printBreakdown
+    }
+  }
+
   if (!/Models\s*&\s*Quota|Model Quota|Weekly Limit|Five Hour Limit/i.test(cleanOutput)) {
     return null
   }
@@ -658,41 +700,57 @@ function parseAntigravityUsage(output: string): AntigravityUsageSnapshot | null 
   }
 }
 
-function looksLikeAntigravitySignedIn(output: string): boolean {
-  return (
-    /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(output) ||
-    /Models\s*&\s*Quota|Model Quota/i.test(output) ||
-    /\((?:Antigravity|Gemini).*(?:Quota|Plan|Pro|Ultra|Starter)/i.test(output)
-  )
-}
-
-function looksLikeAntigravityLoginScreen(output: string): boolean {
-  const tail = output.slice(-2500)
-  if (looksLikeAntigravitySignedIn(output)) return false
-  return /how would you like to authenticate|waiting for authentication|opening authentication page|sign in with google/i.test(
-    tail
-  )
-}
-
 function queryAntigravityUsage(
   profileEnv: Record<string, string> = {}
 ): Promise<AntigravityUsageSnapshot> {
-  return queryInteractiveUsage(
-    'antigravity',
-    {
-      command: '/usage',
-      parse: parseAntigravityUsage,
-      isReady: (output) =>
-        /(?:^|\n)>\s*(?:\n|$)/m.test(output) && !looksLikeAntigravityLoginScreen(output),
-      detectFailureAfterCommand: true,
-      timeoutMs: 24000,
-      detectFailure: (output) => {
-        if (!looksLikeAntigravityLoginScreen(output)) return null
-        return { status: 'unavailable', detail: 'Antigravity hesabı yeniden giriş gerektiriyor' }
+  const config = resolveSpawnConfigCandidates('antigravity')[0]
+  if (!config) return Promise.reject(new Error('Antigravity CLI is not installed'))
+
+  return new Promise((resolve, reject) => {
+    const process = spawn(config.command, [...config.args, '--print', '/usage'], {
+      cwd: process.cwd(),
+      env: { ...spawnEnv(), ...profileEnv },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
+    })
+    let output = ''
+    let errorOutput = ''
+    let settled = false
+    const timeout = setTimeout(() => {
+      finishError(new Error('Antigravity usage request timed out'))
+    }, 24_000)
+
+    const finish = (callback: () => void): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      callback()
+      try {
+        process.kill()
+      } catch {
+        // The command may already have exited.
       }
-    },
-    profileEnv
-  )
+    }
+    const finishError = (error: Error): void => finish(() => reject(error))
+
+    process.stdout.on('data', (chunk: Buffer | string) => {
+      output = (output + chunk.toString()).slice(-INTERACTIVE_USAGE_OUTPUT_LIMIT)
+    })
+    process.stderr.on('data', (chunk: Buffer | string) => {
+      errorOutput = (errorOutput + chunk.toString()).slice(-2000)
+    })
+    process.on('error', finishError)
+    process.on('exit', (code) => {
+      if (settled) return
+      const snapshot = parseAntigravityUsage(output)
+      if (snapshot) {
+        finish(() => resolve(snapshot))
+        return
+      }
+      const detail = errorOutput.trim() || `Antigravity /usage exited with code ${code ?? 'unknown'}`
+      finishError(new Error(detail))
+    })
+  })
 }
 
 function delay(ms: number): Promise<void> {

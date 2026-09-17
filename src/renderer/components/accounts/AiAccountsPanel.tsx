@@ -155,6 +155,15 @@ function formatSubscriptionMoney(subscription: SubscriptionRecord): string {
   }
 }
 
+function formatPlanRenewal(timestamp: number | null | undefined): string | null {
+  if (!timestamp || !Number.isFinite(timestamp)) return null
+  return new Date(timestamp * 1000).toLocaleDateString([], {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  })
+}
+
 function AccountForm({
   account,
   onClose
@@ -322,6 +331,7 @@ function AccountCard({
     .filter(Boolean)
     .join(' · ')
   const subscription = subscriptions[0]
+  const renewalDate = formatPlanRenewal(provider?.subscriptionRenewsAt ?? subscription?.renewalDate)
   const actionLabel = !account.profileReady ? 'Login' : isActive ? 'Open' : 'Use'
 
   return (
@@ -373,8 +383,12 @@ function AccountCard({
       )}
 
       <div className="account-card-foot">
-        {subscription ? (
-          <span className="account-card-price">{formatSubscriptionMoney(subscription)}</span>
+        {subscription || renewalDate ? (
+          <span className="account-card-price">
+            {[subscription ? formatSubscriptionMoney(subscription) : undefined, renewalDate ? `Renews ${renewalDate}` : undefined]
+              .filter(Boolean)
+              .join(' · ')}
+          </span>
         ) : (
           <span />
         )}
