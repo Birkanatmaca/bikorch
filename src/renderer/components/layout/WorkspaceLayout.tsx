@@ -19,6 +19,7 @@ import { useGitStatusBar } from '@renderer/stores/git-store'
 import { selectIsolationState, useIsolationStore } from '@renderer/stores/isolation-store'
 import { WorkspaceCenterEmpty } from '@renderer/components/workspace/WorkspaceCenterEmpty'
 import { OrchestratorZone } from '@renderer/components/workspace/OrchestratorZone'
+import { DeveloperSecretary } from '@renderer/components/workspace/DeveloperSecretary'
 import { lockTerminalLayout, unlockTerminalLayout } from '@renderer/lib/app-events'
 import { cn } from '@renderer/lib/utils'
 
@@ -206,6 +207,7 @@ function ZonePanels({
 
 export function WorkspaceLayout(): React.JSX.Element {
   const activeProjectId = useWorkspaceStore((s) => s.activeProjectId)
+  const project = useWorkspaceStore((s) => s.projects.find((item) => item.id === s.activeProjectId))
   const workspace = useWorkspaceStore((s) =>
     activeProjectId ? s.workspaces[activeProjectId] : null
   )
@@ -561,6 +563,7 @@ export function WorkspaceLayout(): React.JSX.Element {
           mainContent
         )}
         </div>
+        {project ? <DeveloperSecretary project={project} panels={panels} /> : null}
       </div>
     </div>
   )

@@ -13,6 +13,7 @@ import { registerMusicHandlers } from './music'
 import { registerAutomationHandlers } from './automation'
 import { registerNotificationHandlers } from './notifications'
 import { registerResourceHandlers } from './resources'
+import { registerSecretaryHandlers } from './secretary'
 
 export function registerIpcHandlers(): void {
   registerPtyHandlers()
@@ -29,6 +30,7 @@ export function registerIpcHandlers(): void {
   registerAutomationHandlers()
   registerNotificationHandlers()
   registerResourceHandlers()
+  registerSecretaryHandlers()
 
   ipcMain.handle('dialog:selectFolder', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)

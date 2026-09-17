@@ -135,6 +135,12 @@ import {
   type AutomationStatusSummary
 } from '@shared/contracts/automation'
 import {
+  SECRETARY_IPC,
+  type SecretaryPlan,
+  type SecretaryPlanRequest,
+  type SecretarySettings
+} from '@shared/contracts/secretary'
+import {
   NOTIFICATION_IPC,
   type CliTaskNotification
 } from '@shared/contracts/notifications'
@@ -357,6 +363,14 @@ export interface AutomationApi {
   onEvent: (callback: (event: AutomationEvent) => void) => () => void
 }
 
+export interface SecretaryApi {
+  getSettings: () => Promise<SecretarySettings>
+  saveKey: (key: string) => Promise<SecretarySettings>
+  clearKey: () => Promise<SecretarySettings>
+  updateSettings: (settings: { model: string }) => Promise<SecretarySettings>
+  createPlan: (request: SecretaryPlanRequest) => Promise<SecretaryPlan>
+}
+
 export interface NotificationsApi {
   showCliTask: (payload: CliTaskNotification) => Promise<{ ok: true } | { ok: false; error: string }>
   onClicked: (callback: (payload: CliTaskNotification) => void) => () => void
@@ -383,6 +397,7 @@ export interface AppApi {
   developerIntelligence: DeveloperIntelligenceApi
   music: MusicApi
   automation: AutomationApi
+  secretary: SecretaryApi
   notifications: NotificationsApi
   resources: ResourcesApi
 }
@@ -637,6 +652,14 @@ const automationApi: AutomationApi = {
   }
 }
 
+const secretaryApi: SecretaryApi = {
+  getSettings: () => ipcRenderer.invoke(SECRETARY_IPC.GET_SETTINGS),
+  saveKey: (key) => ipcRenderer.invoke(SECRETARY_IPC.SAVE_KEY, key),
+  clearKey: () => ipcRenderer.invoke(SECRETARY_IPC.CLEAR_KEY),
+  updateSettings: (settings) => ipcRenderer.invoke(SECRETARY_IPC.UPDATE_SETTINGS, settings),
+  createPlan: (request) => ipcRenderer.invoke(SECRETARY_IPC.CREATE_PLAN, request)
+}
+
 const notificationsApi: NotificationsApi = {
   showCliTask: (payload) => ipcRenderer.invoke(NOTIFICATION_IPC.SHOW_CLI_TASK, payload),
   onClicked: (callback) => {
@@ -671,6 +694,7 @@ const api: AppApi = {
   developerIntelligence: developerIntelligenceApi,
   music: musicApi,
   automation: automationApi,
+  secretary: secretaryApi,
   notifications: notificationsApi,
   resources: resourcesApi
 }
