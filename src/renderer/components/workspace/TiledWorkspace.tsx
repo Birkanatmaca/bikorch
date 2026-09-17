@@ -12,7 +12,7 @@ import {
   type PanelType,
   type WorkspaceGridNode
 } from '@shared/types'
-import { buildLayoutGrid } from '@shared/workspace-grid'
+import { buildLayoutGrid, emptyGridCellId, isEmptyGridCellId, layoutCellCount } from '@shared/workspace-grid'
 import { PanelShell } from '@renderer/components/panels/PanelShell'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
@@ -20,6 +20,8 @@ import { cn } from '@renderer/lib/utils'
 import { cliFrameClass, getCliChromePhase } from '@renderer/lib/cli-chrome'
 import { isMacOS } from '@renderer/lib/electron-api'
 import { focusTerminal, lockTerminalLayout, unlockTerminalLayout } from '@renderer/lib/app-events'
+import { getCliLogo } from '@renderer/lib/cli-logos'
+import { Terminal } from 'lucide-react'
 
 const LIVE_PANEL_TYPES: PanelType[] = [
   'terminal',
@@ -31,6 +33,33 @@ const LIVE_PANEL_TYPES: PanelType[] = [
 ]
 
 const TILE_DRAG = 'application/x-bikorch-tile'
+
+const EMPTY_CELL_LAUNCHERS: Array<{ type: Extract<PanelType, 'terminal' | 'claude' | 'cursor' | 'gemini' | 'antigravity' | 'codex'>; label: string }> = [
+  { type: 'cursor', label: 'Cursor' },
+  { type: 'claude', label: 'Claude' },
+  { type: 'codex', label: 'Codex' },
+  { type: 'gemini', label: 'Gemini' },
+  { type: 'antigravity', label: 'Antigravity' },
+  { type: 'terminal', label: 'Terminal' }
+]
+
+function TiledEmptyCell(): React.JSX.Element {
+  const addPanel = useWorkspaceStore((state) => state.addPanel)
+  return (
+    <div className="tiled-empty-cell">
+      <p>Open a CLI</p>
+      <div>
+        {EMPTY_CELL_LAUNCHERS.map(({ type, label }) => {
+          const logo = type === 'terminal' ? null : getCliLogo(type)
+          return <button key={type} type="button" onClick={() => addPanel(type, 'center')} title={`Open ${label}`}>
+            {logo ? <img src={logo} alt="" /> : <Terminal className="h-3.5 w-3.5" />}
+            <span>{label}</span>
+          </button>
+        })}
+      </div>
+    </div>
+  )
+}
 
 interface TiledWorkspaceProps {
   panels: PanelDefinition[]
@@ -141,7 +170,7 @@ function GridBranch({
 
   if (node.type === 'leaf') {
     const panel = panelsById.get(node.panelId)
-    if (!panel) return null
+    if (!panel) return isEmptyGridCellId(node.panelId) ? <TiledEmptyCell /> : null
     return (
       <TiledWindow
         panel={panel}
@@ -243,7 +272,16 @@ export function TiledWorkspace({
     () => new Map(panels.map((panel) => [panel.id, panel])),
     [panels]
   )
-  const tree = grid ?? buildLayoutGrid(panels.map((panel) => panel.id), canvasMode)
+  const tree = grid ?? buildLayoutGrid(
+    [
+      ...panels.map((panel) => panel.id),
+      ...Array.from(
+        { length: Math.max(0, layoutCellCount(canvasMode) - panels.length) },
+        (_, index) => emptyGridCellId(`${canvasMode}-${index}`)
+      )
+    ],
+    canvasMode
+  )
 
   useEffect(() => {
     const el = rootRef.current

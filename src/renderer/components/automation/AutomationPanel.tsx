@@ -1,5 +1,18 @@
 import { useMemo, useState } from 'react'
-import { CalendarClock, Loader2, Pause, Play, Plus } from 'lucide-react'
+import {
+  CalendarClock,
+  ChevronDown,
+  CircleAlert,
+  Clock3,
+  FolderKanban,
+  History,
+  Loader2,
+  Pause,
+  Play,
+  Plus,
+  Sparkles,
+  Terminal
+} from 'lucide-react'
 import {
   AUTOMATION_PERMISSION_PROFILE_LABELS,
   describeAutomationSchedule,
@@ -41,6 +54,24 @@ const DEFAULT_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone
 function formatNextRun(nextRunAt: number | null): string {
   if (nextRunAt === null) return 'Not scheduled'
   return new Date(nextRunAt).toLocaleString()
+}
+
+function formatRunTime(value: number | null): string {
+  if (!value) return 'Not started'
+  return new Date(value).toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+function runStatusTone(status: AutomationRunStatus): 'success' | 'warning' | 'error' | 'info' | 'primary' {
+  if (status === 'succeeded') return 'success'
+  if (status === 'failed' || status === 'cancelled' || status === 'interrupted') return 'error'
+  if (status === 'needs-attention' || status === 'waiting-network') return 'warning'
+  if (status === 'running' || status === 'preparing') return 'primary'
+  return 'info'
 }
 
 function buildSchedule(
@@ -114,7 +145,16 @@ function AutomationCreateForm({ onCancel }: { onCancel: () => void }): React.JSX
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3 p-3 text-xs">
+    <form onSubmit={handleSubmit} className="automation-form" aria-label="Create automation">
+      <div className="automation-form-heading">
+        <div className="automation-form-icon"><Sparkles className="h-4 w-4" /></div>
+        <div>
+          <h2>New automation</h2>
+          <p>Choose a project, describe the task, then schedule it.</p>
+        </div>
+      </div>
+      <div className="automation-form-section">
+        <span className="automation-form-label">Task</span>
       <input
         value={name}
         onChange={(event) => setName(event.target.value)}
@@ -124,7 +164,9 @@ function AutomationCreateForm({ onCancel }: { onCancel: () => void }): React.JSX
         aria-label="Automation name"
         autoFocus
       />
-
+      </div>
+      <div className="automation-form-section">
+        <span className="automation-form-label">Project</span>
       <select
         value={projectId}
         onChange={(event) => setProjectId(event.target.value)}
@@ -138,7 +180,9 @@ function AutomationCreateForm({ onCancel }: { onCancel: () => void }): React.JSX
           </option>
         ))}
       </select>
-
+      </div>
+      <div className="automation-form-section">
+        <span className="automation-form-label">Instruction</span>
       <textarea
         value={prompt}
         onChange={(event) => setPrompt(event.target.value)}
@@ -148,8 +192,11 @@ function AutomationCreateForm({ onCancel }: { onCancel: () => void }): React.JSX
         className="ui-control ui-control-sm w-full resize-none"
         aria-label="Prompt"
       />
+      </div>
 
-      <div className="flex flex-wrap gap-1.5">
+      <div className="automation-form-section">
+        <span className="automation-form-label">Schedule</span>
+      <div className="automation-schedule-options">
         {(Object.keys(SCHEDULE_KIND_LABELS) as AutomationScheduleKind[]).map((kind) => (
           <button
             key={kind}
@@ -164,7 +211,7 @@ function AutomationCreateForm({ onCancel }: { onCancel: () => void }): React.JSX
           >
             {SCHEDULE_KIND_LABELS[kind]}
           </button>
-        ))}
+          ))}
       </div>
 
       {(scheduleKind === 'daily' || scheduleKind === 'weekdays' || scheduleKind === 'weekly') && (
@@ -224,7 +271,10 @@ function AutomationCreateForm({ onCancel }: { onCancel: () => void }): React.JSX
           aria-label="Cron expression"
         />
       )}
+      </div>
 
+      <div className="automation-form-section">
+        <span className="automation-form-label">Access</span>
       <select
         value={permissionProfile}
         onChange={(event) => setPermissionProfile(event.target.value as AutomationPermissionProfile)}
@@ -237,8 +287,9 @@ function AutomationCreateForm({ onCancel }: { onCancel: () => void }): React.JSX
             <option key={profile} value={profile}>
               {AUTOMATION_PERMISSION_PROFILE_LABELS[profile]}
             </option>
-          ))}
+        ))}
       </select>
+      </div>
 
       {error ? <p className="text-[11px] text-red-400">{error}</p> : null}
 
@@ -258,6 +309,7 @@ function AutomationCard({ automation }: { automation: AutomationDefinition }): R
   const setEnabled = useAutomationStore((state) => state.setEnabled)
   const runNow = useAutomationStore((state) => state.runNow)
   const loadRuns = useAutomationStore((state) => state.loadRuns)
+  const project = useWorkspaceStore((state) => state.projects.find((item) => item.id === automation?.projectId))
   const runs = useAutomationStore((state) => state.runsByAutomation[automation?.id ?? ''] ?? [])
   const [expanded, setExpanded] = useState(false)
   const [running, setRunning] = useState(false)
@@ -291,21 +343,25 @@ function AutomationCard({ automation }: { automation: AutomationDefinition }): R
     }
   }
 
+  const latestRun = runs[0]
+  const isActive = latestRun?.status === 'running' || latestRun?.status === 'preparing' || latestRun?.status === 'queued'
+
   return (
-    <div className="rounded-lg border border-white/8 bg-white/[0.02] p-3 text-xs">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <button
-            type="button"
-            onClick={handleToggleExpand}
-            className="truncate text-left font-medium text-text-primary hover:text-purple-200"
-            title={automation.name}
-          >
-            {automation.name}
-          </button>
-          <p className="mt-0.5 truncate text-[11px] text-text-muted">
-            {describeAutomationSchedule(automation.schedule)} · {formatNextRun(automation.nextRunAt)}
-          </p>
+    <article className={cn('automation-card', !automation.enabled && 'is-paused')}>
+      <div className="automation-card-header">
+        <div className="automation-card-title">
+          <div className={cn('automation-card-icon', isActive && 'is-active')}>
+            {isActive ? <Loader2 className="h-4 w-4 animate-spin" /> : <Terminal className="h-4 w-4" />}
+          </div>
+          <div className="min-w-0">
+            <button type="button" onClick={handleToggleExpand} className="automation-title-button" title={automation.name}>
+              {automation.name}
+            </button>
+            <div className="automation-project-line" title={project?.folderPath ?? project?.name ?? 'Project unavailable'}>
+              <FolderKanban className="h-3 w-3" />
+              <span>{project?.name ?? 'Project unavailable'}</span>
+            </div>
+          </div>
         </div>
         <button
           type="button"
@@ -321,40 +377,51 @@ function AutomationCard({ automation }: { automation: AutomationDefinition }): R
         </button>
       </div>
 
-      <div className="mt-2 flex items-center gap-2">
-        <Button type="button" variant="secondary" size="sm" onClick={handleRunNow} disabled={running}>
+      <p className="automation-prompt" title={automation.prompt}>{automation.prompt}</p>
+
+      <div className="automation-meta-grid">
+        <div><Clock3 className="h-3.5 w-3.5" /><span>Schedule</span><strong>{describeAutomationSchedule(automation.schedule)}</strong></div>
+        <div><CalendarClock className="h-3.5 w-3.5" /><span>Next run</span><strong>{formatNextRun(automation.nextRunAt)}</strong></div>
+      </div>
+
+      <div className="automation-card-footer">
+        <Button type="button" variant="primary" size="sm" onClick={handleRunNow} disabled={running}>
           {running ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Run now'}
         </Button>
         <button
           type="button"
           onClick={handleToggleExpand}
-          className="text-[11px] text-text-muted hover:text-text-secondary"
+          className="automation-history-toggle"
+          aria-expanded={expanded}
         >
-          {expanded ? 'Hide history' : 'History'}
+          <History className="h-3.5 w-3.5" /> {expanded ? 'Hide details' : 'View activity'} <ChevronDown className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')} />
         </button>
       </div>
 
       {actionError ? <p className="mt-2 text-[11px] text-red-400">{actionError}</p> : null}
 
       {expanded && (
-        <ul className="mt-2 space-y-1 border-t border-white/5 pt-2">
+        <div className="automation-activity">
+          <div className="automation-activity-heading"><span>Recent activity</span><span>{runs.length} run{runs.length === 1 ? '' : 's'}</span></div>
+          <ul>
           {runs.length === 0 ? (
-            <li className="text-[11px] text-text-muted">No runs yet.</li>
+            <li className="automation-empty-run">No runs yet. Use “Run now” to start the first one.</li>
           ) : (
             runs.slice(0, 6).map((run) => (
-              <li key={run.id} className="flex items-center justify-between text-[11px]">
-                <span className="text-text-secondary">
-                  {RUN_STATUS_LABELS[run.status] ?? run.status}
-                </span>
-                <span className="text-text-muted">
-                  {run.startedAt ? new Date(run.startedAt).toLocaleTimeString() : '—'}
-                </span>
+              <li key={run.id} className="automation-run-row">
+                <span className="status-chip" data-tone={runStatusTone(run.status)}><span className="status-chip-dot" />{RUN_STATUS_LABELS[run.status] ?? run.status}</span>
+                <div className="automation-run-details">
+                  <span>{formatRunTime(run.startedAt)}</span>
+                  {run.summary ? <p>{run.summary}</p> : null}
+                  {run.errorMessage ? <p className="is-error"><CircleAlert className="h-3 w-3" />{run.errorMessage}</p> : null}
+                </div>
               </li>
             ))
           )}
-        </ul>
+          </ul>
+        </div>
       )}
-    </div>
+    </article>
   )
 }
 
@@ -362,6 +429,7 @@ export function AutomationPanel(): React.JSX.Element {
   const definitions = useAutomationStore((state) => state.definitions)
   const loaded = useAutomationStore((state) => state.loaded)
   const [creating, setCreating] = useState(false)
+  const status = useAutomationStore((state) => state.status)
 
   const sorted = useMemo(() => {
     if (!Array.isArray(definitions)) return []
@@ -373,10 +441,12 @@ export function AutomationPanel(): React.JSX.Element {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center justify-between px-3 py-2">
-        <p className="text-[11px] font-medium text-text-secondary">
-          {definitions.length > 0 ? `${definitions.length} automation${definitions.length === 1 ? '' : 's'}` : 'Automations'}
-        </p>
+      <div className="automation-panel-header">
+        <div>
+          <p className="automation-eyebrow">Automation center</p>
+          <h1>Scheduled tasks</h1>
+          <p className="automation-subtitle">{status.running > 0 ? `${status.running} task${status.running === 1 ? '' : 's'} currently running` : `${definitions.length} automation${definitions.length === 1 ? '' : 's'} configured`}</p>
+        </div>
         <Button type="button" variant="secondary" size="sm" onClick={() => setCreating((v) => !v)}>
           <Plus className="h-3 w-3" />
           New
@@ -406,7 +476,7 @@ export function AutomationPanel(): React.JSX.Element {
             }
           />
         ) : (
-          <div className="flex flex-col gap-2">
+          <div className="automation-list">
           {sorted.filter((automation) => automation?.id).map((automation) => (
               <AutomationCard key={automation.id} automation={automation} />
             ))}

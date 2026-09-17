@@ -9,6 +9,23 @@ import {
   parseCanvasMode
 } from './types'
 
+export const EMPTY_GRID_CELL_PREFIX = '__bikorch_empty__:'
+
+export function emptyGridCellId(seed: string): string {
+  return `${EMPTY_GRID_CELL_PREFIX}${seed}`
+}
+
+export function isEmptyGridCellId(id: string): boolean {
+  return id.startsWith(EMPTY_GRID_CELL_PREFIX)
+}
+
+export function layoutCellCount(mode: WorkspaceCanvasMode): number {
+  const parsed = parseCanvasMode(mode)
+  if (parsed === 'cols-2' || parsed === 'rows-2') return 2
+  if (parsed === 'cols-3' || parsed === 'rows-3') return 3
+  return 4
+}
+
 export function isTiledWorkspace(layout: WorkspaceLayout): boolean {
   return parseCanvasMode(layout.canvasMode) !== 'free'
 }
@@ -164,6 +181,17 @@ export function insertPanelInGrid(
   side: TiledSplitSide = 'right'
 ): WorkspaceGridNode {
   if (!node) return { type: 'leaf', panelId: newPanelId }
+  const fillEmpty = (current: WorkspaceGridNode): WorkspaceGridNode | null => {
+    if (current.type === 'leaf') {
+      return isEmptyGridCellId(current.panelId) ? { type: 'leaf', panelId: newPanelId } : null
+    }
+    const left = fillEmpty(current.children[0])
+    if (left) return { ...current, children: [left, current.children[1]] }
+    const right = fillEmpty(current.children[1])
+    return right ? { ...current, children: [current.children[0], right] } : null
+  }
+  const filled = fillEmpty(node)
+  if (filled) return filled
   return splitGridPanel(node, lastLeafId(node), side, newPanelId)
 }
 
@@ -215,6 +243,7 @@ export function syncGridWithPanelIds(
 
   let next: WorkspaceGridNode | null = node
   for (const id of collectGridIds(next)) {
+    if (isEmptyGridCellId(id)) continue
     if (!panelIds.includes(id)) next = removePanelFromGrid(next, id)
   }
   const have = new Set(collectGridIds(next))

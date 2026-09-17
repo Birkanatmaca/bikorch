@@ -46,6 +46,9 @@ export function ProjectTabs(): React.JSX.Element {
   const attentionByProject = useActivityAttentionStore((s) => s.attentionByProject)
   const { openFolderPicker } = useOpenProject()
   const listRef = useRef<HTMLDivElement>(null)
+  const draggedProjectIdRef = useRef<string | null>(null)
+  const draggedTabRef = useRef<HTMLDivElement | null>(null)
+  const dropTabRef = useRef<HTMLDivElement | null>(null)
 
   const activityFor = (projectId: string): ProjectTabActivity =>
     summarizeProjectTabActivity({
@@ -81,6 +84,36 @@ export function ProjectTabs(): React.JSX.Element {
     activateProject(projectId)
   }
 
+  const finishDragging = (): void => {
+    draggedTabRef.current?.classList.remove('is-dragging')
+    dropTabRef.current?.classList.remove('is-drop-target')
+    draggedProjectIdRef.current = null
+    draggedTabRef.current = null
+    dropTabRef.current = null
+  }
+
+  const setDropTarget = (tab: HTMLDivElement): void => {
+    if (dropTabRef.current === tab) return
+    dropTabRef.current?.classList.remove('is-drop-target')
+    dropTabRef.current = tab
+    tab.classList.add('is-drop-target')
+  }
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>, targetProjectId: string): void => {
+    event.preventDefault()
+    const sourceProjectId = event.dataTransfer.getData('application/x-bikorch-project') || draggedProjectIdRef.current
+    if (!sourceProjectId || sourceProjectId === targetProjectId) {
+      finishDragging()
+      return
+    }
+    const fromIndex = projects.findIndex((project) => project.id === sourceProjectId)
+    const toIndex = projects.findIndex((project) => project.id === targetProjectId)
+    if (fromIndex >= 0 && toIndex >= 0) {
+      useWorkspaceStore.getState().reorderProjects(fromIndex, toIndex)
+    }
+    finishDragging()
+  }
+
   return (
     <div
       ref={listRef}
@@ -97,6 +130,29 @@ export function ProjectTabs(): React.JSX.Element {
           <div
             key={project.id}
             data-project-id={project.id}
+            draggable
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = 'move'
+              event.dataTransfer.setData('application/x-bikorch-project', project.id)
+              draggedProjectIdRef.current = project.id
+              draggedTabRef.current = event.currentTarget
+              event.currentTarget.classList.add('is-dragging')
+            }}
+            onDragOver={(event) => {
+              if (draggedProjectIdRef.current === project.id) return
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'move'
+              setDropTarget(event.currentTarget)
+            }}
+            onDragLeave={(event) => {
+              const nextTarget = event.relatedTarget
+              if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return
+              if (dropTabRef.current?.dataset.projectId !== project.id) return
+              dropTabRef.current.classList.remove('is-drop-target')
+              dropTabRef.current = null
+            }}
+            onDrop={(event) => handleDrop(event, project.id)}
+            onDragEnd={finishDragging}
             onPointerDown={(event) => handleActivate(event, project.id)}
             role="tab"
             aria-selected={isActive}

@@ -37,7 +37,9 @@ import {
   swapGridPanels,
   tiledCenterPanelIds,
   updateGridSizes,
-  buildLayoutGrid
+  buildLayoutGrid,
+  emptyGridCellId,
+  layoutCellCount
 } from '@shared/workspace-grid'
 import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
@@ -66,9 +68,18 @@ function pruneCenterGrid(
   node: WorkspaceGridNode | null | undefined,
   removedIds: Set<string>
 ): WorkspaceGridNode | null {
-  let next = node ?? null
-  for (const id of removedIds) next = removePanelFromGrid(next, id)
-  return next
+  const replaceRemoved = (current: WorkspaceGridNode | null): WorkspaceGridNode | null => {
+    if (!current) return null
+    if (current.type === 'leaf') {
+      return removedIds.has(current.panelId) ? { type: 'leaf', panelId: emptyGridCellId(current.panelId) } : current
+    }
+    const left = replaceRemoved(current.children[0])
+    const right = replaceRemoved(current.children[1])
+    if (!left) return right
+    if (!right) return left
+    return { ...current, children: [left, right] }
+  }
+  return replaceRemoved(node ?? null)
 }
 
 function releasePanelIsolation(panel: PanelDefinition, projectRoot: string | null | undefined): void {
@@ -918,8 +929,12 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     if (!workspace) return
 
     const ids = tiledCenterPanelIds(workspace.panels)
+    const emptyCells = Array.from(
+      { length: Math.max(0, layoutCellCount(mode) - ids.length) },
+      (_, index) => emptyGridCellId(`${mode}-${index}`)
+    )
     const centerGrid =
-      mode === 'free' ? (workspace.layout.centerGrid ?? null) : buildLayoutGrid(ids, mode)
+      mode === 'free' ? (workspace.layout.centerGrid ?? null) : buildLayoutGrid([...ids, ...emptyCells], mode)
 
     set({
       workspaces: {
