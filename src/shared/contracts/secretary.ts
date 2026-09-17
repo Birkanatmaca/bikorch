@@ -48,11 +48,31 @@ export interface SecretaryPlan {
   approvalRequired: true
 }
 
+export interface SecretaryChatTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface SecretaryChatRequest {
+  project: { id: string; name: string; folderPath: string | null }
+  message: string
+  history: SecretaryChatTurn[]
+  panels: SecretaryPanelContext[]
+  usage: CliUsageInfo[]
+}
+
+export interface SecretaryChatResponse {
+  reply: string
+  plan: SecretaryPlan | null
+  openKinds: CliUsageKind[]
+}
+
 export const SECRETARY_IPC = {
   GET_SETTINGS: 'secretary:getSettings',
   SAVE_KEY: 'secretary:saveKey',
   CLEAR_KEY: 'secretary:clearKey',
   RESET_USAGE: 'secretary:resetUsage',
   UPDATE_SETTINGS: 'secretary:updateSettings',
-  CREATE_PLAN: 'secretary:createPlan'
+  CREATE_PLAN: 'secretary:createPlan',
+  CHAT: 'secretary:chat'
 } as const

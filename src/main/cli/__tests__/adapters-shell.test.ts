@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { enrichedPath, getDefaultShell, resolveSpawnConfigCandidates } from '../adapters'
+import { cliLaunchArgs, enrichedPath, getDefaultShell, resolveSpawnConfigCandidates } from '../adapters'
 import { existsSync } from 'fs'
 
 describe('getDefaultShell', () => {
@@ -27,6 +27,15 @@ describe('getDefaultShell', () => {
     delete process.env.SHELL
 
     expect(getDefaultShell()).toEqual({ command: '/bin/zsh', args: ['-l'] })
+  })
+})
+
+describe('cliLaunchArgs', () => {
+  it('trusts Cursor workspaces in interactive agent sessions', () => {
+    expect(cliLaunchArgs('cursor')).toEqual(['--trust'])
+    expect(cliLaunchArgs('cursor', 'login')).toEqual(['login'])
+    expect(cliLaunchArgs('gemini')).toEqual(['--skip-trust'])
+    expect(cliLaunchArgs('claude')).toEqual([])
   })
 })
 

@@ -7,10 +7,13 @@ import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 interface TerminalStore {
   sessions: Record<string, PtySessionStatus>
   errors: Record<string, string | undefined>
+  outputTails: Record<string, string>
 
   setStatus: (sessionId: string, status: PtySessionStatus, error?: string) => void
+  setOutputTail: (sessionId: string, tail: string) => void
   removeSession: (sessionId: string) => void
   getStatus: (sessionId: string) => PtySessionStatus | undefined
+  getOutputTail: (sessionId: string) => string
 }
 
 function noteCliTaskFinish(sessionId: string, next: PtySessionStatus, prev?: PtySessionStatus): void {
@@ -32,6 +35,7 @@ function noteCliTaskFinish(sessionId: string, next: PtySessionStatus, prev?: Pty
 export const useTerminalStore = create<TerminalStore>((set, get) => ({
   sessions: {},
   errors: {},
+  outputTails: {},
 
   setStatus: (sessionId, status, error) => {
     const prev = get().sessions[sessionId]
@@ -43,13 +47,22 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     noteCliTaskFinish(sessionId, status, prev)
   },
 
+  setOutputTail: (sessionId, tail) => {
+    if (get().outputTails[sessionId] === tail) return
+    set((state) => ({
+      outputTails: { ...state.outputTails, [sessionId]: tail }
+    }))
+  },
+
   removeSession: (sessionId) => {
     set((state) => {
       const { [sessionId]: _s, ...sessions } = state.sessions
       const { [sessionId]: _e, ...errors } = state.errors
-      return { sessions, errors }
+      const { [sessionId]: _t, ...outputTails } = state.outputTails
+      return { sessions, errors, outputTails }
     })
   },
 
-  getStatus: (sessionId) => get().sessions[sessionId]
+  getStatus: (sessionId) => get().sessions[sessionId],
+  getOutputTail: (sessionId) => get().outputTails[sessionId] ?? ''
 }))

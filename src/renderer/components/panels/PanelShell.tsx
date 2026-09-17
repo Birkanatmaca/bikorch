@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { AGENT_WORKTREE_KINDS } from '@shared/contracts/git'
-import { type PanelType } from '@shared/types'
+import { type PanelType, isCanvasDevicePanel } from '@shared/types'
 import type { PtyLaunchMode, PtySessionStatus } from '@shared/contracts/pty'
 import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS, type AiAccount } from '@shared/contracts/accounts'
 import { cn } from '@renderer/lib/utils'
@@ -300,6 +300,7 @@ export function PanelShell({
   const cliLogo = getCliLogo(type)
   const isMac = isMacOS()
   const isWin = isWindows()
+  const isDevice = isCanvasDevicePanel(type)
   const isWebChatPanel = type === 'chatgpt' || type === 'claude-chat'
   const isTerminalPanel = PTY_PANEL_TYPES.includes(type)
   const showMacWindowControls = isMac && isTerminalPanel && Boolean(onClose) && !onHide
@@ -361,7 +362,8 @@ export function PanelShell({
     <>
       <div
         className={cn(
-          'panel-shell workstation-panel relative flex h-full flex-col overflow-hidden bg-panel-bg',
+          'panel-shell workstation-panel relative flex h-full flex-col',
+          isDevice ? 'canvas-device-shell overflow-visible bg-transparent' : 'overflow-hidden bg-panel-bg',
           flush ? 'panel-shell-flush rounded-none border-0' : 'rounded-md border border-border shadow-sm',
           isMac && 'panel-shell-macos',
           isWin && 'panel-shell-windows',
@@ -530,7 +532,7 @@ export function PanelShell({
           </div>
         </header>
         )}
-        <div className={cn('min-h-0 flex-1 overflow-hidden', !showHeader && 'rounded-md')}>
+        <div className={cn('min-h-0 flex-1', isDevice ? 'overflow-visible' : 'overflow-hidden', !showHeader && !isDevice && 'rounded-md')}>
           <PanelContent panelId={id} type={type} launchMode={launchMode} accountId={accountId} />
         </div>
       </div>

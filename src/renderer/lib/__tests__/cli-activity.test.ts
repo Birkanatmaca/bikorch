@@ -44,4 +44,10 @@ describe('CliActivityTracker', () => {
   it('recognizes a final prompt even if prior output contained a spinner', () => {
     expect(inferCliActivity('⠋ thinking\nCompleted\n❯ ')).toBe('waiting')
   })
+
+  it('does not treat the workspace trust dialog as an idle prompt', () => {
+    expect(
+      inferCliActivity('⚠ Workspace Trust Required\nDo you trust the contents of this directory?\n▶ [a] Trust this workspace\n')
+    ).toBeNull()
+  })
 })

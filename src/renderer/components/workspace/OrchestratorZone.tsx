@@ -3,9 +3,9 @@ import {
   allocateOrchestratorRect,
   clampOrchestratorRect,
   DEFAULT_ORCHESTRATOR_RECT,
-  DEFAULT_PLAYER_RECT,
-  DEFAULT_TIMER_RECT,
   floatingWidgetRect,
+  floatsOnCanvas,
+  isCanvasDevicePanel,
   isFloatingWidget,
   panelMinLimits,
   isFullBleedOrchestratorRect,
@@ -19,6 +19,7 @@ import { isTiledWorkspace, syncGridWithPanelIds, tiledCenterPanelIds } from '@sh
 import { PanelShell } from '@renderer/components/panels/PanelShell'
 import { WorkspacePlayerPanel } from '@renderer/components/music/WorkspacePlayerPanel'
 import { WorkspaceTimerWidget } from '@renderer/components/timer/WorkspaceTimerWidget'
+import { CanvasDeviceInteractionContext } from '@renderer/components/mobile-preview/canvas-device-context'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { cn } from '@renderer/lib/utils'
@@ -192,9 +193,11 @@ function OrchestratorWindow({
   active: boolean
 }): React.JSX.Element {
   const isWidget = isFloatingWidget(panel.type)
+  const isDevice = isCanvasDevicePanel(panel.type)
+  const floats = isWidget || isDevice
   const status = useTerminalStore((s) => s.sessions[panel.id])
   const phase = getCliChromePhase(panel.type, status)
-  const showChrome = !isWidget && LIVE_PANEL_TYPES.includes(panel.type) && phase !== 'off'
+  const showChrome = !floats && LIVE_PANEL_TYPES.includes(panel.type) && phase !== 'off'
   const isMac = isMacOS()
 
   return (
@@ -212,7 +215,7 @@ function OrchestratorWindow({
       }}
       onPointerDown={(e) => {
         onFocus()
-        if (isWidget) return
+        if (floats) return
         const target = e.target as HTMLElement
         if (target.closest('button, header, [data-resize-handle]')) return
         focusTerminal(panel.id)
@@ -241,6 +244,31 @@ function OrchestratorWindow({
           )}
           {panel.type === 'timer' ? <ResizeHandles onStart={onResizeStart} /> : null}
         </div>
+      ) : isDevice ? (
+        <CanvasDeviceInteractionContext.Provider value={{ onMoveStart, onClose }}>
+          <div
+            className="canvas-device-host relative h-full w-full overflow-visible"
+            onPointerDown={(event) => {
+              const target = event.target as HTMLElement
+              if (target.closest('.mobile-device-screen, button, input, .browser-omnibox, [data-resize-handle]')) return
+              onMoveStart(event)
+            }}
+          >
+            <PanelShell
+              id={panel.id}
+              type={panel.type}
+              title={panel.title}
+              onClose={onClose}
+              launchMode={panel.launchMode}
+              accountId={panel.accountId}
+              draggable={false}
+              flush
+              showHeader={false}
+              windowActive={active}
+            />
+            <ResizeHandles onStart={onResizeStart} />
+          </div>
+        </CanvasDeviceInteractionContext.Provider>
       ) : (
         <div
           className={cn(
@@ -271,7 +299,7 @@ function OrchestratorWindow({
           />
         </div>
       )}
-      <ResizeHandles onStart={onResizeStart} />
+      {!isDevice && <ResizeHandles onStart={onResizeStart} />}
     </div>
   )
 }
@@ -305,8 +333,8 @@ export function OrchestratorZone({
 
   const rects = layout.centerPanelRects ?? {}
   const tiled = isTiledWorkspace(layout)
-  const tilePanels = panels.filter((panel) => !isFloatingWidget(panel.type))
-  const widgetPanels = panels.filter((panel) => isFloatingWidget(panel.type))
+  const tilePanels = panels.filter((panel) => !floatsOnCanvas(panel.type))
+  const widgetPanels = panels.filter((panel) => floatsOnCanvas(panel.type))
 
   useEffect(() => {
     if (!tiled) return
@@ -341,15 +369,15 @@ export function OrchestratorZone({
       const only = panels[0]
       const current = next[only.id]
       if (current && isFullBleedOrchestratorRect(current)) {
-        next[only.id] = isFloatingWidget(only.type)
-          ? { ...(only.type === 'timer' ? DEFAULT_TIMER_RECT : DEFAULT_PLAYER_RECT) }
+        next[only.id] = floatsOnCanvas(only.type)
+          ? floatingWidgetRect(only.type)
           : { ...DEFAULT_ORCHESTRATOR_RECT }
         changed = true
       }
     }
 
     for (const panel of panels) {
-      if (!isFloatingWidget(panel.type)) continue
+      if (!floatsOnCanvas(panel.type)) continue
       const current = next[panel.id]
       if (current && current.w >= 50 && current.h >= 50) {
         next[panel.id] = floatingWidgetRect(panel.type)
@@ -363,7 +391,7 @@ export function OrchestratorZone({
       const placed: OrchestratorRect[] = placedPanels.map((panel) => next[panel.id])
 
       for (const panel of missing) {
-        if (isFloatingWidget(panel.type)) {
+        if (floatsOnCanvas(panel.type)) {
           next[panel.id] = floatingWidgetRect(panel.type)
           placedPanels.push(panel)
           placed.push(next[panel.id])
@@ -371,7 +399,7 @@ export function OrchestratorZone({
           continue
         }
         const { next: allocated, shrinkFirst } = allocateOrchestratorRect(placed)
-        if (shrinkFirst && placedPanels[0] && !isFloatingWidget(placedPanels[0].type)) {
+        if (shrinkFirst && placedPanels[0] && !floatsOnCanvas(placedPanels[0].type)) {
           next[placedPanels[0].id] = shrinkFirst
           placed[0] = shrinkFirst
         }
@@ -392,7 +420,7 @@ export function OrchestratorZone({
       const live = previewRects[panelId] ?? rects[panelId]
       if (live) return live
       const panel = panels.find((item) => item.id === panelId)
-      return panel && isFloatingWidget(panel.type)
+      return panel && floatsOnCanvas(panel.type)
         ? floatingWidgetRect(panel.type)
         : defaultRect()
     },
@@ -485,7 +513,7 @@ export function OrchestratorZone({
       previewRectsRef.current = {}
       setPreviewRects({})
       unlockTerminalLayout(drag.panelId)
-      if (!isFloatingWidget(drag.panelType)) focusTerminal(drag.panelId)
+      if (!floatsOnCanvas(drag.panelType)) focusTerminal(drag.panelId)
     }
 
     window.addEventListener('pointermove', handlePointerMove)
@@ -509,7 +537,7 @@ export function OrchestratorZone({
       (tiled ? widgetPanels : panels).map((panel, index) => {
         const rect = getRect(panel.id)
         const focused = panel.id === activePanelId
-        const z = isFloatingWidget(panel.type) ? (focused ? 46 : 32) : focused ? 40 : 10 + index
+        const z = floatsOnCanvas(panel.type) ? (focused ? 46 : 32) : focused ? 40 : 10 + index
         return { panel, rect, z }
       }),
     [activePanelId, getRect, panels, tiled, widgetPanels]

@@ -14,7 +14,8 @@ vi.mock('@homebridge/node-pty-prebuilt-multiarch', () => ({
 vi.mock('../adapters', () => ({
   resolveSpawnConfigCandidates: () => [{ command: 'agent', args: [] }],
   getKindLabel: () => 'Claude',
-  spawnEnv: () => ({})
+  spawnEnv: () => ({}),
+  cliLaunchArgs: () => []
 }))
 vi.mock('../path-validator', () => ({ isValidSessionId: () => true, resolveSafeCwd: () => '.' }))
 vi.mock('../../accounts/profile-manager', () => ({

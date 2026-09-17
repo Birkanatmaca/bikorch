@@ -8,7 +8,7 @@ import {
   type PtySessionStatus,
   PTY_IPC
 } from '@shared/contracts/pty'
-import { resolveSpawnConfigCandidates, getKindLabel, spawnEnv } from './adapters'
+import { resolveSpawnConfigCandidates, getKindLabel, spawnEnv, cliLaunchArgs } from './adapters'
 import { isValidSessionId, resolveSafeCwd } from './path-validator'
 import {
   getAuthProfileEnv,
@@ -254,8 +254,7 @@ class PtyManager {
       }
       profileEnv = getAuthProfileEnv(kind, request.accountId)
     }
-    const launchArgs =
-      request.launchMode === 'login' && (kind === 'codex' || kind === 'cursor') ? ['login'] : []
+    const launchArgs = cliLaunchArgs(kind, request.launchMode ?? 'normal')
 
     const useHost = await ptyHostClient.ensureConnected()
 

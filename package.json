@@ -8,7 +8,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "clean:release": "rm -rf release",
+    "clean:release": "node -e \"require('fs').rmSync('release',{recursive:true,force:true})\"",
     "dist:mac": "npm run clean:release && npm run build && electron-builder --mac && node -e \"const fs=require('fs');const path=require('path');const root='release';if(!fs.existsSync(root))process.exit(0);for(const name of fs.readdirSync(root)){if(name==='Bikorch.dmg')continue;fs.rmSync(path.join(root,name),{recursive:true,force:true})}\"",
     "dist:win": "npm run clean:release && npm run build && electron-builder --win",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
@@ -27,8 +27,15 @@
     "removePackageScripts": true,
     "files": [
       "out/**/*",
+      "package.json",
       "app-logo.png",
-      "build/icon.icns"
+      "build/icon.icns",
+      "node_modules/sql.js/**",
+      "node_modules/@homebridge/node-pty-prebuilt-multiarch/**"
+    ],
+    "asarUnpack": [
+      "node_modules/@homebridge/node-pty-prebuilt-multiarch/**",
+      "node_modules/sql.js/dist/*.wasm"
     ],
     "extraResources": [
       {
@@ -55,10 +62,16 @@
       "title": "Bikorch"
     },
     "win": {
+      "icon": "build/icon.png",
       "target": [
         "nsis",
         "dir"
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Bikorch-Setup.exe"
     }
   },
   "dependencies": {

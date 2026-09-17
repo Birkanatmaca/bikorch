@@ -269,6 +269,13 @@ export function resolveSpawnConfig(kind: PtyKind): SpawnConfig {
   return resolveSpawnConfigCandidates(kind)[0] ?? getDefaultShell()
 }
 
+export function cliLaunchArgs(kind: PtyKind, launchMode: 'normal' | 'login' = 'normal'): string[] {
+  if (launchMode === 'login' && (kind === 'codex' || kind === 'cursor')) return ['login']
+  if (kind === 'cursor') return ['--trust']
+  if (kind === 'gemini') return ['--skip-trust']
+  return []
+}
+
 export function getKindLabel(kind: PtyKind): string {
   switch (kind) {
     case 'terminal':

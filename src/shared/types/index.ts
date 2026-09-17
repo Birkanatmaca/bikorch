@@ -70,6 +70,14 @@ export function isFloatingWidget(type: PanelType | undefined): boolean {
   return type === 'player' || type === 'timer'
 }
 
+export function isCanvasDevicePanel(type: PanelType | undefined): type is 'ios-preview' | 'android-preview' {
+  return type === 'ios-preview' || type === 'android-preview'
+}
+
+export function floatsOnCanvas(type: PanelType | undefined): boolean {
+  return isFloatingWidget(type) || isCanvasDevicePanel(type)
+}
+
 export function isMobilePreviewPanel(type: PanelType | undefined): type is 'mobile-preview' | 'ios-preview' | 'android-preview' {
   return type === 'mobile-preview' || type === 'ios-preview' || type === 'android-preview'
 }
@@ -315,6 +323,7 @@ export function rebalanceCenterPanelSizes(panelIds: string[]): Record<string, nu
 export const ORCHESTRATOR_MIN_PX = { w: 240, h: 140 } as const
 export const PLAYER_MIN_PX = { w: 200, h: 160 } as const
 export const TIMER_MIN_PX = { w: 168, h: 120 } as const
+export const DEVICE_MIN_PX = { w: 168, h: 320 } as const
 
 /** Used when the canvas size is unknown (persist / add without a measured layout). */
 const ORCH_MIN_W = 10
@@ -323,6 +332,8 @@ const PLAYER_MIN_W = 10
 const PLAYER_MIN_H = 12
 const TIMER_MIN_W = 8
 const TIMER_MIN_H = 10
+const DEVICE_MIN_W = 8
+const DEVICE_MIN_H = 16
 
 /** First terminal sits inset on the notebook grid (12×10 cells). */
 export const DEFAULT_ORCHESTRATOR_RECT: OrchestratorRect = {
@@ -344,6 +355,13 @@ export const DEFAULT_TIMER_RECT: OrchestratorRect = {
   y: 8,
   w: 28,
   h: 28
+}
+
+export const DEFAULT_DEVICE_RECT: OrchestratorRect = {
+  x: 10,
+  y: 8,
+  w: 22,
+  h: 78
 }
 
 export const DEFAULT_CHAT_RIGHT_SIZE = 22
@@ -371,11 +389,12 @@ export function minPercentFromPixels(
   return Math.min(80, Math.max(2, percent))
 }
 
-export type OrchestratorLimitKind = 'panel' | 'player' | 'timer'
+export type OrchestratorLimitKind = 'panel' | 'player' | 'timer' | 'device'
 
 export function limitKindForPanel(type: PanelType | undefined): OrchestratorLimitKind {
   if (type === 'player') return 'player'
   if (type === 'timer') return 'timer'
+  if (isCanvasDevicePanel(type)) return 'device'
   return 'panel'
 }
 
@@ -393,6 +412,12 @@ export function orchestratorMinLimits(
     return {
       minW: minPercentFromPixels(PLAYER_MIN_PX.w, canvas?.w ?? 0, PLAYER_MIN_W),
       minH: minPercentFromPixels(PLAYER_MIN_PX.h, canvas?.h ?? 0, PLAYER_MIN_H)
+    }
+  }
+  if (kind === 'device') {
+    return {
+      minW: minPercentFromPixels(DEVICE_MIN_PX.w, canvas?.w ?? 0, DEVICE_MIN_W),
+      minH: minPercentFromPixels(DEVICE_MIN_PX.h, canvas?.h ?? 0, DEVICE_MIN_H)
     }
   }
   return {
@@ -426,15 +451,23 @@ export function placeChatRect(): OrchestratorRect {
   return clampOrchestratorRect({ ...DEFAULT_CHAT_RECT })
 }
 
+export function placeDeviceRect(type?: PanelType): OrchestratorRect {
+  const rect = { ...DEFAULT_DEVICE_RECT }
+  if (type === 'android-preview') rect.x = 36
+  return clampOrchestratorRect(rect, { minW: DEVICE_MIN_W, minH: DEVICE_MIN_H })
+}
+
 export function floatingWidgetRect(type: PanelType): OrchestratorRect {
-  return type === 'timer' ? placeTimerRect() : placePlayerRect()
+  if (type === 'timer') return placeTimerRect()
+  if (isCanvasDevicePanel(type)) return placeDeviceRect(type)
+  return placePlayerRect()
 }
 
 export function floatingWidgetLimits(
   type: PanelType | undefined,
   canvas?: { w: number; h: number } | null
 ): { minW: number; minH: number } | undefined {
-  if (!isFloatingWidget(type)) return undefined
+  if (!floatsOnCanvas(type)) return undefined
   return orchestratorMinLimits(limitKindForPanel(type), canvas)
 }
 

@@ -45,12 +45,20 @@ export function looksCliSignedIn(kind: PtyKind, buffer: string): boolean {
 export function inferCliActivity(buffer: string): 'waiting' | 'busy' | null {
   const tail = stripAnsi(buffer).replace(/\r/g, '').slice(-1200)
   if (!tail.trim()) return null
+  if (looksWorkspaceTrustPrompt(tail)) return null
   // A prompt at the end is definitive. The same retained terminal tail often still
   // contains a spinner or a word such as "thinking" from the completed response.
   if (IDLE_PROMPT_RE.test(tail) || IDLE_BOX_RE.test(tail)) return 'waiting'
   if (SPINNER_RE.test(tail) || BUSY_WORD_RE.test(tail)) return 'busy'
   return null
 }
+
+export function looksWorkspaceTrustPrompt(buffer: string): boolean {
+  const tail = stripAnsi(buffer).replace(/\r/g, '')
+  return /workspace trust required|trust this workspace|do you trust the (?:files|contents) of this directory/i.test(tail)
+}
+
+export const TRUST_ACCEPT_SEQUENCE = 'a\r'
 
 export function isPromptSubmit(data: string): boolean {
   return /[\r\n]/.test(data)

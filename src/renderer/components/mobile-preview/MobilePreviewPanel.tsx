@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { Camera, Loader2, RefreshCw, Search, Smartphone, Square, Video } from 'lucide-react'
+import { useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Camera, Loader2, RefreshCw, Search, Smartphone, Square, Video, X } from 'lucide-react'
 import {
   LOCAL_BROWSER_PRESETS,
   resolveBrowserNavigation
@@ -7,6 +7,7 @@ import {
 import { useBrowserStore } from '@renderer/stores/browser-store'
 import { Button } from '@renderer/components/ui/Button'
 import { cn } from '@renderer/lib/utils'
+import { CanvasDeviceInteractionContext } from '@renderer/components/mobile-preview/canvas-device-context'
 
 type GuestWebview = HTMLElement & {
   src: string
@@ -133,7 +134,19 @@ function captureFileName(device: DeviceSpec, extension: 'png' | 'webm'): string 
   return `bikorch-${device.id}-preview-${stamp}.${extension}`
 }
 
-function MobileDevice({ device, url, reloadVersion }: { device: DeviceSpec; url: string; reloadVersion: number }): React.JSX.Element {
+function MobileDevice({
+  device,
+  url,
+  reloadVersion,
+  canvas = false,
+  empty
+}: {
+  device: DeviceSpec
+  url: string
+  reloadVersion: number
+  canvas?: boolean
+  empty?: ReactNode
+}): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
   const guestRef = useRef<GuestWebview | null>(null)
   const [loading, setLoading] = useState(false)
@@ -300,49 +313,67 @@ function MobileDevice({ device, url, reloadVersion }: { device: DeviceSpec; url:
 
   return (
     <section
-      className={cn('mobile-device', `mobile-device-${device.id}`)}
-      style={{ '--mobile-device-scale': scale } as React.CSSProperties}
+      className={cn('mobile-device', `mobile-device-${device.id}`, canvas && 'is-canvas-device')}
+      style={canvas ? undefined : ({ '--mobile-device-scale': scale } as React.CSSProperties)}
       aria-label={`${device.name} preview`}
     >
       <div className="mobile-device-content">
-        <div className="mobile-device-meta">
-        <div>
-          <strong>{device.name}</strong>
-          <span>{device.subtitle}</span>
-        </div>
-        <div className="mobile-device-actions">
-          {loading || capturing ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-label="Loading" /> : null}
-          <button type="button" onClick={() => void takeScreenshot()} disabled={capturing || recording} title="Save framed screenshot" aria-label={`Save ${device.name} screenshot`}>
-            <Camera className="h-3.5 w-3.5" />
-          </button>
-          <button type="button" onClick={() => (recording ? stopRecording() : void startRecording())} disabled={capturing} title={recording ? 'Stop recording' : 'Record framed video'} aria-label={recording ? `Stop ${device.name} recording` : `Record ${device.name} video`} className={cn(recording && 'is-recording')}>
-            {recording ? <Square className="h-3 w-3" /> : <Video className="h-3.5 w-3.5" />}
-          </button>
-        </div>
-        </div>
+        {!canvas ? (
+          <div className="mobile-device-meta">
+            <div>
+              <strong>{device.name}</strong>
+              <span>{device.subtitle}</span>
+            </div>
+            <div className="mobile-device-actions">
+              {loading || capturing ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-label="Loading" /> : null}
+              <button type="button" onClick={() => void takeScreenshot()} disabled={!url || capturing || recording} title="Save framed screenshot" aria-label={`Save ${device.name} screenshot`}>
+                <Camera className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" onClick={() => (recording ? stopRecording() : void startRecording())} disabled={!url || capturing} title={recording ? 'Stop recording' : 'Record framed video'} aria-label={recording ? `Stop ${device.name} recording` : `Record ${device.name} video`} className={cn(recording && 'is-recording')}>
+                {recording ? <Square className="h-3 w-3" /> : <Video className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+          </div>
+        ) : null}
         <div className="mobile-device-frame">
           {device.id === 'ios' ? <span className="mobile-ios-island" aria-hidden /> : <span className="mobile-android-camera" aria-hidden />}
-          <div ref={hostRef} className="mobile-device-screen" />
+          <div ref={hostRef} className="mobile-device-screen">
+            {empty}
+          </div>
           <span className="mobile-device-home" aria-hidden />
           {failed ? <span className="mobile-device-failed">Could not load</span> : null}
+          {canvas ? (
+            <div className="mobile-device-actions is-overlay">
+              {loading || capturing ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-label="Loading" /> : null}
+              <button type="button" onClick={() => void takeScreenshot()} disabled={!url || capturing || recording} title="Save framed screenshot" aria-label={`Save ${device.name} screenshot`}>
+                <Camera className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" onClick={() => (recording ? stopRecording() : void startRecording())} disabled={!url || capturing} title={recording ? 'Stop recording' : 'Record framed video'} aria-label={recording ? `Stop ${device.name} recording` : `Record ${device.name} video`} className={cn(recording && 'is-recording')}>
+                {recording ? <Square className="h-3 w-3" /> : <Video className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+          ) : null}
         </div>
-        <span className="mobile-device-viewport">CSS viewport {device.viewport}</span>
+        {!canvas ? <span className="mobile-device-viewport">CSS viewport {device.viewport}</span> : null}
       </div>
-      {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const).map((corner) => (
-        <button
-          key={corner}
-          type="button"
-          className={cn('mobile-device-resize-handle', `is-${corner}`)}
-          onPointerDown={(event) => beginResize(event, corner)}
-          aria-label={`Resize ${device.name} from ${corner.replace('-', ' ')}`}
-          title="Resize proportionally"
-        />
-      ))}
+      {canvas
+        ? null
+        : (['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const).map((corner) => (
+            <button
+              key={corner}
+              type="button"
+              className={cn('mobile-device-resize-handle', `is-${corner}`)}
+              onPointerDown={(event) => beginResize(event, corner)}
+              aria-label={`Resize ${device.name} from ${corner.replace('-', ' ')}`}
+              title="Resize proportionally"
+            />
+          ))}
     </section>
   )
 }
 
 export function MobilePreviewPanel({ panelId, deviceId }: { panelId: string; deviceId?: DeviceSpec['id'] }): React.JSX.Element {
+  const canvas = useContext(CanvasDeviceInteractionContext)
   const panel = useBrowserStore((state) => state.panels[panelId])
   const ensure = useBrowserStore((state) => state.ensure)
   const rememberUrl = useBrowserStore((state) => state.rememberUrl)
@@ -373,14 +404,36 @@ export function MobilePreviewPanel({ panelId, deviceId }: { panelId: string; dev
 
   const devices = deviceId ? DEVICES.filter((device) => device.id === deviceId) : DEVICES
   const direct = Boolean(deviceId)
+  const canvasDevice = direct
+
+  const startCopy = (
+    <div className={cn('mobile-preview-start', canvasDevice && 'is-on-device')}>
+      <Smartphone className="h-7 w-7 text-primary" aria-hidden />
+      <h3>{direct ? `Preview your app on ${deviceId === 'ios' ? 'iOS' : 'Android'}` : 'Preview your app on two devices'}</h3>
+      <p>{direct ? 'Enter a URL to open it on this device.' : 'Both frames load the same URL with iPhone and Android viewport sizes.'}</p>
+      <div className="browser-presets">
+        {LOCAL_BROWSER_PRESETS.map((preset) => (
+          <Button key={preset.url} variant="secondary" onClick={() => navigate(preset.url)}>
+            :{preset.label}
+          </Button>
+        ))}
+      </div>
+    </div>
+  )
 
   return (
-    <div className={cn('mobile-preview-workbench', direct && 'mobile-direct-workspace')}>
+    <div className={cn(
+      'mobile-preview-workbench',
+      canvasDevice ? 'mobile-canvas-device' : direct && 'mobile-direct-workspace',
+      canvasDevice && !url && 'is-awaiting-url'
+    )}>
       <div className="mobile-preview-chrome">
-        <div className="mobile-preview-heading">
-          <Smartphone className="h-3.5 w-3.5 text-primary" aria-hidden />
-          <span>{deviceId === 'ios' ? 'iOS device' : deviceId === 'android' ? 'Android device' : 'Mobile preview'}</span>
-        </div>
+        {!canvasDevice ? (
+          <div className="mobile-preview-heading">
+            <Smartphone className="h-3.5 w-3.5 text-primary" aria-hidden />
+            <span>{deviceId === 'ios' ? 'iOS device' : deviceId === 'android' ? 'Android device' : 'Mobile preview'}</span>
+          </div>
+        ) : null}
         <form
           className="browser-omnibox"
           onSubmit={(event) => {
@@ -408,21 +461,28 @@ export function MobilePreviewPanel({ panelId, deviceId }: { panelId: string; dev
         >
           <RefreshCw className="h-3.5 w-3.5" />
         </button>
+        {canvas?.onClose ? (
+          <button type="button" className="browser-icon-btn" onClick={canvas.onClose} aria-label="Close device" title="Close device">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
       </div>
       {error ? <p className="browser-error">{error}</p> : null}
-      {!url ? (
-        <div className="mobile-preview-start">
-          <Smartphone className="h-7 w-7 text-primary" aria-hidden />
-          <h3>{direct ? `Preview your app on ${deviceId === 'ios' ? 'iOS' : 'Android'}` : 'Preview your app on two devices'}</h3>
-          <p>{direct ? 'Enter a URL to open it directly in this device view.' : 'Both frames load the same URL with iPhone and Android viewport sizes.'}</p>
-          <div className="browser-presets">
-            {LOCAL_BROWSER_PRESETS.map((preset) => (
-              <Button key={preset.url} variant="secondary" onClick={() => navigate(preset.url)}>
-                :{preset.label}
-              </Button>
-            ))}
-          </div>
+      {canvasDevice ? (
+        <div className="mobile-preview-stage">
+          {devices.map((device) => (
+            <MobileDevice
+              key={device.id}
+              device={device}
+              url={url}
+              reloadVersion={reloadVersion}
+              canvas
+              empty={url ? null : startCopy}
+            />
+          ))}
         </div>
+      ) : !url ? (
+        startCopy
       ) : (
         <div className="mobile-preview-stage">
           {devices.map((device) => (

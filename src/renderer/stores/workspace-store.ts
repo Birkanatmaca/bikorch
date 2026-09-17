@@ -14,7 +14,7 @@ import {
   normalizeLayoutForPanels,
   layoutAfterAddCenterPanel,
   clampOrchestratorRect,
-  isFloatingWidget,
+  floatsOnCanvas,
   isWebChatPanel,
   floatingWidgetRect,
   floatingWidgetLimits,
@@ -467,7 +467,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       }
     }
 
-    if (isFloatingWidget(type) || isWebChatPanel(type)) {
+    if (floatsOnCanvas(type) || isWebChatPanel(type)) {
       const existing = workspace.panels.find((panel) => panel.type === type)
       if (existing) {
         window.dispatchEvent(new CustomEvent('bikorch:focus-panel', { detail: existing.id }))
@@ -526,7 +526,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     }
 
     if (targetZone === 'center') {
-      if (isFloatingWidget(type) && !rect) {
+      if (floatsOnCanvas(type) && !rect) {
         nextLayout = {
           ...nextLayout,
           centerPanelRects: {
@@ -563,7 +563,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           )
         }
       }
-      if (isTiledWorkspace(nextLayout) && !isFloatingWidget(type)) {
+      if (isTiledWorkspace(nextLayout) && !floatsOnCanvas(type)) {
         nextLayout = {
           ...nextLayout,
           centerGrid: insertPanelInGrid(nextLayout.centerGrid ?? null, newPanel.id)
@@ -815,7 +815,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     let centerPanelRects = workspace.layout.centerPanelRects ?? {}
 
     if (zone === 'center' && current && current.zone !== 'center') {
-      if (isFloatingWidget(current.type)) {
+      if (floatsOnCanvas(current.type)) {
         centerPanelRects = {
           ...centerPanelRects,
           [panelId]: floatingWidgetRect(current.type)
@@ -839,7 +839,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       ...workspace.layout,
       centerPanelRects
     }
-    if (zone === 'center' && current?.zone !== 'center' && !isFloatingWidget(current?.type) && isTiledWorkspace(nextLayout)) {
+    if (zone === 'center' && current?.zone !== 'center' && !floatsOnCanvas(current?.type) && isTiledWorkspace(nextLayout)) {
       nextLayout = {
         ...nextLayout,
         centerGrid: insertPanelInGrid(nextLayout.centerGrid ?? null, panelId)

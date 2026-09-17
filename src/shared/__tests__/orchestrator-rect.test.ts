@@ -40,6 +40,12 @@ describe('orchestrator min size', () => {
     expect(next.h).toBeCloseTo(14)
   })
 
+  it('uses a tall phone-sized floor for canvas devices', () => {
+    const limits = orchestratorMinLimits('device', { w: 1400, h: 800 })
+    expect(limits.minH).toBeGreaterThan(limits.minW)
+    expect(limits.minH).toBeCloseTo((320 / 800) * 100)
+  })
+
   it('does not force the old 22×24 percent floor', () => {
     const limits = orchestratorMinLimits('panel', { w: 3000, h: 1600 })
     const next = clampOrchestratorRect({ x: 0, y: 0, w: 14, h: 16 }, limits)

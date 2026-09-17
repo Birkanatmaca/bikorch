@@ -4,7 +4,9 @@ import type { WebContents } from 'electron'
 const mocks = vi.hoisted(() => ({ spawn: vi.fn(() => ({ kill: vi.fn(), onData: vi.fn(), onExit: vi.fn(), resize: vi.fn() })) }))
 vi.mock('@homebridge/node-pty-prebuilt-multiarch', () => ({ spawn: mocks.spawn }))
 vi.mock('../adapters', () => ({ resolveSpawnConfigCandidates: () => [{ command: 'agent', args: [] }],
-  getKindLabel: () => 'Cursor', spawnEnv: () => ({ CURSOR_API_KEY: 'inherited-key' }) }))
+  getKindLabel: () => 'Cursor', spawnEnv: () => ({ CURSOR_API_KEY: 'inherited-key' }),
+  cliLaunchArgs: (kind: string, launchMode: string = 'normal') =>
+    launchMode === 'login' && (kind === 'cursor' || kind === 'codex') ? ['login'] : kind === 'cursor' ? ['--trust'] : [] }))
 vi.mock('../path-validator', () => ({ isValidSessionId: () => true, resolveSafeCwd: () => '.' }))
 vi.mock('../../accounts/profile-manager', () => ({ prepareAuthProfileLaunch: async () => ({ ok: true, ready: true }),
   getAuthProfileEnv: (_kind: string, id: string) => ({ APPDATA: `profile-${id}`, CURSOR_API_KEY: '' }) }))
@@ -40,8 +42,8 @@ describe('Cursor terminal isolation', () => {
     const [a, b] = mocks.spawn.mock.results.map((result) => result.value)
     expect(a.kill).not.toHaveBeenCalled()
     expect(b.kill).not.toHaveBeenCalled()
-    expect(mocks.spawn).toHaveBeenNthCalledWith(1, 'agent', [], expect.objectContaining({ env: { APPDATA: 'profile-a', CURSOR_API_KEY: '' } }))
-    expect(mocks.spawn).toHaveBeenNthCalledWith(2, 'agent', [], expect.objectContaining({ env: { APPDATA: 'profile-b', CURSOR_API_KEY: '' } }))
+    expect(mocks.spawn).toHaveBeenNthCalledWith(1, 'agent', ['--trust'], expect.objectContaining({ env: { APPDATA: 'profile-a', CURSOR_API_KEY: '' } }))
+    expect(mocks.spawn).toHaveBeenNthCalledWith(2, 'agent', ['--trust'], expect.objectContaining({ env: { APPDATA: 'profile-b', CURSOR_API_KEY: '' } }))
     ptyManager.killForAccount('cursor', 'a')
     expect(a.kill).toHaveBeenCalledTimes(1)
     expect(b.kill).not.toHaveBeenCalled()

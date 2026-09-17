@@ -102,12 +102,14 @@ describe('tiled workspace grid', () => {
     expect(next.sizes).toEqual([40, 60])
   })
 
-  it('keeps player and timer widgets out of the tiled grid', () => {
+  it('keeps player, timer, and device previews out of the tiled grid', () => {
     expect(
       tiledCenterPanelIds([
         { id: 'term', type: 'terminal', title: 'Terminal', zone: 'center' },
         { id: 'player', type: 'player', title: 'Player', zone: 'center' },
         { id: 'timer', type: 'timer', title: 'Timer', zone: 'center' },
+        { id: 'ios', type: 'ios-preview', title: 'iOS Preview', zone: 'center' },
+        { id: 'android', type: 'android-preview', title: 'Android Preview', zone: 'center' },
         { id: 'files', type: 'file-explorer', title: 'Files', zone: 'left' }
       ])
     ).toEqual(['term'])

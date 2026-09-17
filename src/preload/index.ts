@@ -136,6 +136,8 @@ import {
 } from '@shared/contracts/automation'
 import {
   SECRETARY_IPC,
+  type SecretaryChatRequest,
+  type SecretaryChatResponse,
   type SecretaryPlan,
   type SecretaryPlanRequest,
   type SecretarySettings
@@ -370,6 +372,7 @@ export interface SecretaryApi {
   resetUsage: () => Promise<SecretarySettings>
   updateSettings: (settings: { model: string }) => Promise<SecretarySettings>
   createPlan: (request: SecretaryPlanRequest) => Promise<SecretaryPlan>
+  chat: (request: SecretaryChatRequest) => Promise<SecretaryChatResponse>
 }
 
 export interface NotificationsApi {
@@ -659,7 +662,8 @@ const secretaryApi: SecretaryApi = {
   clearKey: () => ipcRenderer.invoke(SECRETARY_IPC.CLEAR_KEY),
   resetUsage: () => ipcRenderer.invoke(SECRETARY_IPC.RESET_USAGE),
   updateSettings: (settings) => ipcRenderer.invoke(SECRETARY_IPC.UPDATE_SETTINGS, settings),
-  createPlan: (request) => ipcRenderer.invoke(SECRETARY_IPC.CREATE_PLAN, request)
+  createPlan: (request) => ipcRenderer.invoke(SECRETARY_IPC.CREATE_PLAN, request),
+  chat: (request) => ipcRenderer.invoke(SECRETARY_IPC.CHAT, request)
 }
 
 const notificationsApi: NotificationsApi = {
