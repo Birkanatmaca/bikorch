@@ -19,7 +19,8 @@ const PANEL_MENU_LABELS: Partial<Record<PanelType, string>> = {
   'claude-chat': 'Claude Chat',
   player: 'Player',
   timer: 'Timer',
-  browser: 'Browser'
+  browser: 'Browser',
+  'mobile-preview': 'Mobile Preview'
 }
 
 const ADDABLE_PANEL_TYPES: PanelType[] = [
@@ -37,7 +38,8 @@ const ADDABLE_PANEL_TYPES: PanelType[] = [
   'logs',
   'player',
   'timer',
-  'browser'
+  'browser',
+  'mobile-preview'
 ]
 
 export { ADD_PANEL_MENU_EVENT } from '@renderer/lib/app-events'

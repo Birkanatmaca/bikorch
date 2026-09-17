@@ -23,6 +23,7 @@ export function getPanelTypeIcon(type: string): string {
     player: '♫',
     timer: '◷',
     browser: '◎',
+    'mobile-preview': '▣',
     usage: '◷'
   }
   return icons[type] ?? '□'

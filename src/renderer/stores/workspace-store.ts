@@ -253,6 +253,7 @@ function getDefaultZone(type: PanelType): PanelZone {
     case 'player':
     case 'timer':
     case 'browser':
+    case 'mobile-preview':
       return 'center'
     case 'chatgpt':
     case 'claude-chat':

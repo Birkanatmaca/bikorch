@@ -65,7 +65,8 @@ const VALID_PANEL_TYPES = new Set<PanelType>([
   'tasks',
   'player',
   'timer',
-  'browser'
+  'browser',
+  'mobile-preview'
 ])
 
 function getDbPath(): string {

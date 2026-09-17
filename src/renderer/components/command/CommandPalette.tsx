@@ -157,6 +157,16 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
         }
       },
       {
+        id: 'add-mobile-preview',
+        label: 'Mobile Preview',
+        group: 'Quick',
+        keywords: 'add mobile preview iphone android phone device viewport',
+        action: () => {
+          addPanel('mobile-preview')
+          onClose()
+        }
+      },
+      {
         id: 'show-music',
         label: 'Show Music',
         group: 'Workspace',

@@ -40,6 +40,11 @@ const WorkspaceTimerWidget = lazy(() =>
 const BrowserPanel = lazy(() =>
   import('@renderer/components/browser/BrowserPanel').then((m) => ({ default: m.BrowserPanel }))
 )
+const MobilePreviewPanel = lazy(() =>
+  import('@renderer/components/mobile-preview/MobilePreviewPanel').then((m) => ({
+    default: m.MobilePreviewPanel
+  }))
+)
 
 interface PanelContentProps {
   panelId: string
@@ -169,6 +174,12 @@ export function PanelContent({ panelId, type, launchMode, accountId }: PanelCont
       return (
         <Suspense fallback={<PanelLoading />}>
           <BrowserPanel panelId={panelId} />
+        </Suspense>
+      )
+    case 'mobile-preview':
+      return (
+        <Suspense fallback={<PanelLoading />}>
+          <MobilePreviewPanel panelId={panelId} />
         </Suspense>
       )
     default:

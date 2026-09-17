@@ -15,6 +15,7 @@ export type PanelType =
   | 'player'
   | 'timer'
   | 'browser'
+  | 'mobile-preview'
 
 export interface PanelDefinition {
   id: string
@@ -218,7 +219,8 @@ export const PANEL_TYPE_LABELS: Record<PanelType, string> = {
   tasks: 'Tasks',
   player: 'Player',
   timer: 'Timer',
-  browser: 'Browser'
+  browser: 'Browser',
+  'mobile-preview': 'Mobile Preview'
 }
 
 export const DEFAULT_LAYOUT: WorkspaceLayout = {

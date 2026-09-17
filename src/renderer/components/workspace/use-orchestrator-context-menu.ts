@@ -13,6 +13,7 @@ import {
   Terminal,
   Timer,
   Globe,
+  Smartphone,
   X
 } from 'lucide-react'
 import {
@@ -165,6 +166,12 @@ export function useOrchestratorContextMenu(
           label: 'Browser',
           icon: Globe,
           action: () => addAtCursor('browser')
+        },
+        {
+          id: 'add-mobile-preview',
+          label: 'Mobile Preview',
+          icon: Smartphone,
+          action: () => addAtCursor('mobile-preview')
         },
         {
           id: 'add-git',
