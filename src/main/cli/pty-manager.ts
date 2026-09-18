@@ -34,8 +34,15 @@ interface PtySession {
   status: PtySessionStatus
   cols: number
   rows: number
-  /** In-process fallback only. Durable sessions replay from the PTY host. */
+  /** Bounded output is kept for reattach and trusted internal observers. */
   outputBuffer?: string
+}
+
+export interface PtySessionSnapshot {
+  sessionId: string
+  kind: PtyCreateRequest['kind']
+  accountId?: string
+  status: PtySessionStatus
 }
 
 const OUTPUT_BUFFER_LIMIT = 120_000
@@ -43,6 +50,7 @@ const HOST_RELEASE_MS = 8_000
 
 class PtyManager {
   private sessions = new Map<string, PtySession>()
+  private observers = new Set<(event: PtyEvent) => void>()
   private hostEventsBound = false
   private hostReleaseTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -54,6 +62,41 @@ class PtyManager {
       else inProcess += 1
     }
     return { bound: this.sessions.size, durable, inProcess }
+  }
+
+  getSessionSnapshot(sessionId: string): PtySessionSnapshot | null {
+    const session = this.sessions.get(sessionId)
+    if (!session) return null
+    return {
+      sessionId: session.id,
+      kind: session.kind,
+      ...(session.accountId ? { accountId: session.accountId } : {}),
+      status: session.status
+    }
+  }
+
+  observe(listener: (event: PtyEvent) => void): () => void {
+    this.observers.add(listener)
+    return () => this.observers.delete(listener)
+  }
+
+  getOutputTail(sessionId: string, maxLength = 8_000): string {
+    const output = this.sessions.get(sessionId)?.outputBuffer ?? ''
+    return output.slice(-Math.max(1, Math.min(maxLength, OUTPUT_BUFFER_LIMIT)))
+  }
+
+  /** Main-process-only write that reports a disconnected session as an error. */
+  async writeForSecretary(sessionId: string, data: string): Promise<void> {
+    const session = this.sessions.get(sessionId)
+    if (!session || session.status === 'stopped' || session.status === 'error') {
+      throw new Error('The selected CLI session is no longer available')
+    }
+    if (session.durable) {
+      await ptyHostClient.write(sessionId, data)
+      return
+    }
+    if (!session.process) throw new Error('The selected CLI session is no longer available')
+    session.process.write(data)
   }
 
   async create(request: PtyCreateRequest, webContents: WebContents): Promise<PtyCreateResponse> {
@@ -81,6 +124,7 @@ class PtyManager {
       if (!session?.durable) return
 
       if (event.type === 'data') {
+        session.outputBuffer = appendOutputBuffer(session.outputBuffer ?? '', event.data, OUTPUT_BUFFER_LIMIT)
         this.emit(session.webContents, { type: 'data', sessionId: event.sessionId, data: event.data })
         return
       }
@@ -140,6 +184,7 @@ class PtyManager {
             const replay = await ptyHostClient.replay(sessionId)
             this.emit(webContents, { type: 'status', sessionId, status: existing.status, kind })
             if (replay.outputBuffer) {
+              existing.outputBuffer = replay.outputBuffer.slice(-OUTPUT_BUFFER_LIMIT)
               this.emit(webContents, { type: 'data', sessionId, data: replay.outputBuffer })
             }
             recordLog('debug', `${getKindLabel(kind)} session reattached (${sessionId})`, 'pty')
@@ -290,7 +335,8 @@ class PtyManager {
             webContents,
             status: hosted.status === 'stopped' ? 'stopped' : 'running',
             cols: safeCols,
-            rows: safeRows
+            rows: safeRows,
+            outputBuffer: hosted.outputBuffer ?? ''
           }
           this.sessions.set(sessionId, session)
           this.clearHostRelease()
@@ -495,6 +541,13 @@ class PtyManager {
   }
 
   private emit(webContents: WebContents, event: PtyEvent): void {
+    for (const observer of this.observers) {
+      try {
+        observer(event)
+      } catch (error) {
+        console.warn('[pty] internal observer failed:', error)
+      }
+    }
     if (webContents.isDestroyed()) return
     webContents.send(PTY_IPC.EVENT, event)
   }

@@ -140,7 +140,14 @@ import {
   type SecretaryChatResponse,
   type SecretaryPlan,
   type SecretaryPlanRequest,
-  type SecretarySettings
+  type SecretarySettings,
+  type SecretaryThread,
+  type SecretaryThreadCreateRequest,
+  type SecretaryThreadDetail,
+  type SecretaryRun,
+  type SecretaryRunDispatchRequest,
+  type SecretaryRunDispatchResult,
+  type SecretaryEvent
 } from '@shared/contracts/secretary'
 import {
   NOTIFICATION_IPC,
@@ -373,6 +380,16 @@ export interface SecretaryApi {
   updateSettings: (settings: { model: string }) => Promise<SecretarySettings>
   createPlan: (request: SecretaryPlanRequest) => Promise<SecretaryPlan>
   chat: (request: SecretaryChatRequest) => Promise<SecretaryChatResponse>
+  listThreads: (projectId: string) => Promise<SecretaryThread[]>
+  createThread: (request: SecretaryThreadCreateRequest) => Promise<SecretaryThread>
+  getThread: (threadId: string) => Promise<SecretaryThreadDetail | null>
+  listRuns: (projectId: string) => Promise<SecretaryRun[]>
+  getRun: (runId: string) => Promise<SecretaryRun | null>
+  approvePlan: (runId: string) => Promise<SecretaryRun>
+  rejectPlan: (runId: string) => Promise<SecretaryRun>
+  failApprovedRun: (runId: string, reason: string) => Promise<SecretaryRun>
+  dispatchRun: (request: SecretaryRunDispatchRequest) => Promise<SecretaryRunDispatchResult>
+  onEvent: (callback: (event: SecretaryEvent) => void) => () => void
 }
 
 export interface NotificationsApi {
@@ -663,7 +680,21 @@ const secretaryApi: SecretaryApi = {
   resetUsage: () => ipcRenderer.invoke(SECRETARY_IPC.RESET_USAGE),
   updateSettings: (settings) => ipcRenderer.invoke(SECRETARY_IPC.UPDATE_SETTINGS, settings),
   createPlan: (request) => ipcRenderer.invoke(SECRETARY_IPC.CREATE_PLAN, request),
-  chat: (request) => ipcRenderer.invoke(SECRETARY_IPC.CHAT, request)
+  chat: (request) => ipcRenderer.invoke(SECRETARY_IPC.CHAT, request),
+  listThreads: (projectId) => ipcRenderer.invoke(SECRETARY_IPC.LIST_THREADS, projectId),
+  createThread: (request) => ipcRenderer.invoke(SECRETARY_IPC.CREATE_THREAD, request),
+  getThread: (threadId) => ipcRenderer.invoke(SECRETARY_IPC.GET_THREAD, threadId),
+  listRuns: (projectId) => ipcRenderer.invoke(SECRETARY_IPC.LIST_RUNS, projectId),
+  getRun: (runId) => ipcRenderer.invoke(SECRETARY_IPC.GET_RUN, runId),
+  approvePlan: (runId) => ipcRenderer.invoke(SECRETARY_IPC.APPROVE_PLAN, runId),
+  rejectPlan: (runId) => ipcRenderer.invoke(SECRETARY_IPC.REJECT_PLAN, runId),
+  failApprovedRun: (runId, reason) => ipcRenderer.invoke(SECRETARY_IPC.FAIL_APPROVED_RUN, runId, reason),
+  dispatchRun: (request) => ipcRenderer.invoke(SECRETARY_IPC.DISPATCH_RUN, request),
+  onEvent: (callback) => {
+    const listener = (_event: IpcRendererEvent, payload: SecretaryEvent): void => callback(payload)
+    ipcRenderer.on(SECRETARY_IPC.EVENT, listener)
+    return () => ipcRenderer.removeListener(SECRETARY_IPC.EVENT, listener)
+  }
 }
 
 const notificationsApi: NotificationsApi = {

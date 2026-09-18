@@ -1,10 +1,8 @@
-const PASTE_START = '\u001b[200~'
-const PASTE_END = '\u001b[201~'
-const SUBMIT_DELAY_MS = 120
+import { formatCliPaste } from '@shared/cli-prompt'
 
-export function formatCliPaste(prompt: string): string {
-  return `${PASTE_START}${prompt}${PASTE_END}`
-}
+export { formatCliPaste } from '@shared/cli-prompt'
+
+const SUBMIT_DELAY_MS = 120
 
 export async function submitCliPrompt(sessionId: string, prompt: string): Promise<void> {
   const text = prompt.trim()

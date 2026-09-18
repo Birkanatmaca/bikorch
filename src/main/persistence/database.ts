@@ -42,6 +42,7 @@ import { parseTaskStatus, type ProjectTask, type TaskPriority } from '@shared/co
 import { initMusicSchema } from '../music/store'
 import { initDownloadSchema } from '../music/downloader/job-store'
 import { initAutomationSchema } from '../automation/store'
+import { initSecretarySchema } from '../secretary/store'
 import { setIsolationPersistSink } from '../git/agent-run-store'
 import { hashRepoRoot } from '../git/worktree-paths'
 import { v4 as uuidv4 } from 'uuid'
@@ -262,6 +263,7 @@ export async function initPersistenceDatabase(): Promise<void> {
     initMusicSchema(db)
     initDownloadSchema(db)
     initAutomationSchema(db)
+    initSecretarySchema(db)
     db.run(`
       CREATE TABLE IF NOT EXISTS agent_isolation_state (
         repo_hash TEXT PRIMARY KEY,

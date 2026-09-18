@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, Check, Loader2, Minus, ShieldCheck, SlidersHorizontal, X } from 'lucide-react'
 import type { PanelDefinition, Project } from '@shared/types'
-import type { SecretaryPlan } from '@shared/contracts/secretary'
+import type { SecretaryPlan, SecretaryRunStatus, SecretaryThreadDetail } from '@shared/contracts/secretary'
 import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import { pickCliAccountId } from '@shared/cli-account'
@@ -12,7 +12,8 @@ import { useUsageStore } from '@renderer/stores/usage-store'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useAiAccountsStore } from '@renderer/stores/ai-accounts-store'
-import { inferCliActivity, looksWorkspaceTrustPrompt, stripAnsi, TRUST_ACCEPT_SEQUENCE } from '@renderer/lib/cli-activity'
+import { inferCliActivity, looksWorkspaceTrustPrompt, stripAnsi } from '@renderer/lib/cli-activity'
+import { submitCliPrompt } from '@renderer/lib/submit-cli-prompt'
 import { cn } from '@renderer/lib/utils'
 
 const CLI_TYPES = new Set(AI_ACCOUNT_KINDS)
@@ -22,7 +23,37 @@ interface ChatItem {
   role: 'user' | 'assistant'
   content: string
   plan?: SecretaryPlan | null
+  runId?: string
+  planOpenKinds?: CliUsageKind[]
+  planStatus?: 'awaiting-approval' | 'dispatching' | 'sent' | 'rejected' | 'failed'
   error?: boolean
+}
+
+function planStatusForRun(status: SecretaryRunStatus): ChatItem['planStatus'] {
+  if (status === 'awaiting-approval') return 'awaiting-approval'
+  if (status === 'rejected') return 'rejected'
+  if (status === 'failed' || status === 'cancelled' || status === 'interrupted') return 'failed'
+  return 'sent'
+}
+
+function chatItemsFromThread(detail: SecretaryThreadDetail): ChatItem[] {
+  const runs = new Map(detail.runs.map((run) => [run.id, run]))
+  return detail.messages.map((message) => {
+    const run = message.runId ? runs.get(message.runId) : undefined
+    const plan = message.role === 'assistant' && message.type === 'chat' ? run?.plan ?? null : null
+    return {
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      ...(plan
+        ? {
+            plan,
+            ...(run ? { runId: run.id, planOpenKinds: run.openKinds, planStatus: planStatusForRun(run.status) } : {})
+          }
+        : {}),
+      error: message.type === 'error'
+    }
+  })
 }
 
 function newId(): string {
@@ -40,9 +71,7 @@ async function waitForCliIdle(sessionId: string, timeoutMs = 60000): Promise<boo
     if (status === 'error' || status === 'stopped') return false
     const tail = stripAnsi(useTerminalStore.getState().getOutputTail(sessionId))
     if (looksWorkspaceTrustPrompt(tail)) {
-      await window.api.pty.write({ sessionId, data: TRUST_ACCEPT_SEQUENCE })
-      await sleep(900)
-      continue
+      throw new Error('The CLI is waiting for workspace trust. Review and approve it in the terminal before sending this task.')
     }
     if (inferCliActivity(tail) === 'waiting') return true
     await sleep(250)
@@ -50,23 +79,9 @@ async function waitForCliIdle(sessionId: string, timeoutMs = 60000): Promise<boo
   return inferCliActivity(stripAnsi(useTerminalStore.getState().getOutputTail(sessionId))) === 'waiting'
 }
 
-async function waitForCliIdleAfterWork(sessionId: string, timeoutMs = 240000): Promise<boolean> {
-  const started = Date.now()
-  let sawBusy = false
-  while (Date.now() - started < timeoutMs) {
-    const status = useTerminalStore.getState().getStatus(sessionId)
-    if (status === 'error' || status === 'stopped') return false
-    if (status === 'busy') sawBusy = true
-    if (sawBusy && status === 'waiting') return true
-    await sleep(400)
-  }
-  return false
-}
-
 function fallbackPlan(
   instruction: string,
-  kinds: CliUsageKind[],
-  opened: Map<CliUsageKind, string>
+  kinds: CliUsageKind[]
 ): SecretaryPlan | null {
   if (kinds.length === 0) return null
   return {
@@ -74,7 +89,7 @@ function fallbackPlan(
     assumptions: [],
     assignments: kinds.map((kind, index) => ({
       id: `assignment-${index + 1}`,
-      panelId: opened.get(kind) ?? null,
+      panelId: null,
       kind,
       title: `${AI_ACCOUNT_LABELS[kind]} task`,
       instruction,
@@ -100,8 +115,10 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
+  const [threadId, setThreadId] = useState<string | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
   const runRef = useRef(0)
+  const approvingPlanIdsRef = useRef(new Set<string>())
 
   const cliPanels = useMemo(() => panels.filter((panel) => CLI_TYPES.has(panel.type as typeof AI_ACCOUNT_KINDS[number])).map((panel) => ({
     id: panel.id,
@@ -122,7 +139,68 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     setDocked(false)
     setBrief('')
     setFeedback(null)
+    setThreadId(null)
+    approvingPlanIdsRef.current.clear()
   }, [project.id])
+
+  useEffect(() => {
+    const run = runRef.current
+    const restoreMostRecentThread = async (): Promise<void> => {
+      try {
+        const threads = await window.api.secretary.listThreads(project.id)
+        const thread = threads[0]
+        if (!thread) return
+        const detail = await window.api.secretary.getThread(thread.id)
+        if (!detail || run !== runRef.current) return
+        setThreadId(detail.thread.id)
+        setMessages(chatItemsFromThread(detail))
+      } catch {
+        // Secretary remains usable without local conversation history.
+      }
+    }
+    void restoreMostRecentThread()
+  }, [project.id])
+
+  useEffect(() => window.api.secretary.onEvent((event) => {
+    if (event.projectId !== project.id) return
+    if (event.type === 'run-report') {
+      setMessages((current) => [
+        ...current.map((item) => item.runId === event.runId ? { ...item, planStatus: 'sent' as const } : item),
+        { id: newId(), role: 'assistant', content: event.reply }
+      ])
+      setFeedback(null)
+      return
+    }
+    if (event.type === 'run-followup') {
+      setMessages((current) => [
+        ...current.map((item) => item.runId === event.completedRunId ? { ...item, planStatus: 'sent' as const } : item),
+        {
+          id: newId(),
+          role: 'assistant',
+          content: event.reply,
+          plan: event.plan,
+          runId: event.runId,
+          planOpenKinds: event.openKinds,
+          planStatus: 'awaiting-approval' as const
+        }
+      ])
+      setFeedback(null)
+      return
+    }
+    if (event.type === 'run-needs-user') {
+      setMessages((current) => [
+        ...current,
+        { id: newId(), role: 'assistant', content: event.message }
+      ])
+      setFeedback('Secretary is waiting for your answer in the CLI terminal.')
+      return
+    }
+    setMessages((current) => [
+      ...current.map((item) => item.runId === event.runId ? { ...item, planStatus: 'failed' as const } : item),
+      { id: newId(), role: 'assistant', content: event.message, error: true }
+    ])
+    setFeedback(null)
+  }), [project.id])
 
   useEffect(() => {
     const node = logRef.current
@@ -134,6 +212,9 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     plan: SecretaryPlan | null
     opened: Map<CliUsageKind, string>
   } => {
+    if (useWorkspaceStore.getState().activeProjectId !== project.id) {
+      throw new Error('The active project changed. Reopen this Secretary conversation before approving the plan.')
+    }
     const kinds = [...openKinds]
     if (plan) {
       for (const assignment of plan.assignments) {
@@ -172,110 +253,130 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     selectLeftSidebar(project.id, 'profile')
   }
 
-  const dispatch = async (plan: SecretaryPlan, run: number): Promise<number> => {
+  const dispatch = async (plan: SecretaryPlan, run: number, persistedRunId?: string): Promise<number> => {
     setSending(true)
     try {
-      let sent = 0
+      const bindings: Array<{ assignmentId: string; sessionId: string }> = []
       for (const assignment of plan.assignments) {
-        if (run !== runRef.current) return sent
+        if (run !== runRef.current) return 0
         if (!assignment.panelId) continue
         const ready = await waitForCliIdle(assignment.panelId)
         if (!ready) {
           throw new Error(`${AI_ACCOUNT_LABELS[assignment.kind]} is still starting. Wait for the prompt, then retry Send.`)
         }
-        await window.api.pty.write({ sessionId: assignment.panelId, data: `${assignment.instruction}\r` })
-        sent += 1
+        bindings.push({ assignmentId: assignment.id, sessionId: assignment.panelId })
+      }
+      if (bindings.length !== plan.assignments.length) {
+        throw new Error('Every approved task needs a ready CLI session before it can start.')
+      }
+      let sent: number
+      if (persistedRunId) {
+        const result = await window.api.secretary.dispatchRun({
+          runId: persistedRunId,
+          projectId: project.id,
+          assignments: bindings
+        })
+        sent = result.dispatchedAssignmentIds.length
+      } else {
+        for (const assignment of plan.assignments) {
+          if (!assignment.panelId) continue
+          await submitCliPrompt(assignment.panelId, assignment.instruction)
+        }
+        sent = bindings.length
       }
       setFeedback(sent > 0 ? `Sent ${sent} prompt${sent === 1 ? '' : 's'} to CLI` : 'No CLI panel was ready')
       window.setTimeout(() => setFeedback(null), 3200)
       return sent
-    } catch (cause) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: newId(),
-          role: 'assistant',
-          content: cause instanceof Error ? cause.message : 'Could not send one or more assignments',
-          error: true
-        }
-      ])
-      return 0
     } finally {
       setSending(false)
     }
   }
 
-  const continueFromCli = async (plan: SecretaryPlan, run: number): Promise<void> => {
-    const targets = plan.assignments.filter((assignment) => assignment.panelId)
-    if (targets.length === 0) return
-    setFeedback('Waiting for CLI analysis…')
-    const finished = await Promise.all(targets.map((assignment) => waitForCliIdleAfterWork(assignment.panelId!)))
-    if (run !== runRef.current) return
-    if (!finished.some(Boolean)) {
-      setFeedback(null)
-      return
-    }
-    const tails = targets
-      .map((assignment) => {
-        const raw = stripAnsi(useTerminalStore.getState().getOutputTail(assignment.panelId!)).slice(-3500)
-        return `## ${AI_ACCOUNT_LABELS[assignment.kind]}\n${raw}`
-      })
-      .join('\n\n')
-    const livePanels = useWorkspaceStore.getState().getActiveWorkspace()?.panels ?? panels
-    const nextPanels = livePanels
-      .filter((panel) => CLI_TYPES.has(panel.type as typeof AI_ACCOUNT_KINDS[number]))
-      .map((panel) => ({
-        id: panel.id,
-        kind: panel.type as typeof AI_ACCOUNT_KINDS[number],
-        accountId: panel.accountId,
-        title: panel.title,
-        status: useTerminalStore.getState().getStatus(panel.id) ?? 'stopped'
-      }))
-    const history = [
-      ...messages
-        .filter((item) => !item.error && item.content.trim())
-        .map((item) => ({ role: item.role, content: item.content })),
-      {
-        role: 'user' as const,
-        content: `The CLI finished. Terminal tail:\n${tails}\n\nIf it listed gaps, return a plan with up to 3 concrete implementation prompts. If the work is done, plan null and summarize.`
-      }
-    ]
+  const rejectPlan = async (messageId: string, persistedRunId?: string): Promise<void> => {
+    if (sending) return
     try {
-      const response = await window.api.secretary.chat({
-        project,
-        message: history.at(-1)!.content,
-        history: history.slice(0, -1),
-        panels: nextPanels,
-        usage: useUsageStore.getState().providers
-      })
-      if (run !== runRef.current) return
-      const bound = applyWorkspaceActions(response.openKinds ?? [], response.plan)
-      const nextPlan = bound.plan
+      if (persistedRunId) await window.api.secretary.rejectPlan(persistedRunId)
+    } catch (cause) {
       setMessages((current) => [
         ...current,
         {
           id: newId(),
           role: 'assistant',
-          content: response.reply,
-          ...(nextPlan ? { plan: nextPlan } : {})
+          content: cause instanceof Error ? cause.message : 'Could not reject the plan',
+          error: true
         }
       ])
-      if (nextPlan?.assignments.some((assignment) => assignment.panelId)) {
-        await dispatch(nextPlan, run)
-      }
+      return
+    }
+    setMessages((current) => current.map((item) => (
+      item.id === messageId && item.planStatus === 'awaiting-approval'
+        ? { ...item, planStatus: 'rejected' as const }
+        : item
+    )))
+    setFeedback('Plan rejected. No CLI was opened and no prompt was sent.')
+    window.setTimeout(() => setFeedback(null), 3200)
+  }
+
+  const approvePlan = async (
+    messageId: string,
+    proposedPlan: SecretaryPlan,
+    openKinds: CliUsageKind[],
+    persistedRunId?: string
+  ): Promise<void> => {
+    if (sending || approvingPlanIdsRef.current.has(messageId)) return
+    approvingPlanIdsRef.current.add(messageId)
+    const run = runRef.current
+    setMessages((current) => current.map((item) => (
+      item.id === messageId && item.planStatus === 'awaiting-approval'
+        ? { ...item, planStatus: 'dispatching' as const }
+        : item
+    )))
+
+    try {
+      if (persistedRunId) await window.api.secretary.approvePlan(persistedRunId)
+      const bound = applyWorkspaceActions(openKinds, proposedPlan)
+      if (run !== runRef.current || !bound.plan) return
+      setMessages((current) => current.map((item) => (
+        item.id === messageId
+          ? { ...item, plan: bound.plan, planStatus: 'dispatching' as const }
+          : item
+      )))
+      const sent = await dispatch(bound.plan, run, persistedRunId)
+      if (run !== runRef.current) return
+      setMessages((current) => current.map((item) => (
+        item.id === messageId
+          ? { ...item, planStatus: sent > 0 ? 'sent' as const : 'failed' as const }
+          : item
+      )))
+      if (sent > 0) setFeedback('CLI work is running. Secretary will post the final report when it finishes.')
     } catch (cause) {
       if (run !== runRef.current) return
+      if (persistedRunId) {
+        try {
+          const persisted = await window.api.secretary.getRun(persistedRunId)
+          if (persisted?.status === 'approved') {
+            await window.api.secretary.failApprovedRun(
+              persistedRunId,
+              cause instanceof Error ? cause.message : 'The approved plan could not be prepared for dispatch.'
+            )
+          }
+        } catch {
+          // Preserve the original dispatch error in the UI even if persistence is unavailable.
+        }
+      }
       setMessages((current) => [
-        ...current,
+        ...current.map((item) => (
+          item.id === messageId ? { ...item, planStatus: 'failed' as const } : item
+        )),
         {
           id: newId(),
           role: 'assistant',
-          content: cause instanceof Error ? cause.message : 'Could not continue from the CLI report',
+          content: cause instanceof Error ? cause.message : 'Could not start the approved plan',
           error: true
         }
       ])
     } finally {
-      if (run === runRef.current) setFeedback(null)
+      approvingPlanIdsRef.current.delete(messageId)
     }
   }
 
@@ -298,26 +399,30 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
         project,
         message: text,
         history,
+        ...(threadId ? { threadId } : {}),
         panels: cliPanels,
         usage
       })
       if (run !== runRef.current) return
-      const bound = applyWorkspaceActions(response.openKinds ?? [], response.plan)
-      const plan = bound.plan ?? fallbackPlan(text, response.openKinds ?? [], bound.opened)
+      if (response.threadId) setThreadId(response.threadId)
+      const plan = response.plan ?? fallbackPlan(text, response.openKinds ?? [])
       setMessages((current) => [
         ...current,
         {
           id: newId(),
           role: 'assistant',
           content: response.reply,
-          ...(plan ? { plan } : {})
+          ...(plan
+            ? {
+                plan,
+                ...(response.runId ? { runId: response.runId } : {}),
+                planOpenKinds: response.openKinds ?? [],
+                planStatus: 'awaiting-approval' as const
+              }
+            : {})
         }
       ])
       void loadSettings()
-      if (plan?.assignments.some((assignment) => assignment.panelId)) {
-        const sent = await dispatch(plan, run)
-        if (sent > 0 && run === runRef.current) void continueFromCli(plan, run)
-      }
     } catch (cause) {
       if (run !== runRef.current) return
       setMessages((current) => [
@@ -429,15 +534,34 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
                       ))}
                     </div>
                     <div className="secretary-plan-actions">
-                      <span><ShieldCheck className="h-3.5 w-3.5" /> Trust is skipped; prompt is typed when the CLI is idle</span>
-                      <button
-                        type="button"
-                        onClick={() => void dispatch(item.plan!, runRef.current)}
-                        disabled={sending || item.plan.assignments.every((assignment) => !assignment.panelId)}
-                      >
-                        {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowUp className="h-3.5 w-3.5" />}
-                        Send again
-                      </button>
+                      {item.planStatus === 'awaiting-approval' ? (
+                        <>
+                          <span><ShieldCheck className="h-3.5 w-3.5" /> Review this plan before any CLI or prompt is started</span>
+                          <button
+                            type="button"
+                            onClick={() => void approvePlan(item.id, item.plan!, item.planOpenKinds ?? [], item.runId)}
+                            disabled={sending}
+                          >
+                            {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowUp className="h-3.5 w-3.5" />}
+                            Approve &amp; run
+                          </button>
+                          <button type="button" onClick={() => void rejectPlan(item.id, item.runId)} disabled={sending}>
+                            Reject
+                          </button>
+                        </>
+                      ) : null}
+                      {item.planStatus === 'dispatching' ? (
+                        <span><Loader2 className="h-3.5 w-3.5 animate-spin" /> Preparing approved CLI work…</span>
+                      ) : null}
+                      {item.planStatus === 'sent' ? (
+                        <span><Check className="h-3.5 w-3.5" /> Approved; prompts were sent to the CLI</span>
+                      ) : null}
+                      {item.planStatus === 'rejected' ? (
+                        <span>Plan rejected; no CLI was started.</span>
+                      ) : null}
+                      {item.planStatus === 'failed' ? (
+                        <span>Plan did not start. Create a fresh plan after resolving the issue.</span>
+                      ) : null}
                     </div>
                   </div>
                 ) : null}
