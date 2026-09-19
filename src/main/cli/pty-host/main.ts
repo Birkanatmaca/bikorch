@@ -11,6 +11,7 @@ import {
   type PtyHostSpawnRequest
 } from './protocol'
 import { appendOutputBuffer, hostHasRunningSessions } from './session-store'
+import { resolveSafeCwd, resolveWindowsSpawnPath } from '../path-validator'
 
 interface HostSession {
   id: string
@@ -195,15 +196,34 @@ class PtyHostRuntime {
 
     if (existing) this.kill(payload.sessionId, true)
 
+    const backends =
+      process.platform === 'win32' ? [{ useConpty: true }, { useConpty: false }] : [{}]
+    let shellProcess: IPty | null = null
+    let lastError: unknown = null
+    for (const backend of backends) {
+      try {
+        shellProcess = pty.spawn(
+          resolveWindowsSpawnPath(payload.command),
+          payload.args.map((arg) =>
+            arg.includes('\\') || arg.includes('/') ? resolveWindowsSpawnPath(arg) : arg
+          ),
+          {
+            name: 'xterm-256color',
+            cols: payload.cols,
+            rows: payload.rows,
+            cwd: resolveSafeCwd(payload.cwd),
+            env: payload.env,
+            ...backend
+          }
+        )
+        break
+      } catch (error) {
+        lastError = error
+      }
+    }
+
     try {
-      const shellProcess = pty.spawn(payload.command, payload.args, {
-        name: 'xterm-256color',
-        cols: payload.cols,
-        rows: payload.rows,
-        cwd: payload.cwd,
-        env: payload.env,
-        ...(process.platform === 'win32' ? { useConpty: false } : {})
-      })
+      if (!shellProcess) throw lastError ?? new Error('Unable to start terminal process')
 
       const session: HostSession = {
         id: payload.sessionId,

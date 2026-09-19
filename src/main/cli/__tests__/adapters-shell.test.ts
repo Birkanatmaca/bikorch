@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { cliLaunchArgs, enrichedPath, getDefaultShell, resolveSpawnConfigCandidates } from '../adapters'
+import { cliLaunchArgs, detectCli, enrichedPath, getDefaultShell, resolveSpawnConfigCandidates } from '../adapters'
 import { existsSync } from 'fs'
+import { join } from 'path'
 
 describe('getDefaultShell', () => {
   const originalPlatform = process.platform
@@ -32,10 +33,33 @@ describe('getDefaultShell', () => {
 
 describe('cliLaunchArgs', () => {
   it('trusts Cursor workspaces in interactive agent sessions', () => {
-    expect(cliLaunchArgs('cursor')).toEqual(['--trust', '--model', 'cursor-grok-4.6-high'])
+    expect(cliLaunchArgs('cursor')).toEqual(['--trust'])
+    expect(cliLaunchArgs('cursor', 'normal', 'cursor-grok-4.6-high'))
+      .toEqual(['--trust', '--model', 'cursor-grok-4.6-high'])
     expect(cliLaunchArgs('cursor', 'login')).toEqual(['login'])
     expect(cliLaunchArgs('gemini')).toEqual(['--skip-trust'])
     expect(cliLaunchArgs('claude')).toEqual([])
+  })
+})
+
+describe('detectCli', () => {
+  it('launches the Cursor node runtime instead of cmd.exe /c agent.cmd', () => {
+    if (process.platform !== 'win32') return
+    const local = process.env.LOCALAPPDATA
+    const installedOnDisk = Boolean(
+      local && (
+        existsSync(join(local, 'cursor-agent', 'agent.cmd')) ||
+        existsSync(join(local, 'cursor-agent', 'cursor-agent.cmd'))
+      )
+    )
+    if (!installedOnDisk) return
+    const detected = detectCli('cursor')
+    const [first] = resolveSpawnConfigCandidates('cursor')
+    expect(detected.installed).toBe(true)
+    expect(first?.command.toLowerCase().endsWith('node.exe')).toBe(true)
+    expect(first?.args[0]?.toLowerCase().endsWith('index.js')).toBe(true)
+    expect(detected.command).not.toMatch(/cmd\.exe/i)
+    expect(detected.command).not.toContain('cursor-grok-4.6-high')
   })
 })
 

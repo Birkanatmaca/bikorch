@@ -8,8 +8,8 @@ import {
   type PtySessionStatus,
   PTY_IPC
 } from '@shared/contracts/pty'
-import { resolveSpawnConfigCandidates, getKindLabel, spawnEnv, cliLaunchArgs } from './adapters'
-import { isValidSessionId, resolveSafeCwd } from './path-validator'
+import { resolveSpawnConfigCandidates, getKindLabel, spawnEnv, cliLaunchArgs, windowsPtySpawnOptions } from './adapters'
+import { isValidSessionId, resolveSafeCwd, resolveWindowsSpawnPath } from './path-validator'
 import {
   getAuthProfileEnv,
   prepareAuthProfileLaunch
@@ -27,6 +27,7 @@ interface PtySession {
   projectId: string
   kind: PtyCreateRequest['kind']
   accountId?: string
+  cliModel?: string
   /** Canonical working directory actually given to the spawned process. */
   cwd: string
   /** Equal to cwd when this session starts in an isolated/integration worktree. */
@@ -112,14 +113,7 @@ class PtyManager {
 
   async create(request: PtyCreateRequest, webContents: WebContents): Promise<PtyCreateResponse> {
     this.bindHostEvents()
-    if (request.kind === 'cursor') {
-      if (!request.accountId) {
-        return {
-          sessionId: request.sessionId,
-          status: 'error',
-          error: 'Accounts bölümünden bir Cursor hesabı seçin.'
-        }
-      }
+    if (request.kind === 'cursor' && request.accountId) {
       return withCursorAccountLock(request.accountId, () => this.createSession(request, webContents))
     }
     return this.createSession(request, webContents)
@@ -181,7 +175,11 @@ class PtyManager {
     const worktreePath = request.worktreePath?.trim() ? cwd : undefined
     const existing = this.sessions.get(sessionId)
 
-    if (existing?.kind === kind && existing.accountId === request.accountId) {
+    if (
+      existing?.kind === kind &&
+      existing.accountId === request.accountId &&
+      existing.cliModel === request.cliModel
+    ) {
       if (
         existing.projectId !== request.projectId ||
         existing.cwd !== cwd ||
@@ -322,24 +320,28 @@ class PtyManager {
       }
       profileEnv = getAuthProfileEnv(kind, request.accountId)
     }
-    const launchArgs = cliLaunchArgs(kind, request.launchMode ?? 'normal')
+    const launchArgs = cliLaunchArgs(kind, request.launchMode ?? 'normal', request.cliModel)
+    const spawnCwd = resolveWindowsSpawnPath(cwd)
 
     const useHost = await ptyHostClient.ensureConnected()
 
     for (const spawnConfig of candidates) {
-      try {
-        const command = spawnConfig.command
-        const args = [...spawnConfig.args, ...launchArgs]
-        const env = { ...spawnEnv(), ...profileEnv, ...(spawnConfig.env ?? {}) }
+      const command = resolveWindowsSpawnPath(spawnConfig.command)
+      const args = [
+        ...spawnConfig.args.map((arg) => (arg.includes('\\') || arg.includes('/') ? resolveWindowsSpawnPath(arg) : arg)),
+        ...launchArgs
+      ]
+      const env = { ...spawnEnv(), ...profileEnv, ...(spawnConfig.env ?? {}) }
 
-        if (useHost) {
+      if (useHost) {
+        try {
           const hosted = await ptyHostClient.spawn({
             sessionId,
             kind,
             ...(request.accountId ? { accountId: request.accountId } : {}),
             command,
             args,
-            cwd,
+            cwd: spawnCwd,
             cols: safeCols,
             rows: safeRows,
             env
@@ -354,6 +356,7 @@ class PtyManager {
             projectId: request.projectId,
             kind,
             ...(request.accountId ? { accountId: request.accountId } : {}),
+            ...(request.cliModel ? { cliModel: request.cliModel } : {}),
             cwd,
             ...(worktreePath ? { worktreePath } : {}),
             process: null,
@@ -383,22 +386,38 @@ class PtyManager {
             status: session.status,
             reattached: hosted.reattached
           }
+        } catch (error) {
+          lastError =
+            error instanceof Error ? error.message : `Failed to start ${getKindLabel(kind)}`
+          continue
         }
+      }
 
-        const shellProcess = pty.spawn(command, args, {
-          name: 'xterm-256color',
-          cols: safeCols,
-          rows: safeRows,
-          cwd,
-          env,
-          ...(process.platform === 'win32' ? { useConpty: false } : {})
-        })
+      let shellProcess: IPty | null = null
+      for (const backend of windowsPtySpawnOptions()) {
+        try {
+          shellProcess = pty.spawn(command, args, {
+            name: 'xterm-256color',
+            cols: safeCols,
+            rows: safeRows,
+            cwd: spawnCwd,
+            env,
+            ...backend
+          })
+          break
+        } catch (error) {
+          lastError =
+            error instanceof Error ? error.message : `Failed to start ${getKindLabel(kind)}`
+        }
+      }
+      if (!shellProcess) continue
 
         const session: PtySession = {
           id: sessionId,
           projectId: request.projectId,
           kind,
           ...(request.accountId ? { accountId: request.accountId } : {}),
+          ...(request.cliModel ? { cliModel: request.cliModel } : {}),
           cwd,
           ...(worktreePath ? { worktreePath } : {}),
           process: shellProcess,
@@ -436,10 +455,6 @@ class PtyManager {
         })
 
         return { sessionId, status: 'running' }
-      } catch (error) {
-        lastError =
-          error instanceof Error ? error.message : `Failed to start ${getKindLabel(kind)}`
-      }
     }
 
     const message =
@@ -451,7 +466,7 @@ class PtyManager {
       sessionId,
       status: 'error',
       error: message,
-      ...(kind !== 'terminal' ? { code: 'CLI_MISSING' as const, kind } : {})
+      ...(kind !== 'terminal' && candidates.length === 0 ? { code: 'CLI_MISSING' as const, kind } : {})
     })
     recordLog('error', message, 'pty')
     if (useHost) this.scheduleHostRelease()
@@ -460,7 +475,7 @@ class PtyManager {
       sessionId,
       status: 'error',
       error: message,
-      ...(kind !== 'terminal' ? { code: 'CLI_MISSING' as const, kind } : {})
+      ...(kind !== 'terminal' && candidates.length === 0 ? { code: 'CLI_MISSING' as const, kind } : {})
     }
   }
 

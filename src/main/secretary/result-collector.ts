@@ -302,6 +302,8 @@ function handlePtyEvent(event: PtyEvent): void {
       resumeRunIfPaused(runId)
     }
     if (activity === 'waiting' && target.sawBusy) {
+      const run = getSecretaryStore()?.getRun(runId)
+      if (run?.status === 'needs-user') return
       resumeRunIfPaused(runId)
       completeTarget(runId, event.sessionId, 'completed')
     }

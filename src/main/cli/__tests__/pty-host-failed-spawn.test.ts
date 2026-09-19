@@ -15,9 +15,14 @@ vi.mock('../adapters', () => ({
   resolveSpawnConfigCandidates: () => [{ command: 'agent', args: [] }],
   getKindLabel: () => 'Claude',
   spawnEnv: () => ({}),
+  windowsPtySpawnOptions: () => [{}],
   cliLaunchArgs: () => []
 }))
-vi.mock('../path-validator', () => ({ isValidSessionId: () => true, resolveSafeCwd: () => '.' }))
+vi.mock('../path-validator', () => ({
+  isValidSessionId: () => true,
+  resolveSafeCwd: () => '.',
+  resolveWindowsSpawnPath: (value: string) => value
+}))
 vi.mock('../../accounts/profile-manager', () => ({
   prepareAuthProfileLaunch: async () => ({ ok: true, ready: true }),
   getAuthProfileEnv: () => ({})

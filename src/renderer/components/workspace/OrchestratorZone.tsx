@@ -261,6 +261,7 @@ function OrchestratorWindow({
               onClose={onClose}
               launchMode={panel.launchMode}
               accountId={panel.accountId}
+              cliModel={panel.cliModel}
               draggable={false}
               flush
               showHeader={false}
@@ -288,6 +289,7 @@ function OrchestratorWindow({
             onClose={onClose}
             launchMode={panel.launchMode}
             accountId={panel.accountId}
+            cliModel={panel.cliModel}
             draggable={false}
             flush
             showHeader={!isMobilePreviewPanel(panel.type)}

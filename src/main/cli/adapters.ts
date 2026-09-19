@@ -3,8 +3,6 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { type PtyKind } from '@shared/contracts/pty'
 
-const DEFAULT_CURSOR_MODEL = 'cursor-grok-4.6-high'
-
 export interface SpawnConfig {
   command: string
   args: string[]
@@ -96,8 +94,8 @@ export function spawnEnv(): Record<string, string> {
 }
 
 function findOnDisk(names: string[]): string | null {
-  const pathDirs = (process.env.PATH ?? '').split(process.platform === 'win32' ? ';' : ':')
-  const dirs = [...extraCliDirs(), ...pathDirs]
+  const delimiter = process.platform === 'win32' ? ';' : ':'
+  const dirs = enrichedPath().split(delimiter)
 
   for (const dir of dirs) {
     if (!dir) continue
@@ -135,10 +133,16 @@ export function getDefaultShell(): SpawnConfig {
   }
 }
 
+function quoteWinCmdArg(value: string): string {
+  if (!/[\s"]|[^\x00-\x7F]/.test(value)) return value
+  return `"${value.replace(/"/g, '\\"')}"`
+}
+
 function windowsCmdSpawn(scriptPath: string, extraArgs: string[] = []): SpawnConfig {
+  const commandLine = [quoteWinCmdArg(scriptPath), ...extraArgs.map(quoteWinCmdArg)].join(' ')
   return {
     command: process.env.COMSPEC ?? 'cmd.exe',
-    args: ['/d', '/c', scriptPath, ...extraArgs]
+    args: ['/d', '/s', '/c', commandLine]
   }
 }
 
@@ -151,31 +155,60 @@ function windowsPowerShellSpawn(scriptPath: string, extraArgs: string[] = []): S
   }
 }
 
+const CURSOR_VERSION_DIR_RE = /^\d{4}\.\d{1,2}\.\d{1,2}(?:-\d{2}-\d{2}-\d{2})?-[a-f0-9]+$/i
+
+function cursorVersionSortKey(name: string): number {
+  const [year = '0', month = '0', day = '0'] = name.split('-')[0]?.split('.') ?? []
+  return Number(`${year}${month.padStart(2, '0')}${day.padStart(2, '0')}`) || 0
+}
+
+function latestCursorAgentRuntime(): SpawnConfig | null {
+  const versionsRoot = join(localAppData(), 'cursor-agent', 'versions')
+  if (!existsSync(versionsRoot)) return null
+  const latest = readdirSync(versionsRoot)
+    .filter((name) => {
+      if (!CURSOR_VERSION_DIR_RE.test(name)) return false
+      const dir = join(versionsRoot, name)
+      return existsSync(join(dir, 'node.exe')) && existsSync(join(dir, 'index.js'))
+    })
+    .sort((left, right) => cursorVersionSortKey(right) - cursorVersionSortKey(left))[0]
+  if (!latest) return null
+  const dir = join(versionsRoot, latest)
+  return {
+    command: join(dir, 'node.exe'),
+    args: [join(dir, 'index.js')],
+    env: { CURSOR_INVOKED_AS: 'agent' }
+  }
+}
+
+function resolveCursorSpawnCandidates(): SpawnConfig[] {
+  if (process.platform !== 'win32') {
+    const unixAgent = findOnDisk(['cursor-agent', 'agent', 'cursor'])
+    if (!unixAgent) return []
+    if (unixAgent.endsWith('cursor') && !unixAgent.includes('cursor-agent')) {
+      return [{ command: unixAgent, args: ['agent'] }]
+    }
+    return [{ command: unixAgent, args: [] }]
+  }
+
+  const candidates: SpawnConfig[] = []
+  const runtime = latestCursorAgentRuntime()
+  if (runtime) candidates.push(runtime)
+
+  const powershellAgent = findOnDisk(['cursor-agent.ps1', 'agent.ps1'])
+  if (powershellAgent) candidates.push(windowsPowerShellSpawn(powershellAgent))
+
+  const agentCmd = findOnDisk(['agent.cmd', 'cursor-agent.cmd', 'agent.exe', 'cursor-agent.exe'])
+  if (agentCmd) candidates.push(windowsCmdSpawn(agentCmd))
+
+  const cursor = findOnDisk(['cursor.cmd', 'cursor.exe'])
+  if (cursor) candidates.push(windowsCmdSpawn(cursor, ['agent']))
+
+  return candidates
+}
+
 function resolveCursorSpawn(): SpawnConfig | null {
-  if (process.platform === 'win32') {
-    const agent = findOnDisk([
-      'agent.cmd',
-      'cursor-agent.cmd',
-      'agent.exe',
-      'cursor-agent.exe'
-    ])
-    if (agent) return windowsCmdSpawn(agent)
-
-    const powershellAgent = findOnDisk(['agent.ps1', 'cursor-agent.ps1'])
-    if (powershellAgent) return windowsPowerShellSpawn(powershellAgent)
-
-    const cursor = findOnDisk(['cursor.cmd', 'cursor.exe'])
-    if (cursor) return windowsCmdSpawn(cursor, ['agent'])
-
-    return null
-  }
-
-  const unixAgent = findOnDisk(['cursor-agent', 'agent', 'cursor'])
-  if (!unixAgent) return null
-  if (unixAgent.endsWith('cursor') && !unixAgent.includes('cursor-agent')) {
-    return { command: unixAgent, args: ['agent'] }
-  }
-  return { command: unixAgent, args: [] }
+  return resolveCursorSpawnCandidates()[0] ?? null
 }
 
 function resolveClaudeSpawn(): SpawnConfig | null {
@@ -252,8 +285,7 @@ export function resolveSpawnConfigCandidates(kind: PtyKind): SpawnConfig[] {
   }
 
   if (kind === 'cursor') {
-    const cursor = resolveCursorSpawn()
-    return cursor ? [cursor] : []
+    return resolveCursorSpawnCandidates()
   }
 
   if (kind === 'claude') {
@@ -283,9 +315,19 @@ export function resolveSpawnConfig(kind: PtyKind): SpawnConfig {
   return resolveSpawnConfigCandidates(kind)[0] ?? getDefaultShell()
 }
 
-export function cliLaunchArgs(kind: PtyKind, launchMode: 'normal' | 'login' = 'normal'): string[] {
+export function windowsPtySpawnOptions(): Array<{ useConpty?: boolean }> {
+  if (process.platform !== 'win32') return [{}]
+  // ConPTY handles Unicode user paths; winpty is the fallback after AttachConsole failures.
+  return [{ useConpty: true }, { useConpty: false }]
+}
+
+export function cliLaunchArgs(
+  kind: PtyKind,
+  launchMode: 'normal' | 'login' = 'normal',
+  cliModel?: string
+): string[] {
   if (launchMode === 'login' && (kind === 'codex' || kind === 'cursor')) return ['login']
-  if (kind === 'cursor') return ['--trust', '--model', DEFAULT_CURSOR_MODEL]
+  if (kind === 'cursor') return cliModel ? ['--trust', '--model', cliModel] : ['--trust']
   if (kind === 'gemini') return ['--skip-trust']
   return []
 }

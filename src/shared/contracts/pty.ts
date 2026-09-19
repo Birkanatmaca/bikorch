@@ -28,6 +28,8 @@ export interface PtyCreateRequest {
   rows?: number
   launchMode?: PtyLaunchMode
   accountId?: string
+  /** Optional model for this CLI session. Currently supported by Cursor. */
+  cliModel?: string
 }
 
 export type PtyErrorCode = 'CLI_MISSING' | 'ACCOUNT_REQUIRED'

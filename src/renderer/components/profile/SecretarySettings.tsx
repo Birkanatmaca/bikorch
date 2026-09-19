@@ -133,8 +133,16 @@ export function SecretarySettings(): React.JSX.Element {
           </label>
           <label>
             <span>Model</span>
-            <input value={model} onChange={(event) => setModel(event.target.value)} placeholder="gpt-5" spellCheck={false} />
+            <input
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
+              placeholder="gpt-5.6-luna"
+              spellCheck={false}
+            />
           </label>
+          <p className="secretary-cost-note">
+            This is only the Secretary planner model. Type the identifier you want, such as gpt-5 or gpt-5.6-luna. Cursor CLI uses its own account and model.
+          </p>
           <div className="secretary-security-note">
             <ShieldCheck className="h-3.5 w-3.5" />
             <span>The key is encrypted with your operating system’s secure storage and is never shown again.</span>

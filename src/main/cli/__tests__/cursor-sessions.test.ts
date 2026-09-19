@@ -5,9 +5,18 @@ const mocks = vi.hoisted(() => ({ spawn: vi.fn(() => ({ kill: vi.fn(), onData: v
 vi.mock('@homebridge/node-pty-prebuilt-multiarch', () => ({ spawn: mocks.spawn }))
 vi.mock('../adapters', () => ({ resolveSpawnConfigCandidates: () => [{ command: 'agent', args: [] }],
   getKindLabel: () => 'Cursor', spawnEnv: () => ({ CURSOR_API_KEY: 'inherited-key' }),
-  cliLaunchArgs: (kind: string, launchMode: string = 'normal') =>
-    launchMode === 'login' && (kind === 'cursor' || kind === 'codex') ? ['login'] : kind === 'cursor' ? ['--trust'] : [] }))
-vi.mock('../path-validator', () => ({ isValidSessionId: () => true, resolveSafeCwd: () => '.' }))
+  windowsPtySpawnOptions: () => [{}],
+  cliLaunchArgs: (kind: string, launchMode: string = 'normal', cliModel?: string) =>
+    launchMode === 'login' && (kind === 'cursor' || kind === 'codex')
+      ? ['login']
+      : kind === 'cursor'
+        ? cliModel ? ['--trust', '--model', cliModel] : ['--trust']
+        : [] }))
+vi.mock('../path-validator', () => ({
+  isValidSessionId: () => true,
+  resolveSafeCwd: () => '.',
+  resolveWindowsSpawnPath: (value: string) => value
+}))
 vi.mock('../../accounts/profile-manager', () => ({ prepareAuthProfileLaunch: async () => ({ ok: true, ready: true }),
   getAuthProfileEnv: (_kind: string, id: string) => ({ APPDATA: `profile-${id}`, CURSOR_API_KEY: '' }) }))
 vi.mock('../../accounts/antigravity-logout', () => ({ logoutAntigravityCli: vi.fn() }))
@@ -59,9 +68,30 @@ describe('Cursor terminal isolation', () => {
     expect(mocks.spawn).toHaveBeenLastCalledWith('agent', ['login'], expect.objectContaining({ env: { APPDATA: 'profile-a', CURSOR_API_KEY: '' } }))
   })
 
-  it('rejects an unscoped Cursor launch instead of falling back to a shared login', async () => {
+  it('allows an unscoped Cursor launch to use the inherited login', async () => {
     const result = await ptyManager.create({ sessionId: 'global', projectId: 'project-1234', kind: 'cursor', cwd: '.' }, contents)
-    expect(result.status).toBe('error')
-    expect(mocks.spawn).not.toHaveBeenCalled()
+    expect(result.status).toBe('running')
+    expect(mocks.spawn).toHaveBeenCalledWith(
+      'agent',
+      ['--trust'],
+      expect.objectContaining({ env: { CURSOR_API_KEY: 'inherited-key' } })
+    )
+  })
+
+  it('applies a model only to the Cursor panel that requested it', async () => {
+    await ptyManager.create({
+      sessionId: 'secretary-cursor',
+      projectId: 'project-1234',
+      kind: 'cursor',
+      accountId: 'a',
+      cliModel: 'cursor-grok-4.6-high',
+      cwd: '.'
+    }, contents)
+
+    expect(mocks.spawn).toHaveBeenCalledWith(
+      'agent',
+      ['--trust', '--model', 'cursor-grok-4.6-high'],
+      expect.objectContaining({ env: { APPDATA: 'profile-a', CURSOR_API_KEY: '' } })
+    )
   })
 })

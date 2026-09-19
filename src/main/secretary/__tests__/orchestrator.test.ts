@@ -148,6 +148,38 @@ describe('Secretary orchestrator', () => {
     expect(mocks.writeForSecretary).not.toHaveBeenCalled()
   })
 
+  it('accepts a session that is already in the project folder even if the panel has a worktree', () => {
+    const run = { ...approvedRun(), status: 'awaiting-approval' as const }
+    mocks.getSecretaryStore.mockReturnValue({ getRun: vi.fn().mockReturnValue(run) })
+    mocks.loadSnapshot.mockReturnValue({
+      projects: [{ id: run.projectId, name: 'Secretary project', folderPath: 'C:\\secretary-project' }],
+      workspaces: {
+        [run.projectId]: {
+          panels: [{
+            id: sessionId,
+            type: 'cursor',
+            title: 'Cursor',
+            zone: 'center',
+            worktreePath: 'C:\\secretary-project\\.bikorch\\cursor-1'
+          }]
+        }
+      }
+    })
+    mocks.getSessionSnapshot.mockReturnValue({
+      sessionId,
+      projectId: run.projectId,
+      kind: 'cursor',
+      cwd: 'C:\\secretary-project',
+      status: 'waiting'
+    })
+
+    expect(prepareSecretaryRun({
+      runId,
+      projectId: run.projectId,
+      assignments: [{ assignmentId, sessionId }]
+    }).preparedAssignmentIds).toEqual([assignmentId])
+  })
+
   it('does not dispatch a CLI session owned by another project', async () => {
     const run = approvedRun()
     mocks.getSecretaryStore.mockReturnValue({ getRun: vi.fn().mockReturnValue(run) })

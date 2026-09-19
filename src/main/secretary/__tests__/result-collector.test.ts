@@ -171,4 +171,42 @@ describe('Secretary result collector', () => {
     await vi.waitFor(() => expect(mocks.finalizeSecretaryRun).toHaveBeenCalledTimes(1))
     expect(mocks.finalizeSecretaryRun.mock.calls[0]?.[1]).toHaveLength(3)
   })
+
+  it('keeps a needs-user run open so the secretary can continue the conversation', async () => {
+    const stored = { ...run, status: 'running' as const }
+    mocks.getSecretaryStore.mockReturnValue({
+      getRun: vi.fn(() => stored),
+      updateRun: vi.fn((_id: string, patch: Partial<SecretaryRun>) => {
+        Object.assign(stored, patch)
+        return stored
+      }),
+      appendMessage: vi.fn()
+    })
+    trackSecretaryRun(run, [{
+      assignment: {
+        id: 'assignment-1',
+        panelId: null,
+        kind: 'cursor',
+        title: 'Greet',
+        instruction: 'merhaba',
+        rationale: 'Greeting',
+        usageNote: 'Available'
+      },
+      sessionId: 'session-1',
+      cwd: 'C:\\workspace',
+      gitStart: { headSha: 'aaaaaaaa', changedFiles: [], commits: [] }
+    }])
+
+    mocks.observer?.({
+      type: 'data',
+      sessionId: 'session-1',
+      data: '<BIKORCH_RESULT>{"status":"needs-user","summary":"Greeting acknowledged","changedFiles":[],"needsUser":"What should I work on next?"}</BIKORCH_RESULT>\n>'
+    })
+
+    await vi.waitFor(() => expect(mocks.emitSecretaryEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'run-needs-user',
+      message: 'What should I work on next?'
+    })))
+    expect(mocks.finalizeSecretaryRun).not.toHaveBeenCalled()
+  })
 })

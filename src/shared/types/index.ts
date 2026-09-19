@@ -26,6 +26,8 @@ export interface PanelDefinition {
   zone: PanelZone
   launchMode?: 'normal' | 'login'
   accountId?: string
+  /** Optional model selected for this CLI panel only. */
+  cliModel?: string
   /** Isolated git worktree for this agent on a local `bikorch/<kind>-<id>` branch. */
   worktreePath?: string
   /** Configured isolation. Isolated is the default. Shared uses the main project tree. */

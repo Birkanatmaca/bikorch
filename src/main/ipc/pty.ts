@@ -45,6 +45,8 @@ function validateCreateRequest(payload: unknown): payload is PtyCreateRequest {
     (req.launchMode === undefined || req.launchMode === 'normal' || req.launchMode === 'login') &&
     (req.accountId === undefined ||
       (typeof req.accountId === 'string' && req.accountId.length > 0 && req.accountId.length <= 200)) &&
+    (req.cliModel === undefined ||
+      (req.kind === 'cursor' && /^[a-zA-Z0-9._-]{2,100}$/.test(req.cliModel))) &&
     (
       req.kind === 'terminal' ||
       req.kind === 'claude' ||

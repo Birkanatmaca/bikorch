@@ -51,6 +51,7 @@ interface TerminalViewProps {
   kind: PtyKind
   launchMode?: PtyLaunchMode
   accountId?: string
+  cliModel?: string
 }
 
 const PTY_RESIZE_MS = 80
@@ -59,7 +60,8 @@ export function TerminalView({
   sessionId,
   kind,
   launchMode = 'normal',
-  accountId
+  accountId,
+  cliModel
 }: TerminalViewProps): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
@@ -447,16 +449,6 @@ export function TerminalView({
 
     const startSession = async (term: Terminal, nextLaunchMode: PtyLaunchMode = launchMode): Promise<void> => {
       if (!active) return
-      if (kind === 'cursor' && window.api.cli) {
-        const detected = await window.api.cli.detect('cursor')
-        if (!active) return
-        if (!detected.installed) {
-          setInstallPrompt('cursor')
-          setStatus(sessionId, 'error', 'Cursor CLI is not installed')
-          return
-        }
-      }
-
       if (nextLaunchMode === 'login' && kind === 'cursor') {
         term.writeln(
           '\x1b[90mSigning out the current Cursor CLI session so you can add a different account...\x1b[0m'
@@ -536,7 +528,8 @@ export function TerminalView({
         cols: term.cols,
         rows: term.rows,
         launchMode: nextLaunchMode,
-        accountId
+        accountId,
+        ...(cliModel ? { cliModel } : {})
       })
       if (!active) return
       // The newly-created (or reattached) PTY starts with this grid. Keep the
@@ -686,7 +679,7 @@ export function TerminalView({
       }
       if (!panelStillExists) removeSession(sessionId)
     }
-  }, [sessionId, kind, accountId, project?.folderPath, setStatus, removeSession, clearPanelLaunchMode, scheduleFit, settleFit, fitTerminal])
+  }, [sessionId, kind, accountId, cliModel, project?.folderPath, setStatus, removeSession, clearPanelLaunchMode, scheduleFit, settleFit, fitTerminal])
 
   // Refit when project tab becomes active again
   useEffect(() => {

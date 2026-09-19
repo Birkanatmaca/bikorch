@@ -190,6 +190,7 @@ interface WorkspaceStore extends WorkspaceSnapshot {
       panelRole?: 'agent' | 'resolver'
       cwdOverride?: string
       workspaceIsolation?: WorkspaceIsolation
+      cliModel?: string
     }
   ) => string
   openResolverPanel: (kind: PanelType, title: string, cwdOverride: string) => string
@@ -506,6 +507,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       zone: targetZone,
       ...(launchMode === 'login' ? { launchMode: 'login' as const } : {}),
       ...(panelAccountId ? { accountId: panelAccountId } : {}),
+      ...(options?.cliModel ? { cliModel: options.cliModel } : {}),
       ...(isolation ? { workspaceIsolation: isolation } : {}),
       ...(options?.panelRole ? { panelRole: options.panelRole } : {}),
       ...(options?.cwdOverride ? { cwdOverride: options.cwdOverride } : {}),

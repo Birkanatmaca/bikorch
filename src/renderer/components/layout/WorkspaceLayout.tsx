@@ -183,6 +183,7 @@ function ZonePanels({
         onDragEnd={onDragEnd}
         launchMode={panel.launchMode}
         accountId={panel.accountId}
+        cliModel={panel.cliModel}
         showHeader={!isDirectDevice(panel)}
         flush={isDirectDevice(panel)}
       />
@@ -202,6 +203,7 @@ function ZonePanels({
             onDragEnd={onDragEnd}
             launchMode={panel.launchMode}
             accountId={panel.accountId}
+            cliModel={panel.cliModel}
             showHeader={!isDirectDevice(panel)}
             flush={isDirectDevice(panel)}
           />
@@ -569,8 +571,8 @@ export function WorkspaceLayout(): React.JSX.Element {
           mainContent
         )}
         </div>
-        {project ? <DeveloperSecretary project={project} panels={panels} /> : null}
       </div>
+      {project ? <DeveloperSecretary project={project} panels={panels} /> : null}
     </div>
   )
 }

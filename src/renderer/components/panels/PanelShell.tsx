@@ -33,6 +33,7 @@ interface PanelShellProps {
   onDragEnd?: () => void
   launchMode?: PtyLaunchMode
   accountId?: string
+  cliModel?: string
   windowActive?: boolean
 }
 
@@ -292,6 +293,7 @@ export function PanelShell({
   onDragEnd,
   launchMode,
   accountId,
+  cliModel,
   windowActive = true
 }: PanelShellProps): React.JSX.Element {
   const status = usePanelStatus(id, type)
@@ -533,7 +535,13 @@ export function PanelShell({
         </header>
         )}
         <div className={cn('min-h-0 flex-1', isDevice ? 'overflow-visible' : 'overflow-hidden', !showHeader && !isDevice && 'rounded-md')}>
-          <PanelContent panelId={id} type={type} launchMode={launchMode} accountId={accountId} />
+          <PanelContent
+            panelId={id}
+            type={type}
+            launchMode={launchMode}
+            accountId={accountId}
+            cliModel={cliModel}
+          />
         </div>
       </div>
       {accountKind ? (

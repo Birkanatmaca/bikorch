@@ -132,6 +132,7 @@ function TiledWindow({
           onClose={onClose}
           launchMode={panel.launchMode}
           accountId={panel.accountId}
+          cliModel={panel.cliModel}
           draggable
           flush
           showHeader={!isMobilePreviewPanel(panel.type)}

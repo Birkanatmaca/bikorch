@@ -51,6 +51,7 @@ interface PanelContentProps {
   type: PanelType
   launchMode?: PtyLaunchMode
   accountId?: string
+  cliModel?: string
 }
 
 function panelTypeToPtyKind(type: PanelType): PtyKind | null {
@@ -95,7 +96,7 @@ function PlaceholderLines({ count = 4 }: { count?: number }): React.JSX.Element 
   )
 }
 
-export function PanelContent({ panelId, type, launchMode, accountId }: PanelContentProps): React.JSX.Element {
+export function PanelContent({ panelId, type, launchMode, accountId, cliModel }: PanelContentProps): React.JSX.Element {
   const ptyKind = panelTypeToPtyKind(type)
 
   if (ptyKind) {
@@ -106,6 +107,7 @@ export function PanelContent({ panelId, type, launchMode, accountId }: PanelCont
           kind={ptyKind}
           launchMode={launchMode}
           accountId={accountId}
+          cliModel={cliModel}
         />
       </Suspense>
     )

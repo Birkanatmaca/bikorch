@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Check, Loader2, Minus, Pencil, Save, ShieldCheck, SlidersHorizontal, X } from 'lucide-react'
+import { ArrowUp, Check, Loader2, PanelRightClose, Pencil, Save, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import type { PanelDefinition, Project } from '@shared/types'
 import type { SecretaryPlan, SecretaryRunStatus, SecretaryThreadDetail } from '@shared/contracts/secretary'
 import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
+import type { PtySessionStatus } from '@shared/contracts/pty'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import { pickCliAccountId } from '@shared/cli-account'
 import { AppLogo } from '@renderer/components/brand/AppLogo'
+import { focusTerminal, focusWorkspacePanel } from '@renderer/lib/app-events'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import { useSecretaryStore } from '@renderer/stores/secretary-store'
 import { useUsageStore } from '@renderer/stores/usage-store'
@@ -69,8 +71,44 @@ function chatItemsFromThread(detail: SecretaryThreadDetail): ChatItem[] {
   })
 }
 
+const SECRETARY_OPEN_KEY = 'bikorch.secretarySidebarOpen'
+const OPEN_SECRETARY_EVENT = 'bikorch:open-secretary'
+
 function newId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function readSecretaryOpen(): boolean {
+  try {
+    return window.localStorage.getItem(SECRETARY_OPEN_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
+function writeSecretaryOpen(open: boolean): void {
+  try {
+    window.localStorage.setItem(SECRETARY_OPEN_KEY, open ? '1' : '0')
+  } catch {
+    // Sidebar preference is local-only; chat still works if storage is blocked.
+  }
+}
+
+function operationTone(status: PtySessionStatus | undefined): string {
+  if (status === 'waiting') return 'is-ready'
+  if (status === 'busy' || status === 'running') return 'is-busy'
+  if (status === 'starting') return 'is-starting'
+  if (status === 'error') return 'is-error'
+  return 'is-idle'
+}
+
+function operationLabel(status: PtySessionStatus | undefined): string {
+  if (status === 'waiting') return 'Ready'
+  if (status === 'busy' || status === 'running') return 'Working'
+  if (status === 'starting') return 'Starting'
+  if (status === 'error') return 'Error'
+  if (status === 'stopped') return 'Stopped'
+  return 'Idle'
 }
 
 function sleep(ms: number): Promise<void> {
@@ -80,9 +118,15 @@ function sleep(ms: number): Promise<void> {
 async function waitForCliIdle(sessionId: string, timeoutMs = 60000): Promise<boolean> {
   const started = Date.now()
   while (Date.now() - started < timeoutMs) {
-    const status = useTerminalStore.getState().getStatus(sessionId)
-    if (status === 'error' || status === 'stopped') return false
-    const tail = stripAnsi(useTerminalStore.getState().getOutputTail(sessionId))
+    const terminal = useTerminalStore.getState()
+    const status = terminal.getStatus(sessionId)
+    if (status === 'error') {
+      throw new Error(terminal.errors[sessionId] ?? 'The CLI could not be started.')
+    }
+    if (status === 'stopped') {
+      throw new Error('The CLI process exited before the task could be sent.')
+    }
+    const tail = stripAnsi(terminal.getOutputTail(sessionId))
     if (looksWorkspaceTrustPrompt(tail)) {
       throw new Error('The CLI is waiting for workspace trust. Review and approve it in the terminal before sending this task.')
     }
@@ -90,27 +134,6 @@ async function waitForCliIdle(sessionId: string, timeoutMs = 60000): Promise<boo
     await sleep(250)
   }
   return inferCliActivity(stripAnsi(useTerminalStore.getState().getOutputTail(sessionId))) === 'waiting'
-}
-
-function fallbackPlan(
-  instruction: string,
-  kinds: CliUsageKind[]
-): SecretaryPlan | null {
-  if (kinds.length === 0) return null
-  return {
-    overview: 'Sending the request to the CLI.',
-    assumptions: [],
-    assignments: kinds.map((kind, index) => ({
-      id: `assignment-${index + 1}`,
-      panelId: null,
-      kind,
-      title: `${AI_ACCOUNT_LABELS[kind]} task`,
-      instruction,
-      rationale: 'You asked this CLI to do the work.',
-      usageNote: 'Using the account with remaining usage.'
-    })),
-    approvalRequired: true
-  }
 }
 
 export function DeveloperSecretary({ project, panels }: { project: Project; panels: PanelDefinition[] }): React.JSX.Element {
@@ -123,8 +146,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   const loadSettings = useSecretaryStore((state) => state.load)
   const [brief, setBrief] = useState('')
   const [messages, setMessages] = useState<ChatItem[]>([])
-  const [open, setOpen] = useState(false)
-  const [docked, setDocked] = useState(false)
+  const [open, setOpen] = useState(readSecretaryOpen)
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
@@ -149,11 +171,14 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     if (!settingsLoaded) void loadSettings()
   }, [loadSettings, settingsLoaded])
 
+  const setSidebarOpen = (next: boolean): void => {
+    setOpen(next)
+    writeSecretaryOpen(next)
+  }
+
   useEffect(() => {
     runRef.current += 1
     setMessages([])
-    setOpen(false)
-    setDocked(false)
     setBrief('')
     setFeedback(null)
     setThreadId(null)
@@ -163,6 +188,12 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     setCancellingRunId(null)
     approvingPlanIdsRef.current.clear()
   }, [project.id])
+
+  useEffect(() => {
+    const openSidebar = (): void => setSidebarOpen(true)
+    window.addEventListener(OPEN_SECRETARY_EVENT, openSidebar)
+    return () => window.removeEventListener(OPEN_SECRETARY_EVENT, openSidebar)
+  }, [])
 
   useEffect(() => {
     const run = runRef.current
@@ -185,6 +216,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   useEffect(() => window.api.secretary.onEvent((event) => {
     if (event.projectId !== project.id) return
     if (event.type === 'run-report') {
+      setSidebarOpen(true)
       setMessages((current) => [
         ...current.map((item) => item.runId === event.runId ? { ...item, planStatus: 'sent' as const } : item),
         {
@@ -202,6 +234,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       return
     }
     if (event.type === 'run-followup') {
+      setSidebarOpen(true)
       setMessages((current) => [
         ...current.map((item) => item.runId === event.completedRunId ? { ...item, planStatus: 'sent' as const } : item),
         {
@@ -218,6 +251,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       return
     }
     if (event.type === 'run-needs-user') {
+      setSidebarOpen(true)
       setMessages((current) => [
         ...current,
         { id: newId(), role: 'assistant', content: event.message }
@@ -240,59 +274,82 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
 
   const applyWorkspaceActions = (openKinds: CliUsageKind[], plan: SecretaryPlan | null): {
     plan: SecretaryPlan | null
-    opened: Map<CliUsageKind, string>
+    openedPanelIds: string[]
   } => {
     if (useWorkspaceStore.getState().activeProjectId !== project.id) {
       throw new Error('The active project changed. Reopen this Secretary conversation before approving the plan.')
     }
-    const kinds = [...openKinds]
-    const livePanels = useWorkspaceStore.getState().getActiveWorkspace()?.panels ?? panels
-    if (plan) {
-      for (const assignment of plan.assignments) {
-        const boundPanel = assignment.panelId
-          ? livePanels.find((panel) => panel.id === assignment.panelId)
-          : undefined
-        const usableBoundPanel = boundPanel &&
-          boundPanel.workspaceIsolation === 'isolated' &&
-          boundPanel.panelRole !== 'resolver'
-        if (!usableBoundPanel && !kinds.includes(assignment.kind)) kinds.push(assignment.kind)
-      }
-    }
-    const opened = new Map<CliUsageKind, string>()
     const accounts = useAiAccountsStore.getState().accounts
     const activeByKind = useAiAccountsStore.getState().activeAccountByKind
-    for (const kind of kinds) {
+    const usedPanelIds = new Set<string>()
+    const openedPanelIds: string[] = []
+
+    const bindPanel = (kind: CliUsageKind, preferredPanelId?: string | null): string => {
       const accountId = pickCliAccountId(kind, accounts, usage, activeByKind[kind])
-      const existing = livePanels.find((panel) =>
+      const livePanels = useWorkspaceStore.getState().getActiveWorkspace()?.panels ?? panels
+      const sessionStatus = (panelId: string) => useTerminalStore.getState().getStatus(panelId)
+      const usable = (panel: PanelDefinition): boolean =>
         panel.type === kind &&
-        (!accountId || panel.accountId === accountId) &&
-        // Secretary writes must never reuse a shared or resolver panel. A
-        // fresh default panel is isolated by workspace-store.addPanel and
-        // therefore gets the worktree handshake before dispatch.
-        (!plan || (panel.workspaceIsolation === 'isolated' && panel.panelRole !== 'resolver'))
+        panel.panelRole !== 'resolver' &&
+        !usedPanelIds.has(panel.id)
+      const healthy = (panel: PanelDefinition): boolean => {
+        const status = sessionStatus(panel.id)
+        return status === 'waiting' || status === 'running' || status === 'busy' || status === 'starting'
+      }
+      const rank = (panel: PanelDefinition): number => {
+        const status = sessionStatus(panel.id)
+        let score = 0
+        if (preferredPanelId && panel.id === preferredPanelId) score += 100
+        if (status === 'waiting') score += 40
+        if (status === 'busy' || status === 'running') score += 30
+        if (status === 'starting') score += 10
+        if (status === 'error' || status === 'stopped') score -= 50
+        if (accountId && panel.accountId === accountId) score += 8
+        if (panel.workspaceIsolation === 'shared') score += 4
+        return score
+      }
+      const candidates = livePanels.filter(usable)
+      const existing = (candidates.some(healthy) ? candidates.filter(healthy) : candidates)
+        .sort((left, right) => rank(right) - rank(left) || left.id.localeCompare(right.id))[0]
+      const panelId = existing?.id ?? addPanel(
+        kind,
+        'center',
+        undefined,
+        undefined,
+        accountId,
+        `Secretary · ${AI_ACCOUNT_LABELS[kind]}`,
+        {
+          panelRole: 'agent',
+          workspaceIsolation: 'shared'
+        }
       )
-      const panelId = existing?.id || addPanel(kind, 'center', undefined, undefined, accountId)
-      if (panelId) opened.set(kind, panelId)
+      if (panelId) {
+        usedPanelIds.add(panelId)
+        if (!existing) openedPanelIds.push(panelId)
+      }
+      return panelId
     }
-    if (!plan) return { plan: null, opened }
+
+    if (!plan) {
+      for (const kind of [...new Set(openKinds)]) bindPanel(kind)
+      return { plan: null, openedPanelIds }
+    }
+
+    const assignments = plan.assignments.map((assignment) => ({
+      ...assignment,
+      panelId: bindPanel(assignment.kind, assignment.panelId)
+    }))
+
+    const assignedKinds = new Set(assignments.map((assignment) => assignment.kind))
+    for (const kind of [...new Set(openKinds)]) {
+      if (!assignedKinds.has(kind)) bindPanel(kind)
+    }
+
     return {
-      opened,
+      openedPanelIds,
       plan: {
         ...plan,
-        assignments: plan.assignments.map((assignment) => {
-          const boundPanel = assignment.panelId
-            ? livePanels.find((panel) => panel.id === assignment.panelId)
-            : undefined
-          const usableBoundPanel = boundPanel &&
-            boundPanel.workspaceIsolation === 'isolated' &&
-            boundPanel.panelRole !== 'resolver'
-            ? boundPanel.id
-            : undefined
-          return {
-            ...assignment,
-            panelId: usableBoundPanel ?? opened.get(assignment.kind) ?? assignment.panelId
-          }
-        })
+        assignments
       }
     }
   }
@@ -551,8 +608,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       .map((item) => ({ role: item.role, content: item.content }))
     const userItem: ChatItem = { id: newId(), role: 'user', content: text }
     setBrief('')
-    setOpen(true)
-    setDocked(true)
+    setSidebarOpen(true)
     setLoading(true)
     setFeedback(null)
     setMessages((current) => [...current, userItem])
@@ -567,7 +623,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       })
       if (run !== runRef.current) return
       if (response.threadId) setThreadId(response.threadId)
-      const plan = response.plan ?? fallbackPlan(text, response.openKinds ?? [])
+      const plan = response.plan
       setMessages((current) => [
         ...current,
         {
@@ -601,26 +657,34 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     }
   }
 
+  const waitingForUser = messages.some((item) => item.planStatus === 'sent') || feedback?.includes('waiting for your answer')
+  const pendingApprovals = messages.filter((item) => item.planStatus === 'awaiting-approval').length
+  const liveOps = cliPanels.filter((panel) => panel.status === 'busy' || panel.status === 'running' || panel.status === 'starting').length
+  const railAttention = loading || waitingForUser || pendingApprovals > 0 || liveOps > 0
   const placeholder = !settings.configured
     ? 'Connect Developer Secretary in Profile to start…'
-    : `Chat with Secretary about ${project.name}…`
+    : waitingForUser
+      ? 'Tell Secretary what to do next…'
+      : `Ask Secretary about ${project.name}…`
+
+  const revealCli = (panelId: string): void => {
+    focusWorkspacePanel(panelId)
+    focusTerminal(panelId)
+  }
 
   const composer = !settings.configured ? (
     <button type="button" className="secretary-composer secretary-connect" onClick={openSettings}>
       <span className="secretary-mark"><AppLogo size="xs" /></span>
-      <span>Connect Developer Secretary in Profile to start…</span>
+      <span>Connect Secretary in Profile to start…</span>
       <span className="secretary-settings-shortcut"><SlidersHorizontal className="h-3.5 w-3.5" /> Profile</span>
     </button>
   ) : (
     <div className="secretary-composer">
-      <button type="button" className="secretary-mark" onClick={openSettings} title="Open Secretary settings" aria-label="Open Secretary settings">
-        <AppLogo size="xs" />
-      </button>
       <textarea
         value={brief}
         onChange={(event) => setBrief(event.target.value)}
         placeholder={placeholder}
-        rows={1}
+        rows={2}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault()
@@ -628,7 +692,6 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           }
         }}
       />
-      <span className="secretary-model-label">{settings.model}</span>
       <button
         type="button"
         className="secretary-send"
@@ -642,32 +705,78 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     </div>
   )
 
+  if (!open) {
+    return (
+      <section className="developer-secretary is-collapsed" aria-label="Developer Secretary">
+        <button
+          type="button"
+          className={cn('secretary-rail', railAttention && 'is-attention')}
+          onClick={() => setSidebarOpen(true)}
+          aria-expanded={false}
+          aria-label="Open Secretary sidebar"
+        >
+          <span className="secretary-rail-mark"><AppLogo size="xs" /></span>
+          {railAttention ? <i className="secretary-rail-pulse" aria-hidden /> : null}
+          <span className="secretary-rail-label">Secretary</span>
+        </button>
+      </section>
+    )
+  }
+
   return (
-    <section
-      className={cn('developer-secretary', docked && 'is-docked', open && 'is-open')}
-      aria-label="Developer Secretary"
-    >
-      {docked ? (
-        <div className="secretary-chat">
-          <header className="secretary-chat-header">
-            <span className="secretary-chat-title">
-              <AppLogo size="xs" />
-              Secretary
+    <section className="developer-secretary is-open" aria-label="Developer Secretary">
+      <aside className="secretary-sidebar">
+        <header className="secretary-chat-header">
+          <span className="secretary-chat-title">
+            <span className="secretary-mark is-static"><AppLogo size="xs" /></span>
+            <span>
+              <strong>Secretary</strong>
+              <small>{project.name}</small>
             </span>
-            <span className="secretary-chat-meta">{settings.model}</span>
-            <button type="button" className="secretary-dismiss" onClick={() => setOpen((value) => !value)} aria-label={open ? 'Collapse chat' : 'Expand chat'}>
-              <Minus className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              className="secretary-dismiss"
-              onClick={() => { runRef.current += 1; setOpen(false); setDocked(false); setMessages([]) }}
-              aria-label="Close chat"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </header>
-          <div className="secretary-chat-log" ref={logRef}>
+          </span>
+          <span className="secretary-chat-meta" title={settings.model}>{settings.model}</span>
+          <button type="button" className="secretary-dismiss" onClick={openSettings} aria-label="Open Secretary settings" title="Secretary settings">
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+          </button>
+          <button type="button" className="secretary-dismiss" onClick={() => setSidebarOpen(false)} aria-label="Collapse Secretary sidebar" title="Collapse">
+            <PanelRightClose className="h-3.5 w-3.5" />
+          </button>
+        </header>
+        <div className="secretary-ops">
+          <div className="secretary-ops-heading">
+            <span>Operations</span>
+            <strong>{cliPanels.length}</strong>
+          </div>
+          {cliPanels.length === 0 ? (
+            <p className="secretary-ops-empty">No CLI is open yet. Chat or approve a plan to start one here.</p>
+          ) : (
+            <div className="secretary-ops-list">
+              {cliPanels.map((panel) => (
+                <button
+                  key={panel.id}
+                  type="button"
+                  className={cn('secretary-op', operationTone(panel.status))}
+                  onClick={() => revealCli(panel.id)}
+                  title={`${panel.title} · ${operationLabel(panel.status)}`}
+                >
+                  <i aria-hidden />
+                  <span>{AI_ACCOUNT_LABELS[panel.kind]}</span>
+                  <small>{operationLabel(panel.status)}</small>
+                </button>
+              ))}
+            </div>
+          )}
+          {pendingApprovals > 0 ? (
+            <p className="secretary-ops-note">{pendingApprovals} plan{pendingApprovals === 1 ? '' : 's'} waiting for approval</p>
+          ) : null}
+        </div>
+        <div className="secretary-chat-log" ref={logRef}>
+          {messages.length === 0 && !loading ? (
+            <div className="secretary-empty">
+              <strong>Command center</strong>
+              <p>Tell Secretary what you want. It will talk, plan CLI work, and keep the live terminals here so you can manage every step.</p>
+            </div>
+          ) : null}
             {messages.map((item) => (
               <article
                 key={item.id}
@@ -839,10 +948,9 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
                 <Check className="h-3.5 w-3.5" /><span>{feedback}</span>
               </div>
             ) : null}
-          </div>
-          {composer}
         </div>
-      ) : composer}
+        {composer}
+      </aside>
     </section>
   )
 }

@@ -1,12 +1,12 @@
 import { formatCliPaste } from '@shared/cli-prompt'
 import { wrapSecretaryCliInstruction } from '@shared/secretary-result-protocol'
-import { resolve } from 'path'
 import type {
   SecretaryRun,
   SecretaryRunDispatchRequest,
   SecretaryRunDispatchResult,
   SecretaryRunPreparationResult
 } from '@shared/contracts/secretary'
+import { isSameFilePath } from '../cli/path-validator'
 import { ptyManager, type PtySessionSnapshot } from '../cli/pty-manager'
 import { snapshotAgentGit } from '../git/session-snapshot'
 import { loadSnapshot } from '../persistence/database'
@@ -44,9 +44,7 @@ function waitForPasteCommit(): Promise<void> {
 }
 
 function samePath(left: string, right: string): boolean {
-  const a = resolve(left)
-  const b = resolve(right)
-  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
+  return isSameFilePath(left, right)
 }
 
 function assertSessionOwnership(
@@ -73,13 +71,17 @@ function assertSessionOwnership(
   if (panel.accountId !== session.accountId) {
     throw new Error('The selected CLI session is using a different account than its project panel')
   }
-  const expectedCwd = panel.panelRole === 'resolver'
-    ? panel.cwdOverride
-    : panel.worktreePath ?? panel.cwdOverride ?? project.folderPath
-  if (!expectedCwd || !samePath(session.cwd, expectedCwd)) {
+  const expectedCwds = panel.panelRole === 'resolver'
+    ? [panel.cwdOverride]
+    : [panel.worktreePath, panel.cwdOverride, project.folderPath]
+  if (!expectedCwds.some((expected) => expected && samePath(session.cwd, expected))) {
     throw new Error('The selected CLI session is running in a different workspace')
   }
-  if (panel.worktreePath && (!session.worktreePath || !samePath(session.worktreePath, panel.worktreePath))) {
+  if (
+    panel.worktreePath &&
+    session.worktreePath &&
+    !samePath(session.worktreePath, panel.worktreePath)
+  ) {
     throw new Error('The selected CLI session is missing its expected isolated worktree')
   }
   return session
