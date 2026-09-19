@@ -170,21 +170,25 @@ export async function dispatchSecretaryRun(payload: unknown): Promise<SecretaryR
   if (!running) releaseSecretaryRunLock(run.id)
   if (!running) throw new Error('Could not start the approved run')
   const dispatchedAssignmentIds: string[] = []
+  const dispatchedSessionIds: string[] = []
   try {
-    // Assignment order is the first scheduler implementation: only the
-    // first task is written now; the collector dispatches each later task
-    // after its predecessor has produced a structured result.
-    const first = steps[0]
-    if (!first) throw new Error('An approved plan has no dispatchable assignment')
-    first.gitStart = await snapshotAgentGit(first.cwd)
-    await ptyManager.writeForSecretary(
-      first.sessionId,
-      formatCliPaste(wrapSecretaryCliInstruction(first.assignment.instruction))
-    )
-    await waitForPasteCommit()
-    await ptyManager.writeForSecretary(first.sessionId, '\r')
-    dispatchedAssignmentIds.push(first.assignment.id)
+    // Start every dependency-root task now. The collector releases dependent
+    // tasks only after all of their prerequisites report a result.
+    const ready = steps.filter((step) => (step.assignment.dependsOn ?? []).length === 0)
+    if (ready.length === 0) throw new Error('An approved plan has no dispatchable dependency root')
+    for (const step of ready) {
+      step.gitStart = await snapshotAgentGit(step.cwd)
+      dispatchedSessionIds.push(step.sessionId)
+      await ptyManager.writeForSecretary(
+        step.sessionId,
+        formatCliPaste(wrapSecretaryCliInstruction(step.assignment.instruction))
+      )
+      await waitForPasteCommit()
+      await ptyManager.writeForSecretary(step.sessionId, '\r')
+      dispatchedAssignmentIds.push(step.assignment.id)
+    }
   } catch (cause) {
+    void Promise.all(dispatchedSessionIds.map((sessionId) => ptyManager.writeForSecretary(sessionId, '\u0003').catch(() => undefined)))
     releaseSecretaryRunLock(run.id)
     const message = cause instanceof Error ? cause.message : 'Could not send the approved prompt to the CLI'
     store.updateRun(run.id, { status: 'failed', errorCode: 'CLI_DISPATCH_FAILED', errorMessage: message })
@@ -199,7 +203,7 @@ export async function dispatchSecretaryRun(payload: unknown): Promise<SecretaryR
     runId: updated.id,
     role: 'assistant',
     type: 'approval',
-    content: `Approved plan started with ${dispatchedAssignmentIds.length} CLI session(s); dependent assignments will be released after each result.`
+    content: `Approved plan started with ${dispatchedAssignmentIds.length} dependency-root CLI session(s); dependent assignments will be released after prerequisite results.`
   })
   return { run: updated, dispatchedAssignmentIds }
 }

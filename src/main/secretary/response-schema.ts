@@ -8,14 +8,18 @@ export interface SecretaryResponseFormat {
 const assignmentSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['panelId', 'kind', 'title', 'instruction', 'rationale', 'usageNote'],
+  required: ['panelId', 'kind', 'title', 'instruction', 'rationale', 'usageNote', 'dependsOn'],
   properties: {
     panelId: { type: ['string', 'null'] },
     kind: { type: 'string', enum: AI_ACCOUNT_KINDS },
     title: { type: 'string' },
     instruction: { type: 'string' },
     rationale: { type: 'string' },
-    usageNote: { type: 'string' }
+    usageNote: { type: 'string' },
+    dependsOn: {
+      type: 'array',
+      items: { type: 'integer', minimum: 0, maximum: 7 }
+    }
   }
 } as const
 

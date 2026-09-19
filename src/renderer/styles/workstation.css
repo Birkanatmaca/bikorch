@@ -450,6 +450,7 @@ input:not(.xterm-helper-textarea), select, textarea:not(.xterm-helper-textarea) 
 .secretary-report-warning { color: #e6bd7c; }
 .secretary-review-changes { justify-self: start; border: 1px solid rgb(139 124 248 / 0.28); border-radius: 6px; padding: 4px 7px; color: var(--color-text-primary); background: rgb(139 124 248 / 0.1); font-size: 9px; }
 .secretary-review-changes:hover { border-color: rgb(139 124 248 / 0.5); background: rgb(139 124 248 / 0.18); }
+.secretary-assignment-dependency { display: block; margin-top: 4px; color: var(--color-purple-light); font-size: 9px; }
 
 .app-header {
   height: 42px;

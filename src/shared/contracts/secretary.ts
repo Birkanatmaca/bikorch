@@ -65,6 +65,8 @@ export interface SecretaryAssignment {
   instruction: string
   rationale: string
   usageNote: string
+  /** Validated assignment IDs that must complete before this task starts. */
+  dependsOn?: string[]
 }
 
 export interface SecretaryPlan {

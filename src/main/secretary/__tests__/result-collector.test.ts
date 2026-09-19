@@ -114,7 +114,7 @@ describe('Secretary result collector', () => {
     })
     trackSecretaryRun(run, [
       { assignment: assignment('assignment-1', 'analysis'), sessionId: 'session-1', cwd: 'C:\\workspace', gitStart: { headSha: 'a', changedFiles: [], commits: [] } },
-      { assignment: assignment('assignment-2', 'implementation'), sessionId: secondSessionId, cwd: 'C:\\workspace', gitStart: { headSha: 'a', changedFiles: [], commits: [] } }
+      { assignment: { ...assignment('assignment-2', 'implementation'), dependsOn: ['assignment-1'] }, sessionId: secondSessionId, cwd: 'C:\\workspace', gitStart: null }
     ])
 
     mocks.observer?.({
@@ -132,5 +132,43 @@ describe('Secretary result collector', () => {
     })
     await vi.waitFor(() => expect(mocks.finalizeSecretaryRun).toHaveBeenCalledTimes(1))
     expect(mocks.finalizeSecretaryRun.mock.calls[0]?.[1]).toHaveLength(2)
+  })
+
+  it('starts an independent root while a dependent branch is still running', async () => {
+    const rootTwo = '55555555-5555-4555-8555-555555555555'
+    const child = '66666666-6666-4666-8666-666666666666'
+    const assignment = (id: string, title: string, dependsOn?: string[]) => ({
+      id,
+      panelId: null,
+      kind: 'cursor' as const,
+      title,
+      instruction: `Do ${title}.`,
+      rationale: 'DAG task',
+      usageNote: 'Available',
+      ...(dependsOn ? { dependsOn } : {})
+    })
+    trackSecretaryRun(run, [
+      { assignment: assignment('assignment-1', 'analysis'), sessionId: 'session-1', cwd: 'C:\\workspace', gitStart: { headSha: 'a', changedFiles: [], commits: [] } },
+      { assignment: assignment('assignment-2', 'independent'), sessionId: rootTwo, cwd: 'C:\\workspace', gitStart: { headSha: 'a', changedFiles: [], commits: [] } },
+      { assignment: assignment('assignment-3', 'implementation', ['assignment-1']), sessionId: child, cwd: 'C:\\workspace', gitStart: null }
+    ])
+
+    mocks.observer?.({
+      type: 'data',
+      sessionId: 'session-1',
+      data: '<BIKORCH_RESULT>{"status":"completed","summary":"Analysis done","changedFiles":[],"needsUser":null}</BIKORCH_RESULT>'
+    })
+    await vi.waitFor(() => expect(mocks.writeForSecretary).toHaveBeenCalledWith(child, expect.stringContaining('Do implementation.')))
+    expect(mocks.finalizeSecretaryRun).not.toHaveBeenCalled()
+
+    for (const sessionId of [child, rootTwo]) {
+      mocks.observer?.({
+        type: 'data',
+        sessionId,
+        data: '<BIKORCH_RESULT>{"status":"completed","summary":"Done","changedFiles":[],"needsUser":null}</BIKORCH_RESULT>'
+      })
+    }
+    await vi.waitFor(() => expect(mocks.finalizeSecretaryRun).toHaveBeenCalledTimes(1))
+    expect(mocks.finalizeSecretaryRun.mock.calls[0]?.[1]).toHaveLength(3)
   })
 })

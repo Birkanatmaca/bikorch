@@ -9,6 +9,21 @@ import type { CliUsageInfo, CliUsageKind } from '@shared/contracts/usage'
 
 const MAX_ASSIGNMENTS = 8
 
+function assertAcyclic(assignments: SecretaryAssignment[]): void {
+  const byId = new Map(assignments.map((assignment) => [assignment.id, assignment]))
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+  const visit = (id: string): void => {
+    if (visited.has(id)) return
+    if (visiting.has(id)) throw new Error('The plan contains a dependency cycle')
+    visiting.add(id)
+    for (const dependency of byId.get(id)?.dependsOn ?? []) visit(dependency)
+    visiting.delete(id)
+    visited.add(id)
+  }
+  for (const assignment of assignments) visit(assignment.id)
+}
+
 const DISALLOWED_CLI_INSTRUCTIONS: RegExp[] = [
   /(?:^|[\n.;])\s*(?:please\s+)?(?:run\s+)?git\s+(?:push|commit|reset\s+--hard|clean\s+-[a-z]*)\b/i,
   /\b(?:rm\s+-rf|rmdir\s+\/s\s+\/q|remove-item\b[^\n]{0,160}-(?:recurse|force))\b/i,
@@ -85,6 +100,7 @@ export function validateSecretaryPlan(
       instruction?: unknown
       rationale?: unknown
       usageNote?: unknown
+      dependsOn?: unknown
     }
     const kind = typeof item.kind === 'string' && AI_ACCOUNT_KINDS.includes(item.kind as CliUsageKind)
       ? item.kind as CliUsageKind
@@ -103,6 +119,14 @@ export function validateSecretaryPlan(
     const usedPercent = routedPanel
       ? panelUsedPercent(routedPanel, request.usage)
       : request.usage.find((provider) => provider.kind === kind && !provider.accountId)?.primary?.usedPercent ?? 0
+    const dependencyIndexes = Array.isArray(item.dependsOn)
+      ? item.dependsOn.filter((dependency): dependency is number => Number.isInteger(dependency))
+      : []
+    const assignmentCount = Math.min((parsed.assignments as unknown[]).length, MAX_ASSIGNMENTS)
+    if (dependencyIndexes.some((dependency) => dependency < 0 || dependency >= assignmentCount || dependency === index)) {
+      throw new Error('The plan contains an invalid assignment dependency')
+    }
+    const dependsOn = [...new Set(dependencyIndexes)].map((dependency) => `assignment-${dependency + 1}`)
     assignments.push({
       id: `assignment-${index + 1}`,
       panelId,
@@ -118,13 +142,15 @@ export function validateSecretaryPlan(
         ? item.usageNote.slice(0, 240)
         : usedPercent >= 80
           ? `Usage looks high (~${Math.round(usedPercent)}%). Still opening this CLI because you asked for it.`
-          : 'Review account availability before dispatching.'
+          : 'Review account availability before dispatching.',
+      dependsOn
     })
     assignedKinds.add(kind)
   }
   if (assignments.length === 0) {
     throw new Error('The planner did not select an available CLI task')
   }
+  assertAcyclic(assignments)
   return {
     overview: parsed.overview.trim().slice(0, 1000),
     assumptions: Array.isArray(parsed.assumptions)

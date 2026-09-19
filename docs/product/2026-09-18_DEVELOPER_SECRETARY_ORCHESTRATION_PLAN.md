@@ -1350,9 +1350,9 @@ Bu sayede CI üzerinde gerçek Cursor/Claude/Codex hesabı olmadan bütün orkes
 
 ### Güncel uygulama özeti — 2026-09-19
 
-**TAMAMLANDI:** Approval gate, kalıcı thread/run/assignment/onay store'u, restart recovery, plan revision UI, aktif-agent bağlamı, proje bağlamı, redaction, strict structured output, plan policy validator/router, proje/session sahipliği ve lock, explicit `prepareRun` handshake'i, main-process dispatch, bracketed-paste gönderimi, PTY gözlemcisi, `BIKORCH_RESULT` protokolü, Git changed-files doğrulaması, result collector, `needs-user`, iptal/timeout/idempotency ve sınırlı takip döngüsü, final rapor ve onay gerektiren takip planı uygulanmıştır.
+**TAMAMLANDI:** Approval gate, kalıcı thread/run/assignment/onay store'u, restart recovery, plan revision UI, aktif-agent bağlamı, proje bağlamı, redaction, strict structured output, plan policy validator/router, dependency DAG scheduler, proje/session sahipliği ve lock, explicit `prepareRun` handshake'i, main-process dispatch, bracketed-paste gönderimi, PTY gözlemcisi, `BIKORCH_RESULT` protokolü, Git changed-files doğrulaması, result collector, `needs-user`, iptal/timeout/idempotency ve sınırlı takip döngüsü, final rapor ve onay gerektiren takip planı uygulanmıştır.
 
-**KALAN EKSİKLER:** Explicit dependency DAG/parallel scheduler, E2E/security/retention/metrics testleri.
+**KALAN EKSİKLER:** E2E/security/retention/metrics testleri.
 
 ### Faz 0 — Mevcut davranışı güvenli hale getirme
 
@@ -1403,12 +1403,12 @@ Amaç: Yeni mimari tamamlanmadan otomatik çalıştırma riskini kaldırmak.
 - [x] Session sahipliğine `projectId`, cwd, account ve worktree bilgisi ekle. — **TAMAMLANDI**
 - [x] `SecretaryOrchestratorService` oluştur. — **TAMAMLANDI**
 - [x] Project/session lock ekle. — **TAMAMLANDI**
-- [x] Ordered dependency scheduler v1 ekle. — **TAMAMLANDI**
+- [x] Dependency DAG ve hazır assignment scheduler'ını ekle. — **TAMAMLANDI**
 - [x] Explicit project'e panel/session hazırlama handshake'i ekle. — **TAMAMLANDI**
 - [x] Bracketed paste ile onaylı prompt dispatch'ini main process'e taşı. — **TAMAMLANDI**
 - [x] İptal/timeout/idempotency davranışlarını tamamla. — **TAMAMLANDI**
 
-**Durum (2026-09-19):** Arayüz plan için görünür CLI panelini hazırlar ve bu workspace bilgisini dispatch öncesi kalıcı hale getirir. Kullanıcı onayına geçmeden hemen önce renderer, ana süreçte `prepareRun` handshake'i çağırır; ana süreç run'ın hâlâ onay beklediğini, aynı `projectId`'ye ait olduğunu, her assignment'ın tek ve hazır bir CLI oturumuna bağlandığını, CLI türü/hesabı/paneli ile çalışma dizini ve worktree bilgisinin hedef projeye ait olduğunu doğrular. Bu doğrulama geçmeden run `approved` durumuna alınmaz. Onaylı planın assignment'ları v1 scheduler'da kalıcı plan sırasıyla tek tek gönderilir; önceki assignment yapılandırılmış sonuç vermeden sonraki CLI promptu yazılmaz. Aynı onay kaydı ikinci kez dispatch edilemez; proje/session lock, durum makinesi ve tekil collector takibi idempotent tekrarları engeller. Kullanıcı aktif run'ı iptal edebilir, collector durur ve mümkünse PTY'ye interrupt gönderilir; sekiz dakikalık sonuç timeout'u kontrollü failure üretir. `PtyManager` iç gözlemci, session snapshot ve sınırlı output tail desteği sağlıyor. Açık dependency DAG ve bağımsız görevlerde kontrollü paralellik sonraki sertleştirme adımıdır.
+**Durum (2026-09-19):** Arayüz plan için görünür CLI panelini hazırlar ve bu workspace bilgisini dispatch öncesi kalıcı hale getirir. Kullanıcı onayına geçmeden hemen önce renderer, ana süreçte `prepareRun` handshake'i çağırır; ana süreç run'ın hâlâ onay beklediğini, aynı `projectId`'ye ait olduğunu, her assignment'ın tek ve hazır bir CLI oturumuna bağlandığını, CLI türü/hesabı/paneli ile çalışma dizini ve worktree bilgisinin hedef projeye ait olduğunu doğrular. Bu doğrulama geçmeden run `approved` durumuna alınmaz. Plan şemasındaki `dependsOn` alanları zero-based assignment index'lerinden güvenli ID'lere normalize edilir, cycle'lar reddedilir. Onaylı planda dependency kökleri birlikte başlar; bağımlı assignment'lar tüm önkoşullar yapılandırılmış başarılı sonuç vermeden prompt almaz. Bir önkoşul başarısız olursa bağlı işler başlatılmaz ve run kontrollü failure olur. Aynı onay kaydı ikinci kez dispatch edilemez; proje/session lock, durum makinesi ve tekil collector takibi idempotent tekrarları engeller. Kullanıcı aktif run'ı iptal edebilir, collector durur ve mümkünse PTY'ye interrupt gönderilir; sekiz dakikalık sonuç timeout'u kontrollü failure üretir.
 
 **Çıkış kriteri:** Onaylanan tek assignment doğru projede güvenilir biçimde başlatılıyor ve renderer state'inden bağımsız izleniyor.
 

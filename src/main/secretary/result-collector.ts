@@ -135,8 +135,13 @@ export function cancelTrackedSecretaryRun(runId: string): string[] {
 }
 
 function failTrackedRun(runId: string, message: string): void {
-  const tracked = dropTrackedRun(runId)
+  const tracked = trackedRuns.get(runId)
   if (!tracked) return
+  const activeSessionIds = [...tracked.targets.values()]
+    .filter((target) => !target.outcome)
+    .map((target) => target.sessionId)
+  dropTrackedRun(runId)
+  void Promise.all(activeSessionIds.map((sessionId) => ptyManager.writeForSecretary(sessionId, '\u0003').catch(() => undefined)))
   releaseSecretaryRunLock(runId)
   const store = getSecretaryStore()
   const current = store?.getRun(runId)
@@ -149,14 +154,44 @@ function failTrackedRun(runId: string, message: string): void {
 
 async function finishTrackedRun(runId: string): Promise<void> {
   const tracked = trackedRuns.get(runId)
-  if (!tracked || tracked.finalizing || [...tracked.targets.values()].some((target) => !target.outcome)) return
-  const next = tracked.pending.shift()
-  if (next) {
+  if (!tracked || tracked.finalizing) return
+  const failedIds = new Set(
+    [...tracked.targets.values()]
+      .filter((target) => target.outcome === 'failed')
+      .map((target) => target.assignment.id)
+  )
+  if (failedIds.size > 0) {
+    failTrackedRun(runId, 'A dependency assignment failed; dependent CLI tasks were not started.')
+    return
+  }
+  const completedIds = new Set(
+    [...tracked.targets.values()]
+      .filter((target) => target.outcome === 'completed')
+      .map((target) => target.assignment.id)
+  )
+  const ready = tracked.pending.filter((binding) =>
+    (binding.assignment.dependsOn ?? []).every((dependency) => completedIds.has(dependency))
+  )
+  const blocked = tracked.pending.some((binding) =>
+    (binding.assignment.dependsOn ?? []).some((dependency) => failedIds.has(dependency))
+  )
+  if (blocked) {
+    failTrackedRun(runId, 'A dependency assignment failed; dependent CLI tasks were not started.')
+    return
+  }
+  if (ready.length > 0) {
+    const readyIds = new Set(ready.map((binding) => binding.assignment.id))
+    tracked.pending = tracked.pending.filter((binding) => !readyIds.has(binding.assignment.id))
     try {
-      await dispatchNextStep(tracked, next)
+      for (const next of ready) await dispatchNextStep(tracked, next)
     } catch (cause) {
       failTrackedRun(runId, cause instanceof Error ? cause.message : 'Could not dispatch the next dependent CLI task.')
     }
+    return
+  }
+  if ([...tracked.targets.values()].some((target) => !target.outcome)) return
+  if (tracked.pending.length > 0) {
+    failTrackedRun(runId, 'The Secretary dependency graph could not make progress.')
     return
   }
   tracked.finalizing = true
@@ -293,12 +328,14 @@ export function trackSecretaryRun(
   initSecretaryResultCollector()
   dropTrackedRun(run.id)
   const targets = new Map<string, Target>()
-  const [first, ...pending] = bindings
-  if (first) {
-    const gitStart = first.gitStart
-    if (!gitStart) throw new Error('The first Secretary assignment is missing its Git baseline')
-    targets.set(first.sessionId, toTarget({ ...first, gitStart }))
-    trackedSessions.set(first.sessionId, run.id)
+  const started = bindings.filter((binding) => binding.gitStart)
+  const pending = bindings.filter((binding) => !binding.gitStart)
+  if (started.length === 0) throw new Error('The Secretary run has no ready assignment')
+  for (const binding of started) {
+    const gitStart = binding.gitStart
+    if (!gitStart) continue
+    targets.set(binding.sessionId, toTarget({ ...binding, gitStart }))
+    trackedSessions.set(binding.sessionId, run.id)
   }
   const timer = setTimeout(() => {
     failTrackedRun(run.id, 'The CLI did not return a result before the Secretary timeout.')

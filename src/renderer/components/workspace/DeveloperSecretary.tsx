@@ -743,6 +743,11 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
                               <div><span>{AI_ACCOUNT_LABELS[assignment.kind]}</span><small>{assignment.usageNote}</small></div>
                               <strong>{assignment.title}</strong>
                               <p>{assignment.instruction}</p>
+                              {assignment.dependsOn && assignment.dependsOn.length > 0 ? (
+                                <small className="secretary-assignment-dependency">
+                                  After: {assignment.dependsOn.map((dependency) => item.plan!.assignments.find((entry) => entry.id === dependency)?.title ?? dependency).join(', ')}
+                                </small>
+                              ) : null}
                             </article>
                           ))}
                         </div>

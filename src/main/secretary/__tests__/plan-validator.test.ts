@@ -47,4 +47,25 @@ describe('Secretary plan validation', () => {
       ]
     }, { panels, usage: [] }, true)).toThrow(/more than one task/i)
   })
+
+  it('normalizes dependency indexes and rejects cycles', () => {
+    const plan = validateSecretaryPlan({
+      overview: 'Analyze then implement',
+      assumptions: [],
+      assignments: [
+        { kind: 'cursor', instruction: 'Analyze the current implementation.', dependsOn: [] },
+        { kind: 'codex', instruction: 'Implement the approved findings.', dependsOn: [0] }
+      ]
+    }, { panels, usage: [] }, true)
+    expect(plan?.assignments[1]?.dependsOn).toEqual(['assignment-1'])
+
+    expect(() => validateSecretaryPlan({
+      overview: 'Cyclic plan',
+      assumptions: [],
+      assignments: [
+        { kind: 'cursor', instruction: 'Analyze the current implementation.', dependsOn: [1] },
+        { kind: 'codex', instruction: 'Implement the approved findings.', dependsOn: [0] }
+      ]
+    }, { panels, usage: [] }, true)).toThrow(/dependency cycle/i)
+  })
 })
