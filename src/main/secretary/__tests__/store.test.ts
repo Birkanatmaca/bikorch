@@ -60,6 +60,7 @@ describe('Secretary SQL store', () => {
       projectId: 'project-1234',
       status: 'awaiting-approval',
       plan: PLAN,
+      planRevision: 1,
       openKinds: ['codex']
     })
     expect(saved?.requestText).toContain('[REDACTED]')
@@ -70,6 +71,23 @@ describe('Secretary SQL store', () => {
     expect(store.listRuns('project-1234')).toHaveLength(1)
     expect(db.exec('SELECT * FROM secretary_assignments')[0]?.values).toHaveLength(1)
     expect(db.exec('SELECT * FROM secretary_approvals')[0]?.values).toHaveLength(1)
+  })
+
+  it('increments the persisted revision whenever an awaiting plan is changed', () => {
+    const thread = store.createThread({ projectId: 'project-1234', title: 'Revision' })
+    const run = store.createRun({ threadId: thread.id, projectId: thread.projectId, requestText: 'Review auth' })
+    const initial = store.updateRun(run.id, { status: 'awaiting-approval', plan: PLAN })
+    const revised = store.updateRun(run.id, {
+      plan: {
+        ...PLAN,
+        overview: 'Review the revised authentication flow.',
+        assignments: [{ ...PLAN.assignments[0]!, instruction: 'Review the revised authentication flow and report risks.' }]
+      }
+    })
+
+    expect(initial?.planRevision).toBe(1)
+    expect(revised).toMatchObject({ planRevision: 2, status: 'awaiting-approval' })
+    expect(store.getRun(run.id)?.plan?.overview).toContain('revised')
   })
 
   it('keeps an awaiting plan after restart recovery but interrupts active work', () => {

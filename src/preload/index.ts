@@ -139,14 +139,17 @@ import {
   type SecretaryChatRequest,
   type SecretaryChatResponse,
   type SecretaryPlan,
+  type SecretaryPlanRevisionRequest,
   type SecretaryPlanRequest,
   type SecretarySettings,
   type SecretaryThread,
   type SecretaryThreadCreateRequest,
   type SecretaryThreadDetail,
   type SecretaryRun,
+  type SecretaryRunCancelRequest,
   type SecretaryRunDispatchRequest,
   type SecretaryRunDispatchResult,
+  type SecretaryRunPreparationResult,
   type SecretaryEvent
 } from '@shared/contracts/secretary'
 import {
@@ -387,6 +390,9 @@ export interface SecretaryApi {
   getRun: (runId: string) => Promise<SecretaryRun | null>
   approvePlan: (runId: string) => Promise<SecretaryRun>
   rejectPlan: (runId: string) => Promise<SecretaryRun>
+  revisePlan: (request: SecretaryPlanRevisionRequest) => Promise<SecretaryRun>
+  cancelRun: (request: SecretaryRunCancelRequest) => Promise<SecretaryRun>
+  prepareRun: (request: SecretaryRunDispatchRequest) => Promise<SecretaryRunPreparationResult>
   failApprovedRun: (runId: string, reason: string) => Promise<SecretaryRun>
   dispatchRun: (request: SecretaryRunDispatchRequest) => Promise<SecretaryRunDispatchResult>
   onEvent: (callback: (event: SecretaryEvent) => void) => () => void
@@ -688,6 +694,9 @@ const secretaryApi: SecretaryApi = {
   getRun: (runId) => ipcRenderer.invoke(SECRETARY_IPC.GET_RUN, runId),
   approvePlan: (runId) => ipcRenderer.invoke(SECRETARY_IPC.APPROVE_PLAN, runId),
   rejectPlan: (runId) => ipcRenderer.invoke(SECRETARY_IPC.REJECT_PLAN, runId),
+  revisePlan: (request) => ipcRenderer.invoke(SECRETARY_IPC.REVISE_PLAN, request),
+  cancelRun: (request) => ipcRenderer.invoke(SECRETARY_IPC.CANCEL_RUN, request),
+  prepareRun: (request) => ipcRenderer.invoke(SECRETARY_IPC.PREPARE_RUN, request),
   failApprovedRun: (runId, reason) => ipcRenderer.invoke(SECRETARY_IPC.FAIL_APPROVED_RUN, runId, reason),
   dispatchRun: (request) => ipcRenderer.invoke(SECRETARY_IPC.DISPATCH_RUN, request),
   onEvent: (callback) => {

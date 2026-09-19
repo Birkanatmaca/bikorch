@@ -1,13 +1,18 @@
 import { formatCliPaste } from '@shared/cli-prompt'
 import { wrapSecretaryCliInstruction } from '@shared/secretary-result-protocol'
+import { resolve } from 'path'
 import type {
   SecretaryRun,
   SecretaryRunDispatchRequest,
-  SecretaryRunDispatchResult
+  SecretaryRunDispatchResult,
+  SecretaryRunPreparationResult
 } from '@shared/contracts/secretary'
-import { ptyManager } from '../cli/pty-manager'
+import { ptyManager, type PtySessionSnapshot } from '../cli/pty-manager'
+import { snapshotAgentGit } from '../git/session-snapshot'
+import { loadSnapshot } from '../persistence/database'
 import { getSecretaryStore } from './store'
 import { trackSecretaryRun } from './result-collector'
+import { releaseSecretaryRunLock, reserveSecretaryRunLock } from './run-lock'
 
 const SUBMIT_DELAY_MS = 120
 
@@ -38,6 +43,87 @@ function waitForPasteCommit(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, SUBMIT_DELAY_MS))
 }
 
+function samePath(left: string, right: string): boolean {
+  const a = resolve(left)
+  const b = resolve(right)
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
+}
+
+function assertSessionOwnership(
+  run: SecretaryRun,
+  assignment: NonNullable<SecretaryRun['plan']>['assignments'][number],
+  sessionId: string
+): PtySessionSnapshot {
+  const session = ptyManager.getSessionSnapshot(sessionId)
+  if (!session || session.kind !== assignment.kind || session.status === 'stopped' || session.status === 'error') {
+    throw new Error(`The selected ${assignment.kind} CLI session is unavailable`)
+  }
+  if (session.projectId !== run.projectId) {
+    throw new Error('The selected CLI session belongs to a different project')
+  }
+  if (assignment.panelId && assignment.panelId !== sessionId) {
+    throw new Error('The approved assignment is bound to a different CLI panel')
+  }
+  const snapshot = loadSnapshot()
+  const project = snapshot.projects.find((item) => item.id === run.projectId)
+  const panel = snapshot.workspaces[run.projectId]?.panels.find((item) => item.id === sessionId)
+  if (!project?.folderPath || !panel || panel.type !== assignment.kind) {
+    throw new Error('The selected CLI session is no longer registered to this project workspace')
+  }
+  if (panel.accountId !== session.accountId) {
+    throw new Error('The selected CLI session is using a different account than its project panel')
+  }
+  const expectedCwd = panel.panelRole === 'resolver'
+    ? panel.cwdOverride
+    : panel.worktreePath ?? panel.cwdOverride ?? project.folderPath
+  if (!expectedCwd || !samePath(session.cwd, expectedCwd)) {
+    throw new Error('The selected CLI session is running in a different workspace')
+  }
+  if (panel.worktreePath && (!session.worktreePath || !samePath(session.worktreePath, panel.worktreePath))) {
+    throw new Error('The selected CLI session is missing its expected isolated worktree')
+  }
+  return session
+}
+
+/**
+ * Verifies project/session bindings while the run is still awaiting approval.
+ * This makes panel launch and session ownership an explicit handshake instead
+ * of relying only on the later terminal write.
+ */
+export function prepareSecretaryRun(payload: unknown): SecretaryRunPreparationResult {
+  const request = parseDispatchRequest(payload)
+  const store = getSecretaryStore()
+  if (!store) throw new Error('Secretary storage is not ready yet')
+  const run = store.getRun(request.runId)
+  if (!run || run.status !== 'awaiting-approval' || !run.plan) {
+    throw new Error('This plan is no longer awaiting approval')
+  }
+  if (run.projectId !== request.projectId) {
+    throw new Error('This plan belongs to a different project')
+  }
+  if (request.assignments.length !== run.plan.assignments.length) {
+    throw new Error('Every assignment must be prepared before approval')
+  }
+  const bindings = new Map<string, string>()
+  for (const binding of request.assignments) {
+    if (bindings.has(binding.assignmentId)) throw new Error('An assignment was prepared more than once')
+    bindings.set(binding.assignmentId, binding.sessionId)
+  }
+  for (const assignment of run.plan.assignments) {
+    const sessionId = bindings.get(assignment.id)
+    if (!sessionId) throw new Error('An approved assignment has no prepared CLI session')
+    assertSessionOwnership(run, assignment, sessionId)
+  }
+  if (new Set(request.assignments.map((binding) => binding.sessionId)).size !== request.assignments.length) {
+    throw new Error('Each assignment must use a different CLI session')
+  }
+  return {
+    runId: run.id,
+    projectId: run.projectId,
+    preparedAssignmentIds: run.plan.assignments.map((assignment) => assignment.id)
+  }
+}
+
 /**
  * Performs the irreversible terminal write only after a persisted approval.
  * The renderer can choose a visible panel, but not alter the stored prompt.
@@ -61,33 +147,45 @@ export async function dispatchSecretaryRun(payload: unknown): Promise<SecretaryR
     if (bindings.has(binding.assignmentId)) throw new Error('An assignment was bound more than once')
     bindings.set(binding.assignmentId, binding.sessionId)
   }
-  const steps = run.plan.assignments.map((assignment) => {
+  const steps: Array<{
+    assignment: NonNullable<SecretaryRun['plan']>['assignments'][number]
+    sessionId: string
+    cwd: string
+    gitStart: Awaited<ReturnType<typeof snapshotAgentGit>> | null
+  }> = []
+  for (const assignment of run.plan.assignments) {
     const sessionId = bindings.get(assignment.id)
     if (!sessionId) throw new Error('An approved assignment has no CLI session')
-    const session = ptyManager.getSessionSnapshot(sessionId)
-    if (!session || session.kind !== assignment.kind || session.status === 'stopped' || session.status === 'error') {
-      throw new Error(`The selected ${assignment.kind} CLI session is unavailable`)
-    }
-    return { assignment, sessionId }
-  })
+    const session = assertSessionOwnership(run, assignment, sessionId)
+    // Capture each step immediately before it is dispatched. Pending steps
+    // must not treat earlier assignments' edits as their own baseline.
+    steps.push({ assignment, sessionId, cwd: session.cwd, gitStart: null })
+  }
   if (new Set(steps.map((step) => step.sessionId)).size !== steps.length) {
     throw new Error('Each approved assignment must use a different CLI session')
   }
 
+  reserveSecretaryRunLock(run, steps.map((step) => step.sessionId))
   const running = store.updateRun(run.id, { status: 'running' })
+  if (!running) releaseSecretaryRunLock(run.id)
   if (!running) throw new Error('Could not start the approved run')
   const dispatchedAssignmentIds: string[] = []
   try {
-    for (const step of steps) {
-      await ptyManager.writeForSecretary(
-        step.sessionId,
-        formatCliPaste(wrapSecretaryCliInstruction(step.assignment.instruction))
-      )
-      await waitForPasteCommit()
-      await ptyManager.writeForSecretary(step.sessionId, '\r')
-      dispatchedAssignmentIds.push(step.assignment.id)
-    }
+    // Assignment order is the first scheduler implementation: only the
+    // first task is written now; the collector dispatches each later task
+    // after its predecessor has produced a structured result.
+    const first = steps[0]
+    if (!first) throw new Error('An approved plan has no dispatchable assignment')
+    first.gitStart = await snapshotAgentGit(first.cwd)
+    await ptyManager.writeForSecretary(
+      first.sessionId,
+      formatCliPaste(wrapSecretaryCliInstruction(first.assignment.instruction))
+    )
+    await waitForPasteCommit()
+    await ptyManager.writeForSecretary(first.sessionId, '\r')
+    dispatchedAssignmentIds.push(first.assignment.id)
   } catch (cause) {
+    releaseSecretaryRunLock(run.id)
     const message = cause instanceof Error ? cause.message : 'Could not send the approved prompt to the CLI'
     store.updateRun(run.id, { status: 'failed', errorCode: 'CLI_DISPATCH_FAILED', errorMessage: message })
     store.appendMessage({ threadId: run.threadId, runId: run.id, role: 'assistant', type: 'error', content: message })
@@ -101,7 +199,7 @@ export async function dispatchSecretaryRun(payload: unknown): Promise<SecretaryR
     runId: updated.id,
     role: 'assistant',
     type: 'approval',
-    content: `Approved plan dispatched to ${dispatchedAssignmentIds.length} CLI session(s).`
+    content: `Approved plan started with ${dispatchedAssignmentIds.length} CLI session(s); dependent assignments will be released after each result.`
   })
   return { run: updated, dispatchedAssignmentIds }
 }

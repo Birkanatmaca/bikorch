@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Check, Loader2, Minus, ShieldCheck, SlidersHorizontal, X } from 'lucide-react'
+import { ArrowUp, Check, Loader2, Minus, Pencil, Save, ShieldCheck, SlidersHorizontal, X } from 'lucide-react'
 import type { PanelDefinition, Project } from '@shared/types'
 import type { SecretaryPlan, SecretaryRunStatus, SecretaryThreadDetail } from '@shared/contracts/secretary'
 import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
@@ -14,6 +14,7 @@ import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useAiAccountsStore } from '@renderer/stores/ai-accounts-store'
 import { inferCliActivity, looksWorkspaceTrustPrompt, stripAnsi } from '@renderer/lib/cli-activity'
 import { submitCliPrompt } from '@renderer/lib/submit-cli-prompt'
+import { flushPersistence } from '@renderer/lib/persistence-sync'
 import { cn } from '@renderer/lib/utils'
 
 const CLI_TYPES = new Set(AI_ACCOUNT_KINDS)
@@ -24,15 +25,21 @@ interface ChatItem {
   content: string
   plan?: SecretaryPlan | null
   runId?: string
+  planRevision?: number
   planOpenKinds?: CliUsageKind[]
-  planStatus?: 'awaiting-approval' | 'dispatching' | 'sent' | 'rejected' | 'failed'
+  planStatus?: 'awaiting-approval' | 'dispatching' | 'sent' | 'rejected' | 'cancelled' | 'failed'
+  report?: {
+    changedFiles: string[]
+    unverifiedReportedFiles: string[]
+  }
   error?: boolean
 }
 
 function planStatusForRun(status: SecretaryRunStatus): ChatItem['planStatus'] {
   if (status === 'awaiting-approval') return 'awaiting-approval'
   if (status === 'rejected') return 'rejected'
-  if (status === 'failed' || status === 'cancelled' || status === 'interrupted') return 'failed'
+  if (status === 'cancelled') return 'cancelled'
+  if (status === 'failed' || status === 'interrupted') return 'failed'
   return 'sent'
 }
 
@@ -48,7 +55,12 @@ function chatItemsFromThread(detail: SecretaryThreadDetail): ChatItem[] {
       ...(plan
         ? {
             plan,
-            ...(run ? { runId: run.id, planOpenKinds: run.openKinds, planStatus: planStatusForRun(run.status) } : {})
+            ...(run ? {
+              runId: run.id,
+              planRevision: run.planRevision,
+              planOpenKinds: run.openKinds,
+              planStatus: planStatusForRun(run.status)
+            } : {})
           }
         : {}),
       error: message.type === 'error'
@@ -116,6 +128,10 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   const [sending, setSending] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [threadId, setThreadId] = useState<string | null>(null)
+  const [editingPlanMessageId, setEditingPlanMessageId] = useState<string | null>(null)
+  const [planDraft, setPlanDraft] = useState<SecretaryPlan | null>(null)
+  const [revisingPlan, setRevisingPlan] = useState(false)
+  const [cancellingRunId, setCancellingRunId] = useState<string | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
   const runRef = useRef(0)
   const approvingPlanIdsRef = useRef(new Set<string>())
@@ -140,6 +156,10 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     setBrief('')
     setFeedback(null)
     setThreadId(null)
+    setEditingPlanMessageId(null)
+    setPlanDraft(null)
+    setRevisingPlan(false)
+    setCancellingRunId(null)
     approvingPlanIdsRef.current.clear()
   }, [project.id])
 
@@ -166,7 +186,15 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     if (event.type === 'run-report') {
       setMessages((current) => [
         ...current.map((item) => item.runId === event.runId ? { ...item, planStatus: 'sent' as const } : item),
-        { id: newId(), role: 'assistant', content: event.reply }
+        {
+          id: newId(),
+          role: 'assistant',
+          content: event.reply,
+          report: {
+            changedFiles: event.changedFiles,
+            unverifiedReportedFiles: event.unverifiedReportedFiles
+          }
+        }
       ])
       setFeedback(null)
       return
@@ -256,6 +284,9 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   const dispatch = async (plan: SecretaryPlan, run: number, persistedRunId?: string): Promise<number> => {
     setSending(true)
     try {
+      // Main-process dispatch verifies panel/project/session ownership against
+      // the persisted workspace, including newly opened CLI panels.
+      await flushPersistence()
       const bindings: Array<{ assignmentId: string; sessionId: string }> = []
       for (const assignment of plan.assignments) {
         if (run !== runRef.current) return 0
@@ -271,6 +302,15 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       }
       let sent: number
       if (persistedRunId) {
+        // The main process verifies project/session ownership before changing
+        // the durable approval state, so a stale or cross-project panel never
+        // becomes an approved run.
+        await window.api.secretary.prepareRun({
+          runId: persistedRunId,
+          projectId: project.id,
+          assignments: bindings
+        })
+        await window.api.secretary.approvePlan(persistedRunId)
         const result = await window.api.secretary.dispatchRun({
           runId: persistedRunId,
           projectId: project.id,
@@ -317,6 +357,95 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     window.setTimeout(() => setFeedback(null), 3200)
   }
 
+  const startPlanRevision = (messageId: string, plan: SecretaryPlan): void => {
+    if (sending || revisingPlan) return
+    setEditingPlanMessageId(messageId)
+    setPlanDraft({
+      ...plan,
+      assumptions: [...plan.assumptions],
+      assignments: plan.assignments.map((assignment) => ({ ...assignment }))
+    })
+    setFeedback(null)
+  }
+
+  const cancelPlanRevision = (): void => {
+    if (revisingPlan) return
+    setEditingPlanMessageId(null)
+    setPlanDraft(null)
+  }
+
+  const savePlanRevision = async (messageId: string, expectedRevision: number, persistedRunId?: string): Promise<void> => {
+    if (!persistedRunId || !planDraft || revisingPlan || sending) return
+    setRevisingPlan(true)
+    try {
+      const revised = await window.api.secretary.revisePlan({
+        runId: persistedRunId,
+        projectId: project.id,
+        expectedRevision,
+        overview: planDraft.overview,
+        assignments: planDraft.assignments.map((assignment) => ({
+          id: assignment.id,
+          title: assignment.title,
+          instruction: assignment.instruction
+        })),
+        panels: cliPanels,
+        usage
+      })
+      setMessages((current) => current.map((item) => (
+        item.id === messageId
+          ? {
+              ...item,
+              plan: revised.plan,
+              planRevision: revised.planRevision,
+              planOpenKinds: revised.openKinds,
+              planStatus: 'awaiting-approval' as const
+            }
+          : item
+      )))
+      setEditingPlanMessageId(null)
+      setPlanDraft(null)
+      setFeedback(`Plan revision ${revised.planRevision} saved. Review and approve when ready.`)
+      window.setTimeout(() => setFeedback(null), 4200)
+    } catch (cause) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: newId(),
+          role: 'assistant',
+          content: cause instanceof Error ? cause.message : 'Could not save the plan revision',
+          error: true
+        }
+      ])
+    } finally {
+      setRevisingPlan(false)
+    }
+  }
+
+  const cancelRun = async (messageId: string, persistedRunId?: string): Promise<void> => {
+    if (!persistedRunId || sending || cancellingRunId) return
+    setCancellingRunId(persistedRunId)
+    try {
+      await window.api.secretary.cancelRun({ runId: persistedRunId, projectId: project.id })
+      setMessages((current) => current.map((item) => (
+        item.id === messageId ? { ...item, planStatus: 'cancelled' as const } : item
+      )))
+      setFeedback('Secretary run cancelled. The CLI was interrupted if it was still active.')
+      window.setTimeout(() => setFeedback(null), 4200)
+    } catch (cause) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: newId(),
+          role: 'assistant',
+          content: cause instanceof Error ? cause.message : 'Could not cancel the Secretary run',
+          error: true
+        }
+      ])
+    } finally {
+      setCancellingRunId(null)
+    }
+  }
+
   const approvePlan = async (
     messageId: string,
     proposedPlan: SecretaryPlan,
@@ -333,7 +462,6 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     )))
 
     try {
-      if (persistedRunId) await window.api.secretary.approvePlan(persistedRunId)
       const bound = applyWorkspaceActions(openKinds, proposedPlan)
       if (run !== runRef.current || !bound.plan) return
       setMessages((current) => current.map((item) => (
@@ -415,7 +543,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           ...(plan
             ? {
                 plan,
-                ...(response.runId ? { runId: response.runId } : {}),
+                ...(response.runId ? { runId: response.runId, planRevision: response.planRevision } : {}),
                 planOpenKinds: response.openKinds ?? [],
                 planStatus: 'awaiting-approval' as const
               }
@@ -516,27 +644,109 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
                 )}
               >
                 <p>{item.content}</p>
+                {item.report ? (
+                  <div className="secretary-report-facts">
+                    <div className="secretary-report-facts-heading">
+                      <span>Verified Git changes</span>
+                      <strong>{item.report.changedFiles.length}</strong>
+                    </div>
+                    {item.report.changedFiles.length > 0 ? (
+                      <ul>
+                        {item.report.changedFiles.slice(0, 8).map((path) => <li key={path}>{path}</li>)}
+                        {item.report.changedFiles.length > 8 ? <li>+{item.report.changedFiles.length - 8} more</li> : null}
+                      </ul>
+                    ) : <p className="secretary-report-empty">No new repository changes were verified.</p>}
+                    {item.report.unverifiedReportedFiles.length > 0 ? (
+                      <p className="secretary-report-warning">
+                        CLI mentioned {item.report.unverifiedReportedFiles.length} file(s) that Git could not verify.
+                      </p>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="secretary-review-changes"
+                      onClick={() => selectLeftSidebar(project.id, 'changes')}
+                    >
+                      Review changes in Git
+                    </button>
+                  </div>
+                ) : null}
                 {item.plan ? (
                   <div className="secretary-plan">
-                    <div className="secretary-plan-heading">
-                      <div>
-                        <span>{sending ? 'Sending to CLI' : 'CLI run'}</span>
-                        <p>{item.plan.overview}</p>
+                    {editingPlanMessageId === item.id && planDraft ? (
+                      <div className="secretary-plan-editor">
+                        <label>
+                          <span>Plan overview</span>
+                          <textarea
+                            value={planDraft.overview}
+                            rows={2}
+                            onChange={(event) => setPlanDraft((current) => current ? { ...current, overview: event.target.value } : current)}
+                            disabled={revisingPlan}
+                          />
+                        </label>
+                        {planDraft.assignments.map((assignment) => (
+                          <label key={assignment.id}>
+                            <span>{AI_ACCOUNT_LABELS[assignment.kind]} assignment</span>
+                            <input
+                              value={assignment.title}
+                              onChange={(event) => setPlanDraft((current) => current ? {
+                                ...current,
+                                assignments: current.assignments.map((entry) => entry.id === assignment.id
+                                  ? { ...entry, title: event.target.value }
+                                  : entry)
+                              } : current)}
+                              disabled={revisingPlan}
+                            />
+                            <textarea
+                              value={assignment.instruction}
+                              rows={4}
+                              onChange={(event) => setPlanDraft((current) => current ? {
+                                ...current,
+                                assignments: current.assignments.map((entry) => entry.id === assignment.id
+                                  ? { ...entry, instruction: event.target.value }
+                                  : entry)
+                              } : current)}
+                              disabled={revisingPlan}
+                            />
+                          </label>
+                        ))}
+                        <div className="secretary-plan-actions">
+                          <span>Changes are safety-checked and saved before approval.</span>
+                          <button type="button" onClick={() => void savePlanRevision(item.id, item.planRevision ?? 1, item.runId)} disabled={revisingPlan || sending}>
+                            {revisingPlan ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                            Save revision
+                          </button>
+                          <button type="button" onClick={cancelPlanRevision} disabled={revisingPlan}>Cancel</button>
+                        </div>
                       </div>
-                    </div>
-                    <div className="secretary-assignments">
-                      {item.plan.assignments.map((assignment) => (
-                        <article key={assignment.id}>
-                          <div><span>{AI_ACCOUNT_LABELS[assignment.kind]}</span><small>{assignment.usageNote}</small></div>
-                          <strong>{assignment.title}</strong>
-                          <p>{assignment.instruction}</p>
-                        </article>
-                      ))}
-                    </div>
+                    ) : (
+                      <>
+                        <div className="secretary-plan-heading">
+                          <div>
+                            <span>{sending ? 'Sending to CLI' : `CLI run${item.planRevision ? ` · revision ${item.planRevision}` : ''}`}</span>
+                            <p>{item.plan.overview}</p>
+                          </div>
+                        </div>
+                        <div className="secretary-assignments">
+                          {item.plan.assignments.map((assignment) => (
+                            <article key={assignment.id}>
+                              <div><span>{AI_ACCOUNT_LABELS[assignment.kind]}</span><small>{assignment.usageNote}</small></div>
+                              <strong>{assignment.title}</strong>
+                              <p>{assignment.instruction}</p>
+                            </article>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    {editingPlanMessageId !== item.id ? (
                     <div className="secretary-plan-actions">
                       {item.planStatus === 'awaiting-approval' ? (
                         <>
                           <span><ShieldCheck className="h-3.5 w-3.5" /> Review this plan before any CLI or prompt is started</span>
+                          {item.runId ? (
+                            <button type="button" onClick={() => startPlanRevision(item.id, item.plan!)} disabled={sending || revisingPlan}>
+                              <Pencil className="h-3.5 w-3.5" /> Edit plan
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             onClick={() => void approvePlan(item.id, item.plan!, item.planOpenKinds ?? [], item.runId)}
@@ -554,15 +764,27 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
                         <span><Loader2 className="h-3.5 w-3.5 animate-spin" /> Preparing approved CLI work…</span>
                       ) : null}
                       {item.planStatus === 'sent' ? (
-                        <span><Check className="h-3.5 w-3.5" /> Approved; prompts were sent to the CLI</span>
+                        <>
+                          <span><Check className="h-3.5 w-3.5" /> Approved; prompts were sent to the CLI</span>
+                          {item.runId ? (
+                            <button type="button" onClick={() => void cancelRun(item.id, item.runId)} disabled={Boolean(cancellingRunId)}>
+                              {cancellingRunId === item.runId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                              Cancel run
+                            </button>
+                          ) : null}
+                        </>
                       ) : null}
                       {item.planStatus === 'rejected' ? (
                         <span>Plan rejected; no CLI was started.</span>
+                      ) : null}
+                      {item.planStatus === 'cancelled' ? (
+                        <span>Run cancelled; no further Secretary prompts will be sent.</span>
                       ) : null}
                       {item.planStatus === 'failed' ? (
                         <span>Plan did not start. Create a fresh plan after resolving the issue.</span>
                       ) : null}
                     </div>
+                    ) : null}
                   </div>
                 ) : null}
               </article>

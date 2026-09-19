@@ -322,6 +322,13 @@ input:not(.xterm-helper-textarea), select, textarea:not(.xterm-helper-textarea) 
 .secretary-assignments strong { display: block; margin-top: 5px; color: var(--color-text-primary); font-size: 10px; font-weight: 620; }
 .secretary-assignments p { display: -webkit-box; overflow: hidden; margin: 4px 0 0; color: var(--color-text-secondary); font-size: 10px; line-height: 15px; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .secretary-assignments small { min-width: 0; overflow: hidden; color: var(--color-text-muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.secretary-plan-editor { display: grid; gap: 10px; }
+.secretary-plan-editor label { display: grid; gap: 5px; }
+.secretary-plan-editor label > span { color: var(--color-purple-light); font-size: 9px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
+.secretary-plan-editor input,
+.secretary-plan-editor textarea { width: 100%; resize: vertical; border: 1px solid rgb(196 181 255 / .24); border-radius: 8px; padding: 7px 8px; outline: 0; background: rgb(0 0 0 / .24); color: var(--color-text-primary); font: inherit; font-size: 10px; line-height: 15px; }
+.secretary-plan-editor input:focus,
+.secretary-plan-editor textarea:focus { border-color: rgb(196 181 255 / .64); box-shadow: 0 0 0 2px rgb(119 103 220 / .16); }
 .secretary-plan-actions { display: flex; align-items: center; justify-content: space-between; gap: 9px; margin-top: 11px; padding-top: 10px; border-top: 1px solid rgb(255 255 255 / .06); }
 .secretary-plan-actions > span { display: inline-flex; align-items: center; gap: 5px; color: #7ac99c; font-size: 9px; }
 .secretary-plan-actions button { display: inline-flex; min-height: 29px; align-items: center; justify-content: center; gap: 5px; border: 1px solid rgb(196 181 255 / .35); border-radius: 8px; padding: 0 10px; background: #7767dc; color: white; cursor: pointer; font-size: 10px; font-weight: 600; }
@@ -428,6 +435,21 @@ input:not(.xterm-helper-textarea), select, textarea:not(.xterm-helper-textarea) 
 }
 .secretary-bubble .secretary-plan { margin-top: 8px; }
 .secretary-chat-log .secretary-inline-message { align-self: stretch; }
+.secretary-report-facts {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  padding-top: 7px;
+  font-size: 10px;
+}
+.secretary-report-facts-heading { display: flex; align-items: center; justify-content: space-between; color: var(--color-text-muted); }
+.secretary-report-facts-heading strong { color: var(--color-text-primary); font-family: var(--font-mono); font-weight: 600; }
+.secretary-report-facts ul { display: grid; gap: 2px; margin: 0; padding-left: 16px; color: var(--color-text-secondary); font-family: var(--font-mono); font-size: 9px; }
+.secretary-report-empty, .secretary-report-warning { margin: 0; color: var(--color-text-muted); font-size: 9px; line-height: 1.4; }
+.secretary-report-warning { color: #e6bd7c; }
+.secretary-review-changes { justify-self: start; border: 1px solid rgb(139 124 248 / 0.28); border-radius: 6px; padding: 4px 7px; color: var(--color-text-primary); background: rgb(139 124 248 / 0.1); font-size: 9px; }
+.secretary-review-changes:hover { border-color: rgb(139 124 248 / 0.5); background: rgb(139 124 248 / 0.18); }
 
 .app-header {
   height: 42px;

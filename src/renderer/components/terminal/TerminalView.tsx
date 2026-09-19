@@ -458,12 +458,14 @@ export function TerminalView({
       }
 
       let cwd = project?.folderPath ?? ''
+      let worktreePath: string | undefined
       const panelAtLaunch = Object.values(useWorkspaceStore.getState().workspaces)
         .flatMap((workspace) => workspace.panels)
         .find((panel) => panel.id === sessionId)
       const resolverCwd = panelAtLaunch?.panelRole === 'resolver' ? panelAtLaunch.cwdOverride : panelAtLaunch?.cwdOverride
       if (resolverCwd) {
         cwd = resolverCwd
+        worktreePath = resolverCwd
       }
       const sharedTree = panelAtLaunch?.workspaceIsolation === 'shared' && panelAtLaunch?.panelRole !== 'resolver'
       const isolate =
@@ -481,6 +483,7 @@ export function TerminalView({
           mode: 'park'
         })
         useWorkspaceStore.getState().setPanelWorktree(sessionId, null)
+        worktreePath = undefined
       }
       if (isolate && cwd) {
         const isolated = await window.api.git.ensureWorktree({
@@ -491,6 +494,7 @@ export function TerminalView({
         })
         if (isolated.ok && isolated.worktreePath) {
           cwd = isolated.worktreePath
+          worktreePath = isolated.worktreePath
           useWorkspaceStore.getState().setPanelWorktree(sessionId, isolated.worktreePath)
           term.writeln(
             '\x1b[90m[Bikorch] Separate workspace — this agent edits its own copy until you apply it to the project.\x1b[0m'
@@ -510,9 +514,15 @@ export function TerminalView({
       if (projectIdNow && folderNow) {
         void useIsolationStore.getState().inspect(projectIdNow, folderNow)
       }
+      if (!projectIdAtMount) {
+        setStatus(sessionId, 'error', 'Open this terminal from a project workspace first.')
+        return
+      }
       const result: PtyCreateResponse = await window.api.pty.create({
         sessionId,
+        projectId: projectIdAtMount,
         cwd,
+        ...(worktreePath ? { worktreePath } : {}),
         kind,
         cols: term.cols,
         rows: term.rows,

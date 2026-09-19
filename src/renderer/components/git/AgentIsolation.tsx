@@ -148,6 +148,10 @@ export function AgentIsolationBlock({
   const handleApply = async (card: AgentWorkCard): Promise<void> => {
     const lane = laneFor(card)
     if (!lane || apply) return
+    const confirmed = window.confirm(
+      `Apply ${card.title || agentKindLabel(card.kind)} changes to the project? Review the diff first; this is a separate approval from starting the CLI task.`
+    )
+    if (!confirmed) return
     const current = useIsolationStore.getState().byProject[projectId]?.fold ?? fold
     const alreadyPrepared =
       Boolean(current) &&

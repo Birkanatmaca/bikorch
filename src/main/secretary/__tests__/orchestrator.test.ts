@@ -4,7 +4,8 @@ const mocks = vi.hoisted(() => ({
   getSecretaryStore: vi.fn(),
   getSessionSnapshot: vi.fn(),
   writeForSecretary: vi.fn(),
-  trackSecretaryRun: vi.fn()
+  trackSecretaryRun: vi.fn(),
+  loadSnapshot: vi.fn()
 }))
 
 vi.mock('../store', () => ({ getSecretaryStore: mocks.getSecretaryStore }))
@@ -15,8 +16,9 @@ vi.mock('../../cli/pty-manager', () => ({
   }
 }))
 vi.mock('../result-collector', () => ({ trackSecretaryRun: mocks.trackSecretaryRun }))
+vi.mock('../../persistence/database', () => ({ loadSnapshot: mocks.loadSnapshot }))
 
-import { dispatchSecretaryRun } from '../orchestrator'
+import { dispatchSecretaryRun, prepareSecretaryRun } from '../orchestrator'
 
 const runId = '11111111-1111-4111-8111-111111111111'
 const threadId = '22222222-2222-4222-8222-222222222222'
@@ -48,6 +50,7 @@ function approvedRun() {
     openKinds: [],
     errorCode: null,
     errorMessage: null,
+    planRevision: 1,
     createdAt: 1,
     updatedAt: 1
   }
@@ -56,6 +59,14 @@ function approvedRun() {
 describe('Secretary orchestrator', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.loadSnapshot.mockReturnValue({
+      projects: [{ id: '44444444-4444-4444-8444-444444444444', name: 'Secretary project', folderPath: 'C:\\secretary-project' }],
+      workspaces: {
+        '44444444-4444-4444-8444-444444444444': {
+          panels: [{ id: sessionId, type: 'cursor', title: 'Cursor', zone: 'center' }]
+        }
+      }
+    })
   })
 
   it('writes only the persisted approved instruction to the compatible CLI session', async () => {
@@ -68,7 +79,13 @@ describe('Secretary orchestrator', () => {
       appendMessage: vi.fn()
     }
     mocks.getSecretaryStore.mockReturnValue(store)
-    mocks.getSessionSnapshot.mockReturnValue({ sessionId, kind: 'cursor', status: 'waiting' })
+    mocks.getSessionSnapshot.mockReturnValue({
+      sessionId,
+      projectId: run.projectId,
+      kind: 'cursor',
+      cwd: 'C:\\secretary-project',
+      status: 'waiting'
+    })
     mocks.writeForSecretary.mockResolvedValue(undefined)
 
     const result = await dispatchSecretaryRun({
@@ -83,6 +100,28 @@ describe('Secretary orchestrator', () => {
     ))
     expect(mocks.writeForSecretary).toHaveBeenNthCalledWith(2, sessionId, '\r')
     expect(store.updateRun).toHaveBeenCalledWith(runId, { status: 'running' })
+  })
+
+  it('requires a valid project/session handshake before approval', () => {
+    const run = { ...approvedRun(), status: 'awaiting-approval' as const }
+    mocks.getSecretaryStore.mockReturnValue({ getRun: vi.fn().mockReturnValue(run) })
+    mocks.getSessionSnapshot.mockReturnValue({
+      sessionId,
+      projectId: run.projectId,
+      kind: 'cursor',
+      cwd: 'C:\\secretary-project',
+      status: 'waiting'
+    })
+
+    expect(prepareSecretaryRun({
+      runId,
+      projectId: run.projectId,
+      assignments: [{ assignmentId, sessionId }]
+    })).toEqual({
+      runId,
+      projectId: run.projectId,
+      preparedAssignmentIds: [assignmentId]
+    })
   })
 
   it('refuses any run that was not explicitly approved', async () => {
@@ -104,6 +143,25 @@ describe('Secretary orchestrator', () => {
     await expect(dispatchSecretaryRun({
       runId,
       projectId: '55555555-5555-4555-8555-555555555555',
+      assignments: [{ assignmentId, sessionId }]
+    })).rejects.toThrow(/different project/i)
+    expect(mocks.writeForSecretary).not.toHaveBeenCalled()
+  })
+
+  it('does not dispatch a CLI session owned by another project', async () => {
+    const run = approvedRun()
+    mocks.getSecretaryStore.mockReturnValue({ getRun: vi.fn().mockReturnValue(run) })
+    mocks.getSessionSnapshot.mockReturnValue({
+      sessionId,
+      projectId: '55555555-5555-4555-8555-555555555555',
+      kind: 'cursor',
+      cwd: 'C:\\secretary-project',
+      status: 'waiting'
+    })
+
+    await expect(dispatchSecretaryRun({
+      runId,
+      projectId: run.projectId,
       assignments: [{ assignmentId, sessionId }]
     })).rejects.toThrow(/different project/i)
     expect(mocks.writeForSecretary).not.toHaveBeenCalled()

@@ -1350,19 +1350,19 @@ Bu sayede CI üzerinde gerçek Cursor/Claude/Codex hesabı olmadan bütün orkes
 
 ### Güncel uygulama özeti — 2026-09-19
 
-**TAMAMLANDI:** Approval gate, kalıcı thread/run/assignment/onay store'u, restart recovery, proje bağlamı, redaction, strict structured output, plan policy validator/router, main-process dispatch, bracketed-paste gönderimi, PTY gözlemcisi, `BIKORCH_RESULT` protokolü, result collector, `needs-user` durumu, final rapor ve onay gerektiren takip planı uygulanmıştır.
+**TAMAMLANDI:** Approval gate, kalıcı thread/run/assignment/onay store'u, restart recovery, plan revision UI, aktif-agent bağlamı, proje bağlamı, redaction, strict structured output, plan policy validator/router, proje/session sahipliği ve lock, explicit `prepareRun` handshake'i, main-process dispatch, bracketed-paste gönderimi, PTY gözlemcisi, `BIKORCH_RESULT` protokolü, Git changed-files doğrulaması, result collector, `needs-user`, iptal/timeout/idempotency ve sınırlı takip döngüsü, final rapor ve onay gerektiren takip planı uygulanmıştır.
 
-**KALAN EKSİKLER:** Kalıcı plan revision UI'ı, active-agent bağlamı, session sahipliği ve project lock, Git changed-files doğrulaması, takip turu/iptal sınırları, diff/apply ve conflict resolver, proje dışı bildirimler, E2E/security/retention/metrics testleri.
+**KALAN EKSİKLER:** Explicit dependency DAG/parallel scheduler, conflict resolver, proje dışı bildirimler, E2E/security/retention/metrics testleri.
 
 ### Faz 0 — Mevcut davranışı güvenli hale getirme
 
-**Durum (2026-09-18):** Onay kapısı, trust davranışı, güvenli prompt gönderimi ve proje değişimi guard'ı uygulandı. Kalıcı plan düzenleme sonraki domain-store fazına taşındı.
+**Durum (2026-09-19):** Onay kapısı, trust davranışı, güvenli prompt gönderimi, proje değişimi guard'ı ve kalıcı plan düzenleme uygulandı. Kullanıcı plan özeti ile assignment başlık/prompt metnini onaydan önce düzenler; ana süreç planı tekrar policy validator'dan geçirir ve yeni revision'ı kalıcı olarak kaydeder. Eski bir ekranda kalan revision'ın yeni planı ezmesi engellenir.
 
 Amaç: Yeni mimari tamamlanmadan otomatik çalıştırma riskini kaldırmak.
 
 - [x] Plan geldikten sonra otomatik `dispatch` çağrısını kaldır. — **TAMAMLANDI**
 - [x] Gerçek `Approve` ve `Reject` UI durumlarını ekle. — **TAMAMLANDI**
-- [ ] Kalıcı plan düzenleme/revision UI'ını ekle.
+- [x] Kalıcı plan düzenleme/revision UI'ını ekle. — **TAMAMLANDI**
 - [x] Workspace trust otomatik kabulünü kapat. — **TAMAMLANDI**
 - [x] Prompt gönderiminde `submitCliPrompt` kullan. — **TAMAMLANDI**
 - [x] Aynı planı ikinci kez göndermeyi UI guard ile engelle. — **TAMAMLANDI**
@@ -1387,27 +1387,28 @@ Amaç: Yeni mimari tamamlanmadan otomatik çalıştırma riskini kaldırmak.
 
 - [x] `SecretaryProjectContextService` oluştur. — **TAMAMLANDI**
 - [x] Git, stack, talimat, tree ve task özetlerini ekle. — **TAMAMLANDI**
-- [ ] Active agent özetini ekle.
+- [x] Active agent özetini ekle. — **TAMAMLANDI**
 - [x] Path guard, boyut limiti ve redaction uygula. — **TAMAMLANDI**
 - [x] Planner için JSON Schema structured output ekle. — **TAMAMLANDI**
 - [x] `SecretaryPlanValidator` ve deterministik router ekle. — **TAMAMLANDI**
 - [x] API timeout/retry/safe error katmanını tamamla. — **TAMAMLANDI**
 
-**Durum (2026-09-18):** Planner'a; sınırlandırılmış dosya ağacı, güvenli kök talimatları, package/script özeti, teknoloji taraması, git özeti ve kayıtlı görevler veriliyor. Gizli dosyalar, bağımlılık klasörleri ve mutlak proje yolu dışarıda bırakılıyor; içerik saklanmadan ve modele gönderilmeden redakte ediliyor. API yanıtı artık `strict` JSON Schema ile plan/sohbet biçimine zorlanıyor ve mevcut runtime plan ayrıştırıcısından geçiyor. Runtime validator; boş veya eksik planı, uyumsuz CLI türünü, tehlikeli silme/commit/push komutlarını ve secret sızdırma talimatlarını reddediyor. Panel seçimi modelin bildirdiği kimlikten bağımsız olarak boşta ve daha az kullanılan uyumlu panele yönlendiriliyor. İstekler 45 saniye sonra zaman aşımına uğrar; geçici ağ/servis sorunları bir kez yeniden denenir ve kullanıcıya ham API gövdesi gösterilmez. Aktif ajan özeti sonraki adımdır.
+**Durum (2026-09-19):** Planner'a; sınırlandırılmış dosya ağacı, güvenli kök talimatları, package/script özeti, teknoloji taraması, git özeti, kayıtlı görevler ve bu projeye ait canlı CLI/agent özeti veriliyor. Aktif agent özetinde yalnız tür, redakte başlık, çalışma durumu ve izolasyon bilgisi bulunur; mutlak dosya yolu veya hesap kimliği bulunmaz. Gizli dosyalar, bağımlılık klasörleri ve mutlak proje yolu dışarıda bırakılıyor; içerik saklanmadan ve modele gönderilmeden redakte ediliyor. API yanıtı artık `strict` JSON Schema ile plan/sohbet biçimine zorlanıyor ve mevcut runtime plan ayrıştırıcısından geçiyor. Runtime validator; boş veya eksik planı, uyumsuz CLI türünü, tehlikeli silme/commit/push komutlarını ve secret sızdırma talimatlarını reddediyor. Panel seçimi modelin bildirdiği kimlikten bağımsız olarak boşta ve daha az kullanılan uyumlu panele yönlendiriliyor. İstekler 45 saniye sonra zaman aşımına uğrar; geçici ağ/servis sorunları bir kez yeniden denenir ve kullanıcıya ham API gövdesi gösterilmez.
 
 **Çıkış kriteri:** Plan gerçek proje özelliklerini kullanıyor ve model çıktısı policy validator'dan geçmeden onaya sunulmuyor.
 
 ### Faz 3 — Main-process orkestratör ve PTY event bus
 
 - [x] `PtyManager` internal observer/snapshot desteği ekle. — **TAMAMLANDI**
-- [ ] Session sahipliğine `projectId`, cwd, account ve worktree bilgisi ekle.
+- [x] Session sahipliğine `projectId`, cwd, account ve worktree bilgisi ekle. — **TAMAMLANDI**
 - [x] `SecretaryOrchestratorService` oluştur. — **TAMAMLANDI**
-- [ ] Dependency scheduler ve project/session lock ekle.
-- [ ] Explicit project'e panel/session hazırlama handshake'i ekle.
+- [x] Project/session lock ekle. — **TAMAMLANDI**
+- [x] Ordered dependency scheduler v1 ekle. — **TAMAMLANDI**
+- [x] Explicit project'e panel/session hazırlama handshake'i ekle. — **TAMAMLANDI**
 - [x] Bracketed paste ile onaylı prompt dispatch'ini main process'e taşı. — **TAMAMLANDI**
-- [ ] İptal/timeout/idempotency davranışlarını tamamla.
+- [x] İptal/timeout/idempotency davranışlarını tamamla. — **TAMAMLANDI**
 
-**Durum (2026-09-18):** Arayüz artık yalnızca plan için görünür CLI panelini hazırlar. Ana süreç; kayıtlı run'ın gerçekten `approved` olduğunu, çağrının aynı `projectId` için geldiğini, her assignment'ın tam olarak bir oturuma bağlandığını ve CLI türünün eşleştiğini doğrular; ardından kalıcı plandaki promptu bracketed-paste ile gönderip run'ı `running` durumuna alır. Aynı onay kaydı ikinci kez dispatch edilemez. `PtyManager` iç gözlemci, session snapshot ve sınırlı output tail desteği sağlıyor. Project/session sahipliği, event cursor'ları ve scheduler sonraki adımdır.
+**Durum (2026-09-19):** Arayüz plan için görünür CLI panelini hazırlar ve bu workspace bilgisini dispatch öncesi kalıcı hale getirir. Kullanıcı onayına geçmeden hemen önce renderer, ana süreçte `prepareRun` handshake'i çağırır; ana süreç run'ın hâlâ onay beklediğini, aynı `projectId`'ye ait olduğunu, her assignment'ın tek ve hazır bir CLI oturumuna bağlandığını, CLI türü/hesabı/paneli ile çalışma dizini ve worktree bilgisinin hedef projeye ait olduğunu doğrular. Bu doğrulama geçmeden run `approved` durumuna alınmaz. Onaylı planın assignment'ları v1 scheduler'da kalıcı plan sırasıyla tek tek gönderilir; önceki assignment yapılandırılmış sonuç vermeden sonraki CLI promptu yazılmaz. Aynı onay kaydı ikinci kez dispatch edilemez; proje/session lock, durum makinesi ve tekil collector takibi idempotent tekrarları engeller. Kullanıcı aktif run'ı iptal edebilir, collector durur ve mümkünse PTY'ye interrupt gönderilir; sekiz dakikalık sonuç timeout'u kontrollü failure üretir. `PtyManager` iç gözlemci, session snapshot ve sınırlı output tail desteği sağlıyor. Açık dependency DAG ve bağımsız görevlerde kontrollü paralellik sonraki sertleştirme adımıdır.
 
 **Çıkış kriteri:** Onaylanan tek assignment doğru projede güvenilir biçimde başlatılıyor ve renderer state'inden bağımsız izleniyor.
 
@@ -1415,12 +1416,12 @@ Amaç: Yeni mimari tamamlanmadan otomatik çalıştırma riskini kaldırmak.
 
 - [x] CLI prompt wrapper ve BIKORCH_RESULT şemasını ekle. — **TAMAMLANDI**
 - [x] Result collector ve fallback detection geliştir. — **TAMAMLANDI**
-- [ ] Git snapshot ile changed files doğrulaması ekle.
+- [x] Git snapshot ile changed files doğrulaması ekle. — **TAMAMLANDI**
 - [x] `needs-user` soru akışını ekle. — **TAMAMLANDI**
 - [x] Next-decision model çağrısı ve validator ekle. — **TAMAMLANDI**
-- [ ] Follow-up tur, süre ve tekrar eden hata sınırlarını uygula.
+- [x] Follow-up tur, süre ve tekrar eden hata sınırlarını uygula. — **TAMAMLANDI**
 
-**Durum (2026-09-18):** Onaylı CLI promptuna sonuç şeması ekleniyor. CLI sonuna `BIKORCH_RESULT` JSON işaretini yazarsa ana süreç son geçerli işareti ayrıştırır; yazmazsa busy → waiting terminal geçişi kontrollü fallback olarak kullanılır. Workspace trust, terminal hatası veya sekiz dakikalık sonuç zaman aşımı başarısız run ve kullanıcıya görünür olay üretir. Çıktı bellek sınırında tutulur, redakte edilmeden API'ye veya kalıcı store'a geçmez. CLI `needs-user` sonucu verirse run duraklatılır ve kullanıcının yanıtı terminalde vermesi beklenir; yeni busy çıktısı gelince run otomatik izlemeye döner. Sonuçtan sonra model; yalnız özgün iş için gerçekten uygulama/doğrulama adımı kaldıysa yeni bir plan üretir; bu plan ayrı run olarak kaydedilir ve yeniden kullanıcı onayı ister. Git tabanlı changed-files doğrulaması ve takip turu limiti henüz yoktur.
+**Durum (2026-09-19):** Onaylı CLI promptuna sonuç şeması ekleniyor. CLI sonuna `BIKORCH_RESULT` JSON işaretini yazarsa ana süreç son geçerli işareti ayrıştırır; yazmazsa busy → waiting terminal geçişi kontrollü fallback olarak kullanılır. Dispatch öncesi ve sonuç anında Git snapshot alınır; nihai modele verilen changed-file/commit gerçekleri Git'ten gelir. CLI'nın bildirdiği ancak Git'te görünmeyen dosyalar ayrıca işaretlenir ve nihai raporda değişiklik gibi sunulamaz. Workspace trust, terminal hatası veya sekiz dakikalık sonuç zaman aşımı başarısız run ve kullanıcıya görünür olay üretir. Çıktı bellek sınırında tutulur, redakte edilmeden API'ye veya kalıcı store'a geçmez. CLI `needs-user` sonucu verirse run duraklatılır ve kullanıcının yanıtı terminalde vermesi beklenir; yeni busy çıktısı gelince run otomatik izlemeye döner. Sonuçtan sonra model; yalnız özgün iş için gerçekten uygulama/doğrulama adımı kaldıysa yeni bir plan üretir; bu plan ayrı run olarak kaydedilir ve yeniden kullanıcı onayı ister. Takip zinciri en fazla iki ek turla sınırlıdır. Kullanıcı aktif/bekleyen run'ı iptal ettiğinde collector durur, lock'lar bırakılır ve mümkünse CLI'ye kesme sinyali yazılır.
 
 **Çıkış kriteri:** Analiz → uygulama → doğrulama zinciri sınırlı ve izlenebilir biçimde tamamlanıyor.
 
@@ -1428,12 +1429,12 @@ Amaç: Yeni mimari tamamlanmadan otomatik çalıştırma riskini kaldırmak.
 
 - [x] Deterministik report input üret. — **TAMAMLANDI**
 - [x] Final report structured output ve UI bildirimi ekle. — **TAMAMLANDI**
-- [ ] Existing isolation/diff görünümüne geçiş ekle.
-- [ ] İkinci apply onayı ekle.
+- [x] Existing isolation/diff görünümüne geçiş ekle. — **TAMAMLANDI**
+- [x] İkinci apply onayı ekle. — **TAMAMLANDI**
 - [ ] Conflict/resolver akışına bağla.
 - [ ] Bildirim ve proje dışı aktif run göstergesi ekle.
 
-**Durum (2026-09-18):** Collector; başlangıç isteği, onaylı assignment özeti ve redakte CLI sonucundan deterministik bir rapor girdisi oluşturuyor. Secretary API bu girdiden katı JSON şemalı son açıklamayı üretir; API erişilemezse güvenli deterministik özet kullanılır. Rapor SQL konuşma geçmişine yazılır ve ilgili proje arayüzüne event olarak gelir. Diff/apply entegrasyonu sonraki aşamadadır.
+**Durum (2026-09-19):** Collector; başlangıç isteği, onaylı assignment özeti ve redakte CLI sonucundan deterministik bir rapor girdisi oluşturuyor. Secretary API bu girdiden katı JSON şemalı son açıklamayı üretir; API erişilemezse güvenli deterministik özet kullanılır. Rapor SQL konuşma geçmişine yazılır ve ilgili proje arayüzüne event olarak gelir. Ana süreç Git snapshot'ını rapor event'ine ekler; arayüz doğrulanmış dosyaları ve Git'in doğrulayamadığı CLI iddialarını ayırarak gösterir. `Review changes in Git` eylemi mevcut Changes/Agent Isolation/diff ekranına geçiş yapar. Agent Isolation'daki `Apply to Project` eylemi, CLI çalıştırma onayından ayrı ikinci bir kullanıcı onayı ister. Conflict/resolver bağlama işi hâlâ eksiktir.
 
 **Çıkış kriteri:** Kullanıcı ne yapıldığını ve değişikliklerin nerede olduğunu görebiliyor; ana proje yalnız ikinci onayla değişiyor.
 
@@ -1574,17 +1575,17 @@ Uygulama aşağıdaki koşulların tamamı sağlandığında hedefe ulaşmış s
 - [x] Kullanıcı mesajı sonrası Secretary proje bağlamını kullanarak plan oluşturuyor. — **TAMAMLANDI**
 - [x] Plan görünür biçimde onay bekliyor; onay öncesi CLI/panel/worktree yan etkisi yok. — **TAMAMLANDI**
 - [x] Onaylanan plan sürümü ve hash'i kalıcı olarak kaydediliyor. — **TAMAMLANDI**
-- [ ] CLI doğru `projectId`, account ve canonical workspace ile başlıyor.
-- [ ] Yazma görevi ana proje yerine izole worktree'de çalışıyor.
+- [x] CLI doğru `projectId`, account ve canonical workspace ile başlıyor. — **TAMAMLANDI**
+- [ ] Yazma görevi ana proje yerine izole worktree'de çalışıyor; panelde izolasyon yoksa hazırlama handshake'i eksiktir.
 - [x] Prompt bracketed paste ile tek assignment olarak gönderiliyor. — **TAMAMLANDI**
 - [x] Başka projeye geçmek devam eden run'ın hedefini değiştirmiyor. — **TAMAMLANDI**
 - [x] Her assignment'ın çıktısı prompt öncesi terminal geçmişinden ayrılıyor. — **TAMAMLANDI**
 - [x] CLI soru/izin beklediğinde süreç bunu completion saymıyor ve kullanıcıya iletiyor. — **TAMAMLANDI**
-- [ ] Takip promptları yalnız onaylanan kapsam ve tur sınırı içinde gönderiliyor.
-- [ ] Cancel gerçek run ve assignment durumunu değiştiriyor; mümkünse process'e interrupt gönderiyor.
+- [x] Takip promptları yalnız onaylanan kapsam ve tur sınırı içinde gönderiliyor. — **TAMAMLANDI**
+- [x] Cancel gerçek run ve assignment durumunu değiştiriyor; mümkünse process'e interrupt gönderiyor. — **TAMAMLANDI**
 - [x] Uygulama yeniden açıldığında bekleyen onaylar ve run geçmişi geri geliyor. — **TAMAMLANDI**
-- [ ] Nihai rapordaki dosya ve doğrulama bilgileri Git/process gerçekleriyle eşleşiyor.
-- [ ] Ana projeye apply ayrıca onaylanmadan yapılmıyor.
+- [x] Nihai rapordaki dosya ve doğrulama bilgileri Git/process gerçekleriyle eşleşiyor. — **TAMAMLANDI**
+- [x] Ana projeye apply ayrıca onaylanmadan yapılmıyor. — **TAMAMLANDI**
 - [x] Secretary API anahtarı renderer, DB, log, prompt veya CLI env içinde görünmüyor. — **TAMAMLANDI**
 - [x] Bir projenin mesajı, context'i veya CLI çıktısı başka projeye sızmıyor. — **TAMAMLANDI**
 - [ ] Fake CLI E2E testleri approval, success, question, crash, timeout ve recovery senaryolarını geçiyor.

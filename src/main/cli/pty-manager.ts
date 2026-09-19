@@ -24,8 +24,13 @@ import { appendOutputBuffer } from './pty-host/session-store'
 
 interface PtySession {
   id: string
+  projectId: string
   kind: PtyCreateRequest['kind']
   accountId?: string
+  /** Canonical working directory actually given to the spawned process. */
+  cwd: string
+  /** Equal to cwd when this session starts in an isolated/integration worktree. */
+  worktreePath?: string
   /** Present only for in-process (non-host) sessions. */
   process: IPty | null
   /** True when the process lives in the durable PTY host. */
@@ -40,8 +45,11 @@ interface PtySession {
 
 export interface PtySessionSnapshot {
   sessionId: string
+  projectId: string
   kind: PtyCreateRequest['kind']
   accountId?: string
+  cwd: string
+  worktreePath?: string
   status: PtySessionStatus
 }
 
@@ -69,8 +77,11 @@ class PtyManager {
     if (!session) return null
     return {
       sessionId: session.id,
+      projectId: session.projectId,
       kind: session.kind,
       ...(session.accountId ? { accountId: session.accountId } : {}),
+      cwd: session.cwd,
+      ...(session.worktreePath ? { worktreePath: session.worktreePath } : {}),
       status: session.status
     }
   }
@@ -166,9 +177,22 @@ class PtyManager {
       return { sessionId, status: 'error', error: 'Invalid session ID' }
     }
 
+    const cwd = resolveSafeCwd(request.cwd)
+    const worktreePath = request.worktreePath?.trim() ? cwd : undefined
     const existing = this.sessions.get(sessionId)
 
     if (existing?.kind === kind && existing.accountId === request.accountId) {
+      if (
+        existing.projectId !== request.projectId ||
+        existing.cwd !== cwd ||
+        existing.worktreePath !== worktreePath
+      ) {
+        return {
+          sessionId,
+          status: 'error',
+          error: 'This CLI session is already bound to a different project or workspace.'
+        }
+      }
       existing.webContents = webContents
       const nextCols = Math.max(20, Math.min(400, Math.floor(cols) || 80))
       const nextRows = Math.max(6, Math.min(200, Math.floor(rows) || 24))
@@ -229,7 +253,6 @@ class PtyManager {
       }
     }
 
-    const cwd = resolveSafeCwd(request.cwd)
     const candidates = resolveSpawnConfigCandidates(kind)
     let lastError: string | null = null
 
@@ -328,8 +351,11 @@ class PtyManager {
 
           const session: PtySession = {
             id: sessionId,
+            projectId: request.projectId,
             kind,
             ...(request.accountId ? { accountId: request.accountId } : {}),
+            cwd,
+            ...(worktreePath ? { worktreePath } : {}),
             process: null,
             durable: true,
             webContents,
@@ -370,8 +396,11 @@ class PtyManager {
 
         const session: PtySession = {
           id: sessionId,
+          projectId: request.projectId,
           kind,
           ...(request.accountId ? { accountId: request.accountId } : {}),
+          cwd,
+          ...(worktreePath ? { worktreePath } : {}),
           process: shellProcess,
           durable: false,
           webContents,

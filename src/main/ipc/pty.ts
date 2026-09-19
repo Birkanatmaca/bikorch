@@ -38,7 +38,10 @@ function validateCreateRequest(payload: unknown): payload is PtyCreateRequest {
   const req = payload as PtyCreateRequest
   return (
     isValidSessionId(req.sessionId) &&
+    typeof req.projectId === 'string' &&
+    /^[a-zA-Z0-9-]{8,100}$/.test(req.projectId) &&
     typeof req.cwd === 'string' &&
+    (req.worktreePath === undefined || (typeof req.worktreePath === 'string' && req.worktreePath.length > 0 && req.worktreePath.length <= 4096)) &&
     (req.launchMode === undefined || req.launchMode === 'normal' || req.launchMode === 'login') &&
     (req.accountId === undefined ||
       (typeof req.accountId === 'string' && req.accountId.length > 0 && req.accountId.length <= 200)) &&

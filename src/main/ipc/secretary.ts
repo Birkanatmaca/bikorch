@@ -2,6 +2,7 @@ import { BrowserWindow, ipcMain } from 'electron'
 import { SECRETARY_IPC } from '@shared/contracts/secretary'
 import {
   approveSecretaryPlan,
+  cancelSecretaryRun,
   clearSecretaryApiKey,
   chatWithSecretary,
   createSecretaryPlan,
@@ -13,11 +14,14 @@ import {
   listSecretaryRuns,
   listSecretaryThreads,
   rejectSecretaryPlan,
+  reviseSecretaryPlan,
   resetSecretaryUsage,
   saveSecretaryApiKey,
   updateSecretarySettings
 } from '../secretary/service'
-import { dispatchSecretaryRun } from '../secretary/orchestrator'
+import { dispatchSecretaryRun, prepareSecretaryRun } from '../secretary/orchestrator'
+import { cancelTrackedSecretaryRun } from '../secretary/result-collector'
+import { ptyManager } from '../cli/pty-manager'
 
 function assertTrustedSender(event: Electron.IpcMainInvokeEvent): void {
   if (event.sender.isDestroyed() || !BrowserWindow.fromWebContents(event.sender)) throw new Error('Unauthorized sender')
@@ -38,6 +42,15 @@ export function registerSecretaryHandlers(): void {
   ipcMain.handle(SECRETARY_IPC.GET_RUN, (event, runId: unknown) => { assertTrustedSender(event); return getSecretaryRun(runId) })
   ipcMain.handle(SECRETARY_IPC.APPROVE_PLAN, (event, runId: unknown) => { assertTrustedSender(event); return approveSecretaryPlan(runId) })
   ipcMain.handle(SECRETARY_IPC.REJECT_PLAN, (event, runId: unknown) => { assertTrustedSender(event); return rejectSecretaryPlan(runId) })
+  ipcMain.handle(SECRETARY_IPC.REVISE_PLAN, (event, request: unknown) => { assertTrustedSender(event); return reviseSecretaryPlan(request) })
+  ipcMain.handle(SECRETARY_IPC.CANCEL_RUN, async (event, request: unknown) => {
+    assertTrustedSender(event)
+    const cancelled = cancelSecretaryRun(request)
+    const sessionIds = cancelTrackedSecretaryRun(cancelled.id)
+    await Promise.all(sessionIds.map((sessionId) => ptyManager.writeForSecretary(sessionId, '\u0003').catch(() => undefined)))
+    return cancelled
+  })
+  ipcMain.handle(SECRETARY_IPC.PREPARE_RUN, (event, request: unknown) => { assertTrustedSender(event); return prepareSecretaryRun(request) })
   ipcMain.handle(SECRETARY_IPC.FAIL_APPROVED_RUN, (event, runId: unknown, reason: unknown) => { assertTrustedSender(event); return failApprovedSecretaryRun(runId, reason) })
   ipcMain.handle(SECRETARY_IPC.DISPATCH_RUN, (event, request: unknown) => { assertTrustedSender(event); return dispatchSecretaryRun(request) })
 }

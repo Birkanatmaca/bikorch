@@ -165,6 +165,7 @@ function rowToRun(row: Row): SecretaryRun | null {
   if (!id || !threadId || !projectId || !status || !RUN_STATUSES.has(status) || requestText === null || createdAt === null || updatedAt === null) {
     return null
   }
+  const plan = parsePlan(row['plan_json'])
   return {
     id,
     threadId,
@@ -172,7 +173,8 @@ function rowToRun(row: Row): SecretaryRun | null {
     status,
     requestText,
     reply: text(row['reply']),
-    plan: parsePlan(row['plan_json']),
+    plan,
+    planRevision: Math.max(0, integer(row['plan_revision']) ?? (plan ? 1 : 0)),
     openKinds: parseOpenKinds(row['open_kinds_json']),
     errorCode: text(row['error_code']),
     errorMessage: text(row['error_message']),
@@ -220,6 +222,7 @@ export function initSecretarySchema(db: Database): void {
       request_text TEXT NOT NULL,
       reply TEXT,
       plan_json TEXT,
+      plan_revision INTEGER NOT NULL DEFAULT 0,
       open_kinds_json TEXT NOT NULL DEFAULT '[]',
       error_code TEXT,
       error_message TEXT,
@@ -227,6 +230,10 @@ export function initSecretarySchema(db: Database): void {
       updated_at INTEGER NOT NULL
     );
   `)
+  const runColumns = toRows(db, 'PRAGMA table_info(secretary_runs)')
+  if (!runColumns.some((column) => text(column['name']) === 'plan_revision')) {
+    db.run('ALTER TABLE secretary_runs ADD COLUMN plan_revision INTEGER NOT NULL DEFAULT 0')
+  }
   db.run('CREATE INDEX IF NOT EXISTS secretary_runs_project ON secretary_runs (project_id, created_at DESC);')
   db.run('CREATE INDEX IF NOT EXISTS secretary_runs_thread ON secretary_runs (thread_id, created_at);')
   db.run('CREATE INDEX IF NOT EXISTS secretary_runs_status ON secretary_runs (status);')
@@ -255,7 +262,7 @@ export function initSecretarySchema(db: Database): void {
   `)
   db.run('CREATE INDEX IF NOT EXISTS secretary_approvals_run ON secretary_approvals (run_id, decided_at DESC);')
 
-  db.run('INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)', [
+  db.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [
     'secretary_schema_version',
     String(SECRETARY_SCHEMA_VERSION)
   ])
@@ -370,6 +377,7 @@ export class SqlSecretaryStore implements SecretaryStore {
       requestText: sanitizedText(input.requestText, 8_000),
       reply: null,
       plan: null,
+      planRevision: 0,
       openKinds: [],
       errorCode: null,
       errorMessage: null,
@@ -378,9 +386,9 @@ export class SqlSecretaryStore implements SecretaryStore {
     }
     this.db.run(
       `INSERT INTO secretary_runs (
-        id, thread_id, project_id, status, request_text, reply, plan_json, open_kinds_json,
+        id, thread_id, project_id, status, request_text, reply, plan_json, plan_revision, open_kinds_json,
         error_code, error_message, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, NULL, NULL, '[]', NULL, NULL, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, NULL, NULL, 0, '[]', NULL, NULL, ?, ?)`,
       [run.id, run.threadId, run.projectId, run.status, run.requestText, run.createdAt, run.updatedAt]
     )
     schedulePersistToDisk()
@@ -407,7 +415,8 @@ export class SqlSecretaryStore implements SecretaryStore {
     if (!existing) return null
     if (patch.status !== undefined && !isValidSecretaryRunTransition(existing.status, patch.status)) return null
     const now = Date.now()
-    const plan = patch.plan === undefined ? existing.plan : sanitizePlan(patch.plan)
+    const planChanged = patch.plan !== undefined
+    const plan = planChanged ? sanitizePlan(patch.plan ?? null) : existing.plan
     const next: SecretaryRun = {
       ...existing,
       ...patch,
@@ -415,17 +424,19 @@ export class SqlSecretaryStore implements SecretaryStore {
       ...(patch.errorCode !== undefined ? { errorCode: patch.errorCode === null ? null : sanitizedText(patch.errorCode, 120) } : {}),
       ...(patch.errorMessage !== undefined ? { errorMessage: patch.errorMessage === null ? null : sanitizedText(patch.errorMessage, 1_000) } : {}),
       plan,
+      planRevision: planChanged ? existing.planRevision + 1 : existing.planRevision,
       openKinds: patch.openKinds === undefined ? existing.openKinds : parseOpenKinds(JSON.stringify(patch.openKinds)),
       updatedAt: now
     }
     this.db.run(
       `UPDATE secretary_runs SET
-        status = ?, reply = ?, plan_json = ?, open_kinds_json = ?, error_code = ?, error_message = ?, updated_at = ?
+        status = ?, reply = ?, plan_json = ?, plan_revision = ?, open_kinds_json = ?, error_code = ?, error_message = ?, updated_at = ?
       WHERE id = ?`,
       [
         next.status,
         next.reply,
         next.plan ? JSON.stringify(next.plan) : null,
+        next.planRevision,
         JSON.stringify(next.openKinds),
         next.errorCode,
         next.errorMessage,

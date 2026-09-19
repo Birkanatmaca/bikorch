@@ -59,7 +59,7 @@ describe('PTY host failed spawn', () => {
   it('releases the host when every spawn candidate fails', async () => {
     vi.useFakeTimers()
     const result = await ptyManager.create(
-      { sessionId: 'failed-host', kind: 'claude', cwd: '.' },
+      { sessionId: 'failed-host', projectId: 'project-1234', kind: 'claude', cwd: '.' },
       contents
     )
     expect(result.status).toBe('error')

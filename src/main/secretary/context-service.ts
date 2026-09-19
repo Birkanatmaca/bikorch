@@ -1,10 +1,14 @@
 import { lstat, readdir, readFile, realpath } from 'fs/promises'
 import { basename, join, relative } from 'path'
 import type { SecretaryProjectRef } from '@shared/contracts/secretary'
+import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
+import type { CliUsageKind } from '@shared/contracts/usage'
+import type { PtySessionStatus } from '@shared/contracts/pty'
 import { scanProjectLanguages } from '../developer-intelligence/project-scan'
 import { redactSecrets } from '../developer-intelligence/redaction'
 import { getGitStatus } from '../git'
 import { loadSnapshot } from '../persistence/database'
+import { ptyManager } from '../cli/pty-manager'
 
 const SKIPPED_DIRECTORIES = new Set([
   '.git',
@@ -28,6 +32,8 @@ const INSTRUCTION_FILES = ['AGENTS.md', 'CONTRIBUTING.md', 'README.md']
 const MAX_TREE_ENTRIES = 250
 const MAX_TREE_DEPTH = 4
 const MAX_INSTRUCTION_CHARS = 4_000
+const MAX_ACTIVE_AGENTS = 8
+const CLI_KINDS = new Set<string>(AI_ACCOUNT_KINDS)
 
 export interface SecretaryProjectContext {
   project: {
@@ -55,6 +61,13 @@ export interface SecretaryProjectContext {
   instructions: Array<{ path: string; content: string }>
   tree: Array<{ path: string; kind: 'file' | 'directory' }>
   tasks: Array<{ title: string; status: string; priority: string }>
+  activeAgents: Array<{
+    kind: CliUsageKind
+    title: string
+    status: 'starting' | 'running' | 'waiting' | 'busy'
+    isolation: 'isolated' | 'shared'
+    hasWorktree: boolean
+  }>
   warnings: string[]
 }
 
@@ -152,8 +165,31 @@ function emptyContext(project: SecretaryProjectRef, warning: string): SecretaryP
     instructions: [],
     tree: [],
     tasks: [],
+    activeAgents: [],
     warnings: [warning]
   }
+}
+
+function isActiveSessionStatus(
+  status: PtySessionStatus
+): status is Extract<PtySessionStatus, 'starting' | 'running' | 'waiting' | 'busy'> {
+  return status === 'starting' || status === 'running' || status === 'waiting' || status === 'busy'
+}
+
+function activeAgentsFor(projectId: string, snapshot: ReturnType<typeof loadSnapshot> | null): SecretaryProjectContext['activeAgents'] {
+  const panels = snapshot?.workspaces[projectId]?.panels ?? []
+  return panels.flatMap((panel) => {
+    if (!CLI_KINDS.has(panel.type)) return []
+    const session = ptyManager.getSessionSnapshot(panel.id)
+    if (!session || session.kind !== panel.type || !isActiveSessionStatus(session.status)) return []
+    return [{
+      kind: panel.type as CliUsageKind,
+      title: redactSecrets(panel.title).text.trim().slice(0, 120) || `${panel.type} CLI`,
+      status: session.status,
+      isolation: panel.workspaceIsolation === 'isolated' ? 'isolated' as const : 'shared' as const,
+      hasWorktree: Boolean(panel.worktreePath)
+    }]
+  }).slice(0, MAX_ACTIVE_AGENTS)
 }
 
 /**
@@ -187,6 +223,7 @@ export async function buildSecretaryProjectContext(project: SecretaryProjectRef)
     status: task.status,
     priority: task.priority
   }))
+  const activeAgents = activeAgentsFor(project.id, savedSnapshot)
 
   return {
     project: { id: project.id, name: project.name, rootName: basename(root), available: true },
@@ -211,6 +248,7 @@ export async function buildSecretaryProjectContext(project: SecretaryProjectRef)
     instructions,
     tree: treeResult.entries,
     tasks,
+    activeAgents,
     warnings: treeResult.entries.length >= MAX_TREE_ENTRIES
       ? ['The project tree was truncated to a safe planning limit.']
       : []

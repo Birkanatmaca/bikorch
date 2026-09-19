@@ -1,6 +1,6 @@
 import type { CliUsageInfo, CliUsageKind } from './usage'
 
-export const SECRETARY_SCHEMA_VERSION = 1
+export const SECRETARY_SCHEMA_VERSION = 2
 
 export type SecretaryThreadStatus = 'active' | 'archived'
 
@@ -98,6 +98,8 @@ export interface SecretaryChatResponse {
   /** Present when the local persistence database is available. */
   runId?: string
   runStatus?: SecretaryRunStatus
+  /** Version of the persisted plan when a run was created. */
+  planRevision?: number
 }
 
 export interface SecretaryThread {
@@ -128,6 +130,8 @@ export interface SecretaryRun {
   requestText: string
   reply: string | null
   plan: SecretaryPlan | null
+  /** Increments whenever a pending plan is persisted or revised. */
+  planRevision: number
   openKinds: CliUsageKind[]
   errorCode: string | null
   errorMessage: string | null
@@ -156,9 +160,40 @@ export interface SecretaryRunDispatchRequest {
   }>
 }
 
+/** Read-only handshake used immediately before approval/dispatch. */
+export interface SecretaryRunPreparationResult {
+  runId: string
+  projectId: string
+  preparedAssignmentIds: string[]
+}
+
+/**
+ * The renderer may revise wording before approval, but cannot replace the
+ * persisted assignment identity, CLI kind, or safety policy.
+ */
+export interface SecretaryPlanRevisionRequest {
+  runId: string
+  projectId: string
+  /** Reject stale editor saves instead of overwriting a newer revision. */
+  expectedRevision: number
+  overview: string
+  assignments: Array<{
+    id: string
+    title: string
+    instruction: string
+  }>
+  panels: SecretaryPanelContext[]
+  usage: CliUsageInfo[]
+}
+
 export interface SecretaryRunDispatchResult {
   run: SecretaryRun
   dispatchedAssignmentIds: string[]
+}
+
+export interface SecretaryRunCancelRequest {
+  runId: string
+  projectId: string
 }
 
 export type SecretaryEvent =
@@ -167,6 +202,9 @@ export type SecretaryEvent =
       projectId: string
       runId: string
       reply: string
+      /** Git snapshot facts captured by the main process, not CLI claims. */
+      changedFiles: string[]
+      unverifiedReportedFiles: string[]
     }
   | {
       type: 'run-followup'
@@ -205,6 +243,9 @@ export const SECRETARY_IPC = {
   GET_RUN: 'secretary:getRun',
   APPROVE_PLAN: 'secretary:approvePlan',
   REJECT_PLAN: 'secretary:rejectPlan',
+  REVISE_PLAN: 'secretary:revisePlan',
+  CANCEL_RUN: 'secretary:cancelRun',
+  PREPARE_RUN: 'secretary:prepareRun',
   FAIL_APPROVED_RUN: 'secretary:failApprovedRun',
   DISPATCH_RUN: 'secretary:dispatchRun',
   COMPLETE_RUN: 'secretary:completeRun',

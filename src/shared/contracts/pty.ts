@@ -18,7 +18,11 @@ export type PtyLaunchMode = 'normal' | 'login'
 
 export interface PtyCreateRequest {
   sessionId: string
+  /** Immutable workspace owner captured when the terminal panel starts. */
+  projectId: string
   cwd: string
+  /** Present when this panel runs in an isolated or integration worktree. */
+  worktreePath?: string
   kind: PtyKind
   cols?: number
   rows?: number

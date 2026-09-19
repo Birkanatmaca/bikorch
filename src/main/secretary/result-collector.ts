@@ -1,10 +1,14 @@
 import type { PtyEvent } from '@shared/contracts/pty'
+import type { GitSessionSnapshot } from '@shared/contracts/git'
 import type { SecretaryAssignment, SecretaryRun } from '@shared/contracts/secretary'
-import { readSecretaryCliResult, type SecretaryCliOutcome } from '@shared/secretary-result-protocol'
+import { formatCliPaste } from '@shared/cli-prompt'
+import { readSecretaryCliResult, wrapSecretaryCliInstruction, type SecretaryCliOutcome } from '@shared/secretary-result-protocol'
 import { ptyManager } from '../cli/pty-manager'
+import { snapshotAgentGit } from '../git/session-snapshot'
 import { emitSecretaryEvent } from './events'
 import { finalizeSecretaryRun, type SecretaryCliResult } from './service'
 import { getSecretaryStore } from './store'
+import { releaseSecretaryRunLock } from './run-lock'
 
 const OUTPUT_LIMIT = 8_000
 const RUN_TIMEOUT_MS = 8 * 60_000
@@ -15,11 +19,15 @@ interface Target {
   output: string
   sawBusy: boolean
   outcome: SecretaryCliOutcome | null
+  cwd: string
+  gitStart: GitSessionSnapshot
+  reportedChangedFiles: string[]
 }
 
 interface TrackedRun {
   run: SecretaryRun
   targets: Map<string, Target>
+  pending: Array<{ assignment: SecretaryAssignment; sessionId: string; cwd: string; gitStart: GitSessionSnapshot | null }>
   timer: ReturnType<typeof setTimeout>
   finalizing: boolean
 }
@@ -48,12 +56,28 @@ function inferActivity(buffer: string): 'waiting' | 'busy' | null {
   return null
 }
 
-function toResult(target: Target): SecretaryCliResult {
+function unique(values: string[], limit: number): string[] {
+  return [...new Set(values.filter(Boolean))].slice(0, limit)
+}
+
+async function toResult(target: Target): Promise<SecretaryCliResult> {
+  const gitEnd = await snapshotAgentGit(target.cwd, target.gitStart.headSha ?? undefined)
+  const changedFiles = unique(gitEnd.changedFiles, 80)
+  const changed = new Set(changedFiles)
+  const reportedChangedFiles = unique(target.reportedChangedFiles, 30)
   return {
     kind: target.assignment.kind,
     title: target.assignment.title,
     output: target.output,
-    outcome: target.outcome ?? 'failed'
+    outcome: target.outcome ?? 'failed',
+    git: {
+      available: Boolean(target.gitStart.headSha || gitEnd.headSha || changedFiles.length || gitEnd.commits.length),
+      changedFiles,
+      commits: gitEnd.commits.slice(0, 20),
+      preexistingChangedFiles: unique(target.gitStart.changedFiles, 80),
+      reportedChangedFiles,
+      unverifiedReportedFiles: reportedChangedFiles.filter((path) => !changed.has(path))
+    }
   }
 }
 
@@ -66,9 +90,54 @@ function dropTrackedRun(runId: string): TrackedRun | null {
   return tracked
 }
 
+function toTarget(binding: { assignment: SecretaryAssignment; sessionId: string; cwd: string; gitStart: GitSessionSnapshot }): Target {
+  return {
+    assignment: binding.assignment,
+    sessionId: binding.sessionId,
+    output: '',
+    sawBusy: false,
+    outcome: null,
+    cwd: binding.cwd,
+    gitStart: binding.gitStart,
+    reportedChangedFiles: []
+  }
+}
+
+function waitForPasteCommit(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 120))
+}
+
+async function dispatchNextStep(
+  tracked: TrackedRun,
+  binding: { assignment: SecretaryAssignment; sessionId: string; cwd: string; gitStart: GitSessionSnapshot | null }
+): Promise<void> {
+  const readyBinding = {
+    ...binding,
+    gitStart: binding.gitStart ?? await snapshotAgentGit(binding.cwd)
+  }
+  tracked.targets.set(readyBinding.sessionId, toTarget(readyBinding))
+  trackedSessions.set(readyBinding.sessionId, tracked.run.id)
+  await ptyManager.writeForSecretary(
+    readyBinding.sessionId,
+    formatCliPaste(wrapSecretaryCliInstruction(readyBinding.assignment.instruction))
+  )
+  await waitForPasteCommit()
+  if (trackedRuns.get(tracked.run.id) !== tracked) return
+  await ptyManager.writeForSecretary(readyBinding.sessionId, '\r')
+}
+
+/** Stops observation before a cancellation interrupts the underlying terminal. */
+export function cancelTrackedSecretaryRun(runId: string): string[] {
+  const tracked = dropTrackedRun(runId)
+  if (!tracked) return []
+  releaseSecretaryRunLock(runId)
+  return [...tracked.targets.values()].map((target) => target.sessionId)
+}
+
 function failTrackedRun(runId: string, message: string): void {
   const tracked = dropTrackedRun(runId)
   if (!tracked) return
+  releaseSecretaryRunLock(runId)
   const store = getSecretaryStore()
   const current = store?.getRun(runId)
   if (store && (current?.status === 'running' || current?.status === 'needs-user')) {
@@ -81,11 +150,23 @@ function failTrackedRun(runId: string, message: string): void {
 async function finishTrackedRun(runId: string): Promise<void> {
   const tracked = trackedRuns.get(runId)
   if (!tracked || tracked.finalizing || [...tracked.targets.values()].some((target) => !target.outcome)) return
+  const next = tracked.pending.shift()
+  if (next) {
+    try {
+      await dispatchNextStep(tracked, next)
+    } catch (cause) {
+      failTrackedRun(runId, cause instanceof Error ? cause.message : 'Could not dispatch the next dependent CLI task.')
+    }
+    return
+  }
   tracked.finalizing = true
   const completed = dropTrackedRun(runId)
   if (!completed) return
   try {
-    const result = await finalizeSecretaryRun(runId, [...completed.targets.values()].map(toResult))
+    const results = await Promise.all([...completed.targets.values()].map(toResult))
+    const changedFiles = unique(results.flatMap((result) => result.git.changedFiles), 120)
+    const unverifiedReportedFiles = unique(results.flatMap((result) => result.git.unverifiedReportedFiles), 80)
+    const result = await finalizeSecretaryRun(runId, results)
     if (result.followUpRun?.plan) {
       emitSecretaryEvent({
         type: 'run-followup',
@@ -102,7 +183,9 @@ async function finishTrackedRun(runId: string): Promise<void> {
       type: 'run-report',
       projectId: result.completedRun.projectId,
       runId: result.completedRun.id,
-      reply: result.completedRun.reply ?? 'CLI work completed.'
+      reply: result.completedRun.reply ?? 'CLI work completed.',
+      changedFiles,
+      unverifiedReportedFiles
     })
   } catch {
     const message = 'The CLI finished, but Secretary could not prepare the final report.'
@@ -113,14 +196,24 @@ async function finishTrackedRun(runId: string): Promise<void> {
       store.appendMessage({ threadId: current.threadId, runId, role: 'assistant', type: 'error', content: message })
     }
     emitSecretaryEvent({ type: 'run-failed', projectId: completed.run.projectId, runId, message })
+  } finally {
+    // Keep project/session ownership until the final report event has been
+    // persisted and emitted; a new run must not race finalization.
+    releaseSecretaryRunLock(runId)
   }
 }
 
-function completeTarget(runId: string, sessionId: string, outcome: SecretaryCliOutcome): void {
+function completeTarget(
+  runId: string,
+  sessionId: string,
+  outcome: SecretaryCliOutcome,
+  reportedChangedFiles: string[] = []
+): void {
   const tracked = trackedRuns.get(runId)
   const target = tracked?.targets.get(sessionId)
   if (!tracked || !target || target.outcome) return
   target.outcome = outcome
+  target.reportedChangedFiles = unique(reportedChangedFiles, 30)
   void finishTrackedRun(runId)
 }
 
@@ -163,7 +256,7 @@ function handlePtyEvent(event: PtyEvent): void {
         return
       }
       resumeRunIfPaused(runId)
-      completeTarget(runId, event.sessionId, structured.outcome)
+      completeTarget(runId, event.sessionId, structured.outcome, structured.changedFiles)
       return
     }
     const activity = inferActivity(clean)
@@ -191,22 +284,22 @@ export function initSecretaryResultCollector(): void {
 }
 
 /** Starts collecting only after the durable approved prompts have been sent. */
-export function trackSecretaryRun(run: SecretaryRun, bindings: Array<{ assignment: SecretaryAssignment; sessionId: string }>): void {
+export function trackSecretaryRun(
+  run: SecretaryRun,
+  bindings: Array<{ assignment: SecretaryAssignment; sessionId: string; cwd: string; gitStart: GitSessionSnapshot | null }>
+): void {
   initSecretaryResultCollector()
   dropTrackedRun(run.id)
   const targets = new Map<string, Target>()
-  for (const binding of bindings) {
-    targets.set(binding.sessionId, {
-      assignment: binding.assignment,
-      sessionId: binding.sessionId,
-      output: '',
-      sawBusy: false,
-      outcome: null
-    })
-    trackedSessions.set(binding.sessionId, run.id)
+  const [first, ...pending] = bindings
+  if (first) {
+    const gitStart = first.gitStart
+    if (!gitStart) throw new Error('The first Secretary assignment is missing its Git baseline')
+    targets.set(first.sessionId, toTarget({ ...first, gitStart }))
+    trackedSessions.set(first.sessionId, run.id)
   }
   const timer = setTimeout(() => {
     failTrackedRun(run.id, 'The CLI did not return a result before the Secretary timeout.')
   }, RUN_TIMEOUT_MS)
-  trackedRuns.set(run.id, { run, targets, timer, finalizing: false })
+  trackedRuns.set(run.id, { run, targets, pending, timer, finalizing: false })
 }
