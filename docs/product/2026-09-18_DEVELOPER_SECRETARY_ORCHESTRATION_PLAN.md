@@ -1352,7 +1352,7 @@ Bu sayede CI üzerinde gerçek Cursor/Claude/Codex hesabı olmadan bütün orkes
 
 **TAMAMLANDI:** Approval gate, kalıcı thread/run/assignment/onay store'u, restart recovery, plan revision UI, aktif-agent bağlamı, proje bağlamı, redaction, strict structured output, plan policy validator/router, proje/session sahipliği ve lock, explicit `prepareRun` handshake'i, main-process dispatch, bracketed-paste gönderimi, PTY gözlemcisi, `BIKORCH_RESULT` protokolü, Git changed-files doğrulaması, result collector, `needs-user`, iptal/timeout/idempotency ve sınırlı takip döngüsü, final rapor ve onay gerektiren takip planı uygulanmıştır.
 
-**KALAN EKSİKLER:** Explicit dependency DAG/parallel scheduler, conflict resolver, proje dışı bildirimler, E2E/security/retention/metrics testleri.
+**KALAN EKSİKLER:** Explicit dependency DAG/parallel scheduler, conflict resolver, E2E/security/retention/metrics testleri.
 
 ### Faz 0 — Mevcut davranışı güvenli hale getirme
 
@@ -1432,9 +1432,9 @@ Amaç: Yeni mimari tamamlanmadan otomatik çalıştırma riskini kaldırmak.
 - [x] Existing isolation/diff görünümüne geçiş ekle. — **TAMAMLANDI**
 - [x] İkinci apply onayı ekle. — **TAMAMLANDI**
 - [ ] Conflict/resolver akışına bağla.
-- [ ] Bildirim ve proje dışı aktif run göstergesi ekle.
+- [x] Bildirim ve proje dışı aktif run göstergesi ekle. — **TAMAMLANDI**
 
-**Durum (2026-09-19):** Collector; başlangıç isteği, onaylı assignment özeti ve redakte CLI sonucundan deterministik bir rapor girdisi oluşturuyor. Secretary API bu girdiden katı JSON şemalı son açıklamayı üretir; API erişilemezse güvenli deterministik özet kullanılır. Rapor SQL konuşma geçmişine yazılır ve ilgili proje arayüzüne event olarak gelir. Ana süreç Git snapshot'ını rapor event'ine ekler; arayüz doğrulanmış dosyaları ve Git'in doğrulayamadığı CLI iddialarını ayırarak gösterir. `Review changes in Git` eylemi mevcut Changes/Agent Isolation/diff ekranına geçiş yapar. Agent Isolation'daki `Apply to Project` eylemi, CLI çalıştırma onayından ayrı ikinci bir kullanıcı onayı ister. Conflict/resolver bağlama işi hâlâ eksiktir.
+**Durum (2026-09-19):** Collector; başlangıç isteği, onaylı assignment özeti ve redakte CLI sonucundan deterministik bir rapor girdisi oluşturuyor. Secretary API bu girdiden katı JSON şemalı son açıklamayı üretir; API erişilemezse güvenli deterministik özet kullanılır. Rapor SQL konuşma geçmişine yazılır ve ilgili proje arayüzüne event olarak gelir. Ana süreç Git snapshot'ını rapor event'ine ekler; arayüz doğrulanmış dosyaları ve Git'in doğrulayamadığı CLI iddialarını ayırarak gösterir. `Review changes in Git` eylemi mevcut Changes/Agent Isolation/diff ekranına geçiş yapar. Agent Isolation'daki `Apply to Project` eylemi, CLI çalıştırma onayından ayrı ikinci bir kullanıcı onayı ister. Aktif proje dışındaki Secretary tamamlanma, kullanıcı bekleme veya failure olayları mevcut proje attention/desktop notification kanalına düşer; bildirime tıklanınca hedef proje açılır. Conflict/resolver bağlama işi hâlâ eksiktir.
 
 **Çıkış kriteri:** Kullanıcı ne yapıldığını ve değişikliklerin nerede olduğunu görebiliyor; ana proje yalnız ikinci onayla değişiyor.
 

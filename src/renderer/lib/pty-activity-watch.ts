@@ -1,5 +1,6 @@
 import type { PtyEvent, PtyKind } from '@shared/contracts/pty'
 import type { CliTaskNotification } from '@shared/contracts/notifications'
+import type { SecretaryEvent } from '@shared/contracts/secretary'
 import { CliActivityTracker, mapProcessStatus } from '@renderer/lib/cli-activity'
 import { focusWorkspacePanel } from '@renderer/lib/app-events'
 import { findPanelProject, isWatchedCliPanel } from '@renderer/lib/project-activity'
@@ -43,7 +44,23 @@ function dropTracker(sessionId: string): void {
 function openFinishedCliTask(payload: CliTaskNotification): void {
   useWorkspaceStore.getState().setActiveProject(payload.projectId)
   useActivityAttentionStore.getState().clearProject(payload.projectId)
+  if (payload.panelId.startsWith('secretary:')) return
   window.setTimeout(() => focusWorkspacePanel(payload.panelId), 40)
+}
+
+function handleSecretaryEvent(event: SecretaryEvent): void {
+  const activeProjectId = useWorkspaceStore.getState().activeProjectId
+  if (activeProjectId === event.projectId) return
+  if (event.type !== 'run-report' && event.type !== 'run-failed' && event.type !== 'run-needs-user') return
+  const project = useWorkspaceStore.getState().projects.find((item) => item.id === event.projectId)
+  if (!project) return
+  useActivityAttentionStore.getState().noteFinish({
+    projectId: event.projectId,
+    panelId: `secretary:${event.runId}`,
+    projectName: project.name,
+    title: 'Developer Secretary',
+    outcome: event.type === 'run-report' ? 'done' : 'error'
+  })
 }
 
 function handlePtyEvent(event: PtyEvent): void {
@@ -87,6 +104,7 @@ export function startPtyActivityWatch(): () => void {
 
   unsubscribePty = window.api?.pty?.onEvent(handlePtyEvent) ?? null
   const unsubscribeClicks = window.api?.notifications?.onClicked(openFinishedCliTask) ?? null
+  const unsubscribeSecretary = window.api?.secretary?.onEvent(handleSecretaryEvent) ?? null
   unsubscribeWorkspace = useWorkspaceStore.subscribe((state, prev) => {
     if (state.activeProjectId && state.activeProjectId !== prev.activeProjectId) {
       useActivityAttentionStore.getState().clearProject(state.activeProjectId)
@@ -103,6 +121,7 @@ export function startPtyActivityWatch(): () => void {
     unsubscribePty?.()
     unsubscribePty = null
     unsubscribeClicks?.()
+    unsubscribeSecretary?.()
     unsubscribeWorkspace?.()
     unsubscribeWorkspace = null
     for (const sessionId of trackers.keys()) dropTracker(sessionId)
