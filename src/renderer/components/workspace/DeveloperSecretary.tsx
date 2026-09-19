@@ -246,13 +246,19 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       throw new Error('The active project changed. Reopen this Secretary conversation before approving the plan.')
     }
     const kinds = [...openKinds]
+    const livePanels = useWorkspaceStore.getState().getActiveWorkspace()?.panels ?? panels
     if (plan) {
       for (const assignment of plan.assignments) {
-        if (!assignment.panelId && !kinds.includes(assignment.kind)) kinds.push(assignment.kind)
+        const boundPanel = assignment.panelId
+          ? livePanels.find((panel) => panel.id === assignment.panelId)
+          : undefined
+        const usableBoundPanel = boundPanel &&
+          boundPanel.workspaceIsolation === 'isolated' &&
+          boundPanel.panelRole !== 'resolver'
+        if (!usableBoundPanel && !kinds.includes(assignment.kind)) kinds.push(assignment.kind)
       }
     }
     const opened = new Map<CliUsageKind, string>()
-    const livePanels = useWorkspaceStore.getState().getActiveWorkspace()?.panels ?? panels
     const accounts = useAiAccountsStore.getState().accounts
     const activeByKind = useAiAccountsStore.getState().activeAccountByKind
     for (const kind of kinds) {
@@ -273,12 +279,20 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       opened,
       plan: {
         ...plan,
-        assignments: plan.assignments.map((assignment) => ({
-          ...assignment,
-          panelId: assignment.panelId && livePanels.some((panel) => panel.id === assignment.panelId)
-            ? assignment.panelId
-            : opened.get(assignment.kind) ?? assignment.panelId
-        }))
+        assignments: plan.assignments.map((assignment) => {
+          const boundPanel = assignment.panelId
+            ? livePanels.find((panel) => panel.id === assignment.panelId)
+            : undefined
+          const usableBoundPanel = boundPanel &&
+            boundPanel.workspaceIsolation === 'isolated' &&
+            boundPanel.panelRole !== 'resolver'
+            ? boundPanel.id
+            : undefined
+          return {
+            ...assignment,
+            panelId: usableBoundPanel ?? opened.get(assignment.kind) ?? assignment.panelId
+          }
+        })
       }
     }
   }
