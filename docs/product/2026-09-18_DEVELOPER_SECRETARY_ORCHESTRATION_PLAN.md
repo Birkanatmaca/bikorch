@@ -950,7 +950,7 @@ Secretary verileri renderer'ın bütün workspace snapshot'ına eklenmemelidir. 
 | `content_json` | Sürümlemeli içerik |
 | `created_at` | Sıralama |
 
-Mesajlar kaydedilmeden önce redaction uygulanmalı; retention ayarı bulunmalıdır.
+Mesajlar kaydedilmeden önce redaction uygulanmalı; 90 günlük varsayılan retention politikası uygulanmalıdır.
 
 ### 13.3 `secretary_runs`
 
@@ -988,7 +988,7 @@ Event tablosu monoton sequence ile bounded olaylar tutar:
 - user question/answer;
 - retry/cancel/failure.
 
-Ham terminal çıktısı sınırsız biçimde DB'ye yazılmamalıdır. Event sayısı, event boyutu ve retention sınırlandırılmalıdır.
+Ham terminal çıktısı sınırsız biçimde DB'ye yazılmamalıdır. Event sayısı, event boyutu ve 90 günlük retention sınırı uygulanmalıdır.
 
 ### 13.7 Şema sahipliği ve migration
 
@@ -1608,7 +1608,7 @@ Tek proje
   → ayrı apply onayı
 ```
 
-Bu çekirdek dikey dilim artık dependency DAG ile bağımsız görevlerde kontrollü paralelliği de kapsıyor. Kalan geliştirmeler güvenlik/operasyon testleri, retention/metrics ve provider capability ayrıntılarıdır; bunlar tamamlanmadan daha geniş çok-proje veya uzaktan messaging kapsamına geçilmemelidir.
+Bu çekirdek dikey dilim artık dependency DAG ile bağımsız görevlerde kontrollü paralelliği de kapsıyor. Kalan geliştirmeler güvenlik/operasyon testleri, metrics ve provider capability ayrıntılarıdır; bunlar tamamlanmadan daha geniş çok-proje veya uzaktan messaging kapsamına geçilmemelidir.
 
 Bu yaklaşım mevcut kodun değerli parçalarını korur:
 
