@@ -49,6 +49,10 @@ describe('CliActivityTracker', () => {
     expect(inferCliActivity('Cursor Agent ready\n› ')).toBe('waiting')
   })
 
+  it('recognizes Cursor Agent welcome input text', () => {
+    expect(inferCliActivity('Cursor Agent ready\n→ Plan, search, build anything')).toBe('waiting')
+  })
+
   it('does not treat the workspace trust dialog as an idle prompt', () => {
     expect(
       inferCliActivity('⚠ Workspace Trust Required\nDo you trust the contents of this directory?\n▶ [a] Trust this workspace\n')

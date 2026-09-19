@@ -6,7 +6,8 @@ const BUSY_WORD_RE = /\b(thinking|generating|searching|analyzing|planning)\b|[�
 // Cursor Agent commonly renders its input caret as `›`; keep the prompt
 // markers broad enough to recognize a ready CLI without treating normal text
 // as idle because the marker must still be the final non-whitespace character.
-const IDLE_PROMPT_RE = /(?:^|\n)\s*(?:>|❯|▶|▸|➤|➜|›)\s*$/
+const IDLE_PROMPT_RE = /(?:^|\n)\s*(?:>|❯|▶|▸|➤|➜|›|→)\s*$/
+const CURSOR_WELCOME_RE = /(?:^|\n)\s*(?:›|→)\s*(?:plan,\s*search,\s*build anything|ask anything)\s*$/im
 const IDLE_BOX_RE = /(?:ask|message|prompt)\s*(?:the\s+)?(?:agent|model|assistant)?\s*$/i
 
 export function isCliKind(kind: PtyKind): boolean {
@@ -51,7 +52,7 @@ export function inferCliActivity(buffer: string): 'waiting' | 'busy' | null {
   if (looksWorkspaceTrustPrompt(tail)) return null
   // A prompt at the end is definitive. The same retained terminal tail often still
   // contains a spinner or a word such as "thinking" from the completed response.
-  if (IDLE_PROMPT_RE.test(tail) || IDLE_BOX_RE.test(tail)) return 'waiting'
+  if (IDLE_PROMPT_RE.test(tail) || CURSOR_WELCOME_RE.test(tail) || IDLE_BOX_RE.test(tail)) return 'waiting'
   if (SPINNER_RE.test(tail) || BUSY_WORD_RE.test(tail)) return 'busy'
   return null
 }
