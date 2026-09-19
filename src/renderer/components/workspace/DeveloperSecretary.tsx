@@ -31,6 +31,7 @@ interface ChatItem {
   report?: {
     changedFiles: string[]
     unverifiedReportedFiles: string[]
+    panelIds: string[]
   }
   error?: boolean
 }
@@ -192,7 +193,8 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           content: event.reply,
           report: {
             changedFiles: event.changedFiles,
-            unverifiedReportedFiles: event.unverifiedReportedFiles
+            unverifiedReportedFiles: event.unverifiedReportedFiles,
+            panelIds: event.panelIds
           }
         }
       ])
@@ -355,6 +357,15 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     )))
     setFeedback('Plan rejected. No CLI was opened and no prompt was sent.')
     window.setTimeout(() => setFeedback(null), 3200)
+  }
+
+  const reviewSecretaryChanges = (panelIds: string[]): void => {
+    selectLeftSidebar(project.id, 'changes')
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('bikorch:secretary-review', {
+        detail: { projectId: project.id, panelIds }
+      }))
+    }, 80)
   }
 
   const startPlanRevision = (messageId: string, plan: SecretaryPlan): void => {
@@ -664,7 +675,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
                     <button
                       type="button"
                       className="secretary-review-changes"
-                      onClick={() => selectLeftSidebar(project.id, 'changes')}
+                      onClick={() => reviewSecretaryChanges(item.report?.panelIds ?? [])}
                     >
                       Review changes in Git
                     </button>

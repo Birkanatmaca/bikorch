@@ -166,6 +166,7 @@ async function finishTrackedRun(runId: string): Promise<void> {
     const results = await Promise.all([...completed.targets.values()].map(toResult))
     const changedFiles = unique(results.flatMap((result) => result.git.changedFiles), 120)
     const unverifiedReportedFiles = unique(results.flatMap((result) => result.git.unverifiedReportedFiles), 80)
+    const panelIds = unique([...completed.targets.values()].map((target) => target.sessionId), 8)
     const result = await finalizeSecretaryRun(runId, results)
     if (result.followUpRun?.plan) {
       emitSecretaryEvent({
@@ -185,7 +186,8 @@ async function finishTrackedRun(runId: string): Promise<void> {
       runId: result.completedRun.id,
       reply: result.completedRun.reply ?? 'CLI work completed.',
       changedFiles,
-      unverifiedReportedFiles
+      unverifiedReportedFiles,
+      panelIds
     })
   } catch {
     const message = 'The CLI finished, but Secretary could not prepare the final report.'

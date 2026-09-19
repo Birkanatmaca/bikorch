@@ -95,7 +95,8 @@ describe('Secretary result collector', () => {
     expect(mocks.emitSecretaryEvent).toHaveBeenCalledWith(expect.objectContaining({
       type: 'run-report',
       changedFiles: ['src/app.ts'],
-      unverifiedReportedFiles: ['claimed-only.ts']
+      unverifiedReportedFiles: ['claimed-only.ts'],
+      panelIds: ['session-1']
     }))
     expect(mocks.releaseSecretaryRunLock).toHaveBeenCalledWith(run.id)
   })

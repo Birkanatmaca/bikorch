@@ -205,6 +205,8 @@ export type SecretaryEvent =
       /** Git snapshot facts captured by the main process, not CLI claims. */
       changedFiles: string[]
       unverifiedReportedFiles: string[]
+      /** Panel/session IDs that produced the report facts. */
+      panelIds: string[]
     }
   | {
       type: 'run-followup'

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { AgentWorktreeKind, IsolationFoldSession, IsolationLane } from '@shared/contracts/git'
 import { buildConflictResolvePrompt } from '@shared/lib/isolation-prompt'
 import { submitCliPrompt } from '@renderer/lib/submit-cli-prompt'
@@ -135,6 +135,25 @@ export function AgentIsolationBlock({
     if (files.length === 0) return
     void openFoldReview(projectId, projectRoot, files, filePath)
   }
+
+  useEffect(() => {
+    const handleSecretaryReview = (event: Event): void => {
+      const detail = (event as CustomEvent<{ projectId?: unknown; panelIds?: unknown }>).detail
+      if (detail?.projectId !== projectId || !Array.isArray(detail.panelIds)) return
+      const panelIds = detail.panelIds.filter((item): item is string => typeof item === 'string')
+      const card = cards.find((item) => panelIds.includes(item.panelId))
+      if (!card) return
+      setExpandedId(card.id)
+      setReviewingId(card.id)
+      const lane = laneFor(card)
+      if (!lane) return
+      void ensurePrepared(lane).then((session) => {
+        if (session && session.status !== 'empty') openReviewDiff(session)
+      })
+    }
+    window.addEventListener('bikorch:secretary-review', handleSecretaryReview)
+    return () => window.removeEventListener('bikorch:secretary-review', handleSecretaryReview)
+  }, [cards, fold, projectId, projectRoot])
 
   const handleReview = async (card: AgentWorkCard): Promise<void> => {
     const lane = laneFor(card)
