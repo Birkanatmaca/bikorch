@@ -3,7 +3,10 @@ import type { PtyKind, PtySessionStatus } from '@shared/contracts/pty'
 const ANSI_RE = /\u001b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g
 const SPINNER_RE = /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷◐◓◑◒]/
 const BUSY_WORD_RE = /\b(thinking|generating|searching|analyzing|planning)\b|[✶✻]/i
-const IDLE_PROMPT_RE = /(?:^|\n)\s*(?:>|❯|▶|▸|➤|➜)\s*$/
+// Cursor Agent commonly renders its input caret as `›`; keep the prompt
+// markers broad enough to recognize a ready CLI without treating normal text
+// as idle because the marker must still be the final non-whitespace character.
+const IDLE_PROMPT_RE = /(?:^|\n)\s*(?:>|❯|▶|▸|➤|➜|›)\s*$/
 const IDLE_BOX_RE = /(?:ask|message|prompt)\s*(?:the\s+)?(?:agent|model|assistant)?\s*$/i
 
 export function isCliKind(kind: PtyKind): boolean {
