@@ -218,6 +218,10 @@ export function TerminalView({
     disposedRef.current = false
     const projectIdAtMount = activeProjectId
     const folderPathAtMount = project?.folderPath ?? null
+    // React StrictMode may replay this effect in development. Do not let the
+    // first async worktree/PTTY bootstrap continue after its cleanup, or two
+    // attempts can race on the same deterministic branch.
+    let active = true
 
     const terminal = new Terminal(getTerminalOptions(kind))
     registerLiveTerminal(sessionId, kind, terminal)
@@ -442,8 +446,10 @@ export function TerminalView({
     })
 
     const startSession = async (term: Terminal, nextLaunchMode: PtyLaunchMode = launchMode): Promise<void> => {
+      if (!active) return
       if (kind === 'cursor' && window.api.cli) {
         const detected = await window.api.cli.detect('cursor')
+        if (!active) return
         if (!detected.installed) {
           setInstallPrompt('cursor')
           setStatus(sessionId, 'error', 'Cursor CLI is not installed')
@@ -482,6 +488,7 @@ export function TerminalView({
           title: panelAtLaunch.title,
           mode: 'park'
         })
+        if (!active) return
         useWorkspaceStore.getState().setPanelWorktree(sessionId, null)
         worktreePath = undefined
       }
@@ -492,6 +499,7 @@ export function TerminalView({
           kind: kind as AgentWorktreeKind,
           title: panelAtLaunch?.title
         })
+        if (!active) return
         if (isolated.ok && isolated.worktreePath) {
           cwd = isolated.worktreePath
           worktreePath = isolated.worktreePath
@@ -518,6 +526,7 @@ export function TerminalView({
         setStatus(sessionId, 'error', 'Open this terminal from a project workspace first.')
         return
       }
+      if (!active) return
       const result: PtyCreateResponse = await window.api.pty.create({
         sessionId,
         projectId: projectIdAtMount,
@@ -529,6 +538,7 @@ export function TerminalView({
         launchMode: nextLaunchMode,
         accountId
       })
+      if (!active) return
       // The newly-created (or reattached) PTY starts with this grid. Keep the
       // resize channel in sync so post-layout settling does not resend it.
       lastPtySizeRef.current = { cols: term.cols, rows: term.rows }
@@ -627,6 +637,7 @@ export function TerminalView({
     })
 
     return () => {
+      active = false
       disposedRef.current = true
       if (fitFrameRef.current !== null) {
         cancelAnimationFrame(fitFrameRef.current)
