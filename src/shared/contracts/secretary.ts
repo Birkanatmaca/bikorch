@@ -1,6 +1,6 @@
 import type { CliUsageInfo, CliUsageKind } from './usage'
 
-export const SECRETARY_SCHEMA_VERSION = 2
+export const SECRETARY_SCHEMA_VERSION = 3
 
 export type SecretaryThreadStatus = 'active' | 'archived'
 

@@ -13,7 +13,8 @@ const PLAN: SecretaryPlan = {
     title: 'Review auth',
     instruction: 'Review auth and report the highest-risk issues.',
     rationale: 'The task needs a code review.',
-    usageNote: 'Use the available account.'
+    usageNote: 'Use the available account.',
+    dependsOn: []
   }],
   approvalRequired: true
 }
@@ -88,6 +89,28 @@ describe('Secretary SQL store', () => {
     expect(initial?.planRevision).toBe(1)
     expect(revised).toMatchObject({ planRevision: 2, status: 'awaiting-approval' })
     expect(store.getRun(run.id)?.plan?.overview).toContain('revised')
+  })
+
+  it('round-trips dependency edges in persisted plans', () => {
+    const thread = store.createThread({ projectId: 'project-1234', title: 'Dependencies' })
+    const run = store.createRun({ threadId: thread.id, projectId: thread.projectId, requestText: 'Review then implement' })
+    const plan: SecretaryPlan = {
+      ...PLAN,
+      assignments: [
+        { ...PLAN.assignments[0]!, id: 'assignment-1' },
+        {
+          ...PLAN.assignments[0]!,
+          id: 'assignment-2',
+          kind: 'cursor',
+          title: 'Implement fixes',
+          dependsOn: ['assignment-1']
+        }
+      ]
+    }
+
+    store.updateRun(run.id, { status: 'awaiting-approval', plan })
+
+    expect(store.getRun(run.id)?.plan?.assignments[1]?.dependsOn).toEqual(['assignment-1'])
   })
 
   it('keeps an awaiting plan after restart recovery but interrupts active work', () => {

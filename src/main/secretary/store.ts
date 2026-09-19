@@ -92,16 +92,23 @@ function parsePlan(value: unknown): SecretaryPlan | null {
         title: typeof item.title === 'string' && item.title.trim() ? item.title.trim().slice(0, 120) : `Task ${index + 1}`,
         instruction: item.instruction.trim().slice(0, 6000),
         rationale: typeof item.rationale === 'string' ? item.rationale.slice(0, 500) : 'Selected by the planner.',
-        usageNote: typeof item.usageNote === 'string' ? item.usageNote.slice(0, 240) : 'Review account availability before dispatching.'
+        usageNote: typeof item.usageNote === 'string' ? item.usageNote.slice(0, 240) : 'Review account availability before dispatching.',
+        dependsOn: Array.isArray(item.dependsOn)
+          ? item.dependsOn.filter((dependency): dependency is string => typeof dependency === 'string').slice(0, 8)
+          : []
       }]
     })
     if (assignments.length === 0) return null
+    const assignmentIds = new Set(assignments.map((assignment) => assignment.id))
     return {
       overview: parsed.overview.slice(0, 1000),
       assumptions: Array.isArray(parsed.assumptions)
         ? parsed.assumptions.filter((item): item is string => typeof item === 'string').slice(0, 6)
         : [],
-      assignments,
+      assignments: assignments.map((assignment) => ({
+        ...assignment,
+        dependsOn: assignment.dependsOn.filter((dependency) => assignmentIds.has(dependency) && dependency !== assignment.id)
+      })),
       approvalRequired: true
     }
   } catch {
