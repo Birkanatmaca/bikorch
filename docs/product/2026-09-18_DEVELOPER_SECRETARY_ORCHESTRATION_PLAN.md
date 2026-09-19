@@ -1352,7 +1352,7 @@ Bu sayede CI üzerinde gerçek Cursor/Claude/Codex hesabı olmadan bütün orkes
 
 **TAMAMLANDI:** Approval gate, kalıcı thread/run/assignment/onay store'u, restart recovery, plan revision UI, aktif-agent bağlamı, proje bağlamı, redaction, strict structured output, plan policy validator/router, dependency DAG scheduler, proje/session sahipliği ve lock, explicit `prepareRun` handshake'i, main-process dispatch, bracketed-paste gönderimi, PTY gözlemcisi, `BIKORCH_RESULT` protokolü, Git changed-files doğrulaması, result collector, `needs-user`, iptal/timeout/idempotency ve sınırlı takip döngüsü, final rapor ve onay gerektiren takip planı uygulanmıştır.
 
-**KALAN EKSİKLER:** E2E/security/retention/metrics testleri.
+**KALAN EKSİKLER:** Fake CLI E2E; prompt-injection/secret-leakage testleri; event/output retention cleanup; structured logs ile latency/error metrikleri; provider capability matrisi; accessibility/keyboard/cancellation smoke testleri; büyük proje bağlamı token-bütçe testleri.
 
 ### Faz 0 — Mevcut davranışı güvenli hale getirme
 
@@ -1576,7 +1576,7 @@ Uygulama aşağıdaki koşulların tamamı sağlandığında hedefe ulaşmış s
 - [x] Plan görünür biçimde onay bekliyor; onay öncesi CLI/panel/worktree yan etkisi yok. — **TAMAMLANDI**
 - [x] Onaylanan plan sürümü ve hash'i kalıcı olarak kaydediliyor. — **TAMAMLANDI**
 - [x] CLI doğru `projectId`, account ve canonical workspace ile başlıyor. — **TAMAMLANDI**
-- [ ] Yazma görevi ana proje yerine izole worktree'de çalışıyor; panelde izolasyon yoksa hazırlama handshake'i eksiktir.
+- [x] Yazma görevi ana proje yerine izole worktree'de çalışıyor; panelde izolasyon yoksa Secretary yeni izole panel açıyor. — **TAMAMLANDI**
 - [x] Prompt bracketed paste ile tek assignment olarak gönderiliyor. — **TAMAMLANDI**
 - [x] Başka projeye geçmek devam eden run'ın hedefini değiştirmiyor. — **TAMAMLANDI**
 - [x] Her assignment'ın çıktısı prompt öncesi terminal geçmişinden ayrılıyor. — **TAMAMLANDI**
@@ -1608,7 +1608,7 @@ Tek proje
   → ayrı apply onayı
 ```
 
-Bu dilim uçtan uca güvenilir olmadan çoklu CLI, paralel görev veya gelişmiş takip döngüsü eklenmemelidir. Dikey dilim tamamlandıktan sonra aynı state machine ve veri modeli üzerine dependency DAG ve ikinci CLI eklenebilir.
+Bu çekirdek dikey dilim artık dependency DAG ile bağımsız görevlerde kontrollü paralelliği de kapsıyor. Kalan geliştirmeler güvenlik/operasyon testleri, retention/metrics ve provider capability ayrıntılarıdır; bunlar tamamlanmadan daha geniş çok-proje veya uzaktan messaging kapsamına geçilmemelidir.
 
 Bu yaklaşım mevcut kodun değerli parçalarını korur:
 

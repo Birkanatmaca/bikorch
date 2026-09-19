@@ -258,7 +258,12 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     for (const kind of kinds) {
       const accountId = pickCliAccountId(kind, accounts, usage, activeByKind[kind])
       const existing = livePanels.find((panel) =>
-        panel.type === kind && (!accountId || panel.accountId === accountId)
+        panel.type === kind &&
+        (!accountId || panel.accountId === accountId) &&
+        // Secretary writes must never reuse a shared or resolver panel. A
+        // fresh default panel is isolated by workspace-store.addPanel and
+        // therefore gets the worktree handshake before dispatch.
+        (!plan || (panel.workspaceIsolation === 'isolated' && panel.panelRole !== 'resolver'))
       )
       const panelId = existing?.id || addPanel(kind, 'center', undefined, undefined, accountId)
       if (panelId) opened.set(kind, panelId)
