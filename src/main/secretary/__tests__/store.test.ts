@@ -123,4 +123,22 @@ describe('Secretary SQL store', () => {
     expect(store.getRun(planning.id)?.status).toBe('interrupted')
     expect(store.getRun(awaiting.id)?.status).toBe('awaiting-approval')
   })
+
+  it('retains pending work while removing expired terminal history', () => {
+    const thread = store.createThread({ projectId: 'project-1234', title: 'Retention' })
+    const completed = store.createRun({ threadId: thread.id, projectId: thread.projectId, requestText: 'Old completed work' })
+    store.updateRun(completed.id, { status: 'awaiting-approval', plan: PLAN })
+    store.decidePlan(completed.id, 'rejected')
+    const pending = store.createRun({ threadId: thread.id, projectId: thread.projectId, requestText: 'Keep this approval' })
+    store.updateRun(pending.id, { status: 'awaiting-approval', plan: PLAN })
+    db.run('UPDATE secretary_runs SET updated_at = 1 WHERE id = ?', [completed.id])
+    db.run('UPDATE secretary_messages SET created_at = 1 WHERE run_id = ?', [completed.id])
+
+    const result = store.deleteExpired(Date.now() - 1_000)
+
+    expect(result.runs).toBe(1)
+    expect(store.getRun(completed.id)).toBeNull()
+    expect(store.getRun(pending.id)?.status).toBe('awaiting-approval')
+    expect(db.exec('SELECT * FROM secretary_assignments WHERE run_id = ?', [completed.id])[0]?.values ?? []).toHaveLength(0)
+  })
 })

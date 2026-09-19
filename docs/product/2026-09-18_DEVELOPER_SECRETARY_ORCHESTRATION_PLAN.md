@@ -1352,7 +1352,7 @@ Bu sayede CI üzerinde gerçek Cursor/Claude/Codex hesabı olmadan bütün orkes
 
 **TAMAMLANDI:** Approval gate, kalıcı thread/run/assignment/onay store'u, restart recovery, plan revision UI, aktif-agent bağlamı, proje bağlamı, redaction, strict structured output, plan policy validator/router, dependency DAG scheduler, proje/session sahipliği ve lock, explicit `prepareRun` handshake'i, main-process dispatch, bracketed-paste gönderimi, PTY gözlemcisi, `BIKORCH_RESULT` protokolü, Git changed-files doğrulaması, result collector, `needs-user`, iptal/timeout/idempotency ve sınırlı takip döngüsü, final rapor ve onay gerektiren takip planı uygulanmıştır.
 
-**KALAN EKSİKLER:** Fake CLI E2E; prompt-injection/secret-leakage testleri; event/output retention cleanup; structured logs ile latency/error metrikleri; provider capability matrisi; accessibility/keyboard/cancellation smoke testleri; büyük proje bağlamı token-bütçe testleri.
+**KALAN EKSİKLER:** Fake CLI E2E; prompt-injection/secret-leakage testleri; structured logs ile latency/error metrikleri; provider capability matrisi; accessibility/keyboard/cancellation smoke testleri; büyük proje bağlamı token-bütçe testleri.
 
 ### Faz 0 — Mevcut davranışı güvenli hale getirme
 
@@ -1442,7 +1442,7 @@ Amaç: Yeni mimari tamamlanmadan otomatik çalıştırma riskini kaldırmak.
 
 - [ ] Fake CLI E2E suite.
 - [ ] Prompt injection ve secret leakage testleri.
-- [ ] Event/output retention ve cleanup.
+- [x] Event/output retention ve cleanup. — **TAMAMLANDI** (90 günlük varsayılan; bekleyen/onay bekleyen işler korunur.)
 - [ ] Structured logs ve latency/error metrikleri.
 - [ ] Provider sürüm/capability matrisi.
 - [ ] Accessibility, keyboard ve cancellation smoke testleri.

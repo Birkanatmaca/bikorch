@@ -35,6 +35,7 @@ const THREAD_STATUSES = new Set<SecretaryThreadStatus>(['active', 'archived'])
 const MESSAGE_ROLES = new Set<SecretaryMessageRole>(['user', 'assistant'])
 const MESSAGE_TYPES = new Set<SecretaryMessageType>(['chat', 'plan', 'approval', 'needs-user', 'final-report', 'error'])
 const CLI_KINDS = new Set<CliUsageKind>(['claude', 'cursor', 'gemini', 'antigravity', 'codex'])
+const RETAINABLE_RUN_STATUSES = ['completed', 'rejected', 'failed', 'cancelled', 'interrupted'] as const
 
 const RUN_TRANSITIONS: Record<SecretaryRunStatus, ReadonlySet<SecretaryRunStatus>> = {
   planning: new Set(['awaiting-approval', 'completed', 'failed', 'interrupted']),
@@ -302,6 +303,7 @@ export interface SecretaryStore {
   updateRun(id: string, patch: SecretaryRunPatch): SecretaryRun | null
   decidePlan(id: string, decision: 'approved' | 'rejected'): SecretaryRun | null
   markStaleRunsInterrupted(): number
+  deleteExpired(cutoff: number): { runs: number; messages: number; assignments: number; approvals: number; threads: number }
 }
 
 export class SqlSecretaryStore implements SecretaryStore {
@@ -486,6 +488,45 @@ export class SqlSecretaryStore implements SecretaryStore {
       if (id) this.updateRun(id, { status: 'interrupted' })
     }
     return rows.length
+  }
+
+  deleteExpired(cutoff: number): { runs: number; messages: number; assignments: number; approvals: number; threads: number } {
+    const terminalStatuses = RETAINABLE_RUN_STATUSES.map(() => '?').join(', ')
+    const deleteRows = (sql: string, params: unknown[]): number => {
+      this.db.run(sql, params)
+      return this.db.getRowsModified()
+    }
+    const messages = deleteRows(
+      `DELETE FROM secretary_messages
+       WHERE created_at < ?
+         AND (run_id IS NULL OR run_id IN (
+           SELECT id FROM secretary_runs WHERE updated_at < ? AND status IN (${terminalStatuses})
+         ))`,
+      [cutoff, cutoff, ...RETAINABLE_RUN_STATUSES]
+    )
+    const assignments = deleteRows(
+      `DELETE FROM secretary_assignments
+       WHERE run_id IN (SELECT id FROM secretary_runs WHERE updated_at < ? AND status IN (${terminalStatuses}))`,
+      [cutoff, ...RETAINABLE_RUN_STATUSES]
+    )
+    const approvals = deleteRows(
+      `DELETE FROM secretary_approvals
+       WHERE run_id IN (SELECT id FROM secretary_runs WHERE updated_at < ? AND status IN (${terminalStatuses}))`,
+      [cutoff, ...RETAINABLE_RUN_STATUSES]
+    )
+    const runs = deleteRows(
+      `DELETE FROM secretary_runs WHERE updated_at < ? AND status IN (${terminalStatuses})`,
+      [cutoff, ...RETAINABLE_RUN_STATUSES]
+    )
+    const threads = deleteRows(
+      `DELETE FROM secretary_threads
+       WHERE status = 'archived' AND updated_at < ?
+         AND id NOT IN (SELECT thread_id FROM secretary_runs)
+         AND id NOT IN (SELECT thread_id FROM secretary_messages)`,
+      [cutoff]
+    )
+    if (runs || messages || assignments || approvals || threads) schedulePersistToDisk()
+    return { runs, messages, assignments, approvals, threads }
   }
 }
 

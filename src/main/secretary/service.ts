@@ -49,6 +49,8 @@ const KEY_FILE = 'developer-secretary-key.bin'
 const MODEL_META_KEY = 'developer_secretary_model'
 const USAGE_META_KEY = 'developer_secretary_usage'
 const FOLLOW_UP_LIMIT = 2
+const SECRETARY_RETENTION_DAYS = 90
+const DAY_MS = 24 * 60 * 60 * 1000
 
 const EMPTY_USAGE: SecretaryUsageStats = {
   requests: 0,
@@ -170,6 +172,10 @@ export function initSecretaryService(): void {
   const interrupted = getSecretaryStore()?.markStaleRunsInterrupted() ?? 0
   if (interrupted > 0) {
     console.info(`[secretary] marked ${interrupted} incomplete run(s) as interrupted after restart`)
+  }
+  const cleanup = getSecretaryStore()?.deleteExpired(Date.now() - SECRETARY_RETENTION_DAYS * DAY_MS)
+  if (cleanup && Object.values(cleanup).some((count) => count > 0)) {
+    console.info(`[secretary] retention removed ${cleanup.runs} run(s), ${cleanup.messages} message(s), and related records`)
   }
 }
 
