@@ -140,6 +140,15 @@ function windowsCmdSpawn(scriptPath: string, extraArgs: string[] = []): SpawnCon
   }
 }
 
+function windowsPowerShellSpawn(scriptPath: string, extraArgs: string[] = []): SpawnConfig {
+  const systemRoot = process.env.SystemRoot ?? 'C:\\Windows'
+  const powershell = join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  return {
+    command: existsSync(powershell) ? powershell : 'powershell.exe',
+    args: ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, ...extraArgs]
+  }
+}
+
 function resolveCursorSpawn(): SpawnConfig | null {
   if (process.platform === 'win32') {
     const agent = findOnDisk([
@@ -149,6 +158,9 @@ function resolveCursorSpawn(): SpawnConfig | null {
       'cursor-agent.exe'
     ])
     if (agent) return windowsCmdSpawn(agent)
+
+    const powershellAgent = findOnDisk(['agent.ps1', 'cursor-agent.ps1'])
+    if (powershellAgent) return windowsPowerShellSpawn(powershellAgent)
 
     const cursor = findOnDisk(['cursor.cmd', 'cursor.exe'])
     if (cursor) return windowsCmdSpawn(cursor, ['agent'])
