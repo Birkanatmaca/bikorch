@@ -1350,7 +1350,7 @@ Bu sayede CI üzerinde gerçek Cursor/Claude/Codex hesabı olmadan bütün orkes
 
 ### Güncel uygulama özeti — 2026-09-19
 
-**TAMAMLANDI:** Approval gate, kalıcı thread/run/assignment/onay store'u, restart recovery, plan revision UI, aktif-agent bağlamı, proje bağlamı, redaction, strict structured output, plan policy validator/router, dependency DAG scheduler, proje/session sahipliği ve lock, explicit `prepareRun` handshake'i, main-process dispatch, bracketed-paste gönderimi, PTY gözlemcisi, `BIKORCH_RESULT` protokolü, Git changed-files doğrulaması, result collector, `needs-user`, iptal/timeout/idempotency ve sınırlı takip döngüsü, final rapor ve onay gerektiren takip planı uygulanmıştır.
+**TAMAMLANDI:** Approval gate, kalıcı thread/run/assignment/onay store'u, restart recovery, plan revision UI, aktif-agent bağlamı, proje bağlamı, redaction, strict structured output, plan policy validator/router, dependency DAG scheduler, proje/session sahipliği ve lock, explicit `prepareRun` handshake'i, main-process dispatch, bracketed-paste gönderimi, PTY gözlemcisi, `BIKORCH_RESULT` protokolü, Git changed-files doğrulaması, result collector, `needs-user`, iptal/timeout/idempotency ve sınırlı takip döngüsü, final rapor ve onay gerektiren takip planı, izole yazma paneli garantisi ve 90 günlük terminal geçmişi retention'ı uygulanmıştır.
 
 **KALAN EKSİKLER:** Fake CLI E2E; prompt-injection/secret-leakage testleri; structured logs ile latency/error metrikleri; provider capability matrisi; accessibility/keyboard/cancellation smoke testleri; büyük proje bağlamı token-bütçe testleri.
 
