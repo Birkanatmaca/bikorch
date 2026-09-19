@@ -321,6 +321,10 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       if (bindings.length !== plan.assignments.length) {
         throw new Error('Every approved task needs a ready CLI session before it can start.')
       }
+      // Worktree provisioning and PTY startup can update the workspace after
+      // the initial flush. Persist the final panel/cwd binding before the
+      // main process validates and writes the approved prompt.
+      await flushPersistence()
       let sent: number
       if (persistedRunId) {
         // The main process verifies project/session ownership before changing
