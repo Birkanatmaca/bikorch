@@ -109,10 +109,6 @@ export function AgentIsolationBlock({
     snapshot.provision.copyLocalFiles.length > 0 ||
     Boolean(snapshot.targetBranch)
 
-  if (!hasInbox && !hasSetup && !snapshot.error && !snapshot.notice && !snapshot.setupError) {
-    return null
-  }
-
   const laneFor = (card: AgentWorkCard): IsolationLane | undefined =>
     snapshot.lanes.find((item) => item.runId === card.runId)
 
@@ -154,6 +150,13 @@ export function AgentIsolationBlock({
     window.addEventListener('bikorch:secretary-review', handleSecretaryReview)
     return () => window.removeEventListener('bikorch:secretary-review', handleSecretaryReview)
   }, [cards, fold, projectId, projectRoot])
+
+  // Keep every hook above this guard. The isolation panel can appear after
+  // startup when a worktree or Secretary report arrives; returning before the
+  // effect would change the hook order between renders.
+  if (!hasInbox && !hasSetup && !snapshot.error && !snapshot.notice && !snapshot.setupError) {
+    return null
+  }
 
   const handleReview = async (card: AgentWorkCard): Promise<void> => {
     const lane = laneFor(card)
