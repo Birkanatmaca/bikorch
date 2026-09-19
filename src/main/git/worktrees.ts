@@ -183,10 +183,27 @@ export async function ensureAgentWorktree(input: {
 
     await mkdir(dirname(worktreePath), { recursive: true })
     const branches = await runGit(repoRoot, ['branch', '--list', branch])
-    if (branches.trim().length > 0) {
-      await runGit(repoRoot, ['worktree', 'add', worktreePath, branch])
-    } else {
-      await runGit(repoRoot, ['worktree', 'add', '-b', branch, worktreePath])
+    try {
+      if (branches.trim().length > 0) {
+        await runGit(repoRoot, ['worktree', 'add', worktreePath, branch])
+      } else {
+        await runGit(repoRoot, ['worktree', 'add', '-b', branch, worktreePath])
+      }
+    } catch (firstError) {
+      // Another renderer bootstrap may have created the deterministic branch
+      // between the branch check and `worktree add -b`. Re-read Git state and
+      // attach the requested path to that branch instead of falling back to
+      // the project root.
+      const branchNow = await runGit(repoRoot, ['branch', '--list', branch]).catch(() => '')
+      const linkedNow = listWorktreePaths(await runGit(repoRoot, ['worktree', 'list', '--porcelain']).catch(() => ''))
+        .some((path) => path.toLowerCase() === worktreePath.toLowerCase())
+      if (linkedNow && (await pathExists(worktreePath))) {
+        // The concurrent creator already completed the worktree.
+      } else if (branchNow.trim().length > 0) {
+        await runGit(repoRoot, ['worktree', 'add', worktreePath, branch])
+      } else {
+        throw firstError
+      }
     }
     await applyWorktreeProvision(repoRoot, worktreePath, baseDir)
     const remembered = await rememberRun({
