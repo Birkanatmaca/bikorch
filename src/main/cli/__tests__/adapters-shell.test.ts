@@ -32,7 +32,7 @@ describe('getDefaultShell', () => {
 
 describe('cliLaunchArgs', () => {
   it('trusts Cursor workspaces in interactive agent sessions', () => {
-    expect(cliLaunchArgs('cursor')).toEqual(['--trust'])
+    expect(cliLaunchArgs('cursor')).toEqual(['--trust', '--model', 'cursor-grok-4.6-high'])
     expect(cliLaunchArgs('cursor', 'login')).toEqual(['login'])
     expect(cliLaunchArgs('gemini')).toEqual(['--skip-trust'])
     expect(cliLaunchArgs('claude')).toEqual([])

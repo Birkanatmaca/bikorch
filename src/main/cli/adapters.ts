@@ -3,6 +3,8 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { type PtyKind } from '@shared/contracts/pty'
 
+const DEFAULT_CURSOR_MODEL = 'cursor-grok-4.6-high'
+
 export interface SpawnConfig {
   command: string
   args: string[]
@@ -283,7 +285,7 @@ export function resolveSpawnConfig(kind: PtyKind): SpawnConfig {
 
 export function cliLaunchArgs(kind: PtyKind, launchMode: 'normal' | 'login' = 'normal'): string[] {
   if (launchMode === 'login' && (kind === 'codex' || kind === 'cursor')) return ['login']
-  if (kind === 'cursor') return ['--trust']
+  if (kind === 'cursor') return ['--trust', '--model', DEFAULT_CURSOR_MODEL]
   if (kind === 'gemini') return ['--skip-trust']
   return []
 }
