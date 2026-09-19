@@ -215,7 +215,15 @@ async function callSecretaryModel(
         signal: controller.signal
       })
       if (!response.ok) {
-        const error = secretaryRequestError(response.status)
+        let detail: string | undefined
+        try {
+          const payload = await response.json() as { error?: { message?: unknown }; message?: unknown }
+          const message = payload?.error?.message ?? payload?.message
+          if (typeof message === 'string') detail = message
+        } catch {
+          // Some gateways return an empty or non-JSON error body. Keep the status-only message.
+        }
+        const error = secretaryRequestError(response.status, detail)
         if (attempt < SECRETARY_MAX_REQUEST_ATTEMPTS && isRetryableSecretaryStatus(response.status)) {
           await waitForSecretaryRetry(attempt)
           continue

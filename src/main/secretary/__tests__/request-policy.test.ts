@@ -13,9 +13,13 @@ describe('Secretary request policy', () => {
     expect(isRetryableSecretaryStatus(400)).toBe(false)
   })
 
-  it('does not expose response bodies or credentials in user-facing failures', () => {
+  it('keeps common failures safe while preserving useful validation details', () => {
     expect(secretaryRequestError(401).message).toMatch(/API key was rejected/i)
     expect(secretaryRequestError(429).message).toMatch(/rate-limited/i)
     expect(secretaryNetworkError(true).message).toMatch(/timed out/i)
+    expect(secretaryRequestError(400, 'The model gpt-5.6-luna is not available').message)
+      .toMatch(/gpt-5\.6-luna/)
+    expect(secretaryRequestError(400, 'Bearer sk-secret-value').message)
+      .not.toContain('sk-secret-value')
   })
 })
