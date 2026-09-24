@@ -16,6 +16,10 @@ describe('Secretary response schemas', () => {
         required: ['overview', 'assumptions', 'assignments']
       }
     })
+    const schema = SECRETARY_PLAN_RESPONSE_FORMAT.schema as {
+      properties?: { assignments?: { items?: { required?: string[] } } }
+    }
+    expect(schema.properties?.assignments?.items?.required).toEqual(expect.arrayContaining(['mode', 'expectedResult']))
   })
 
   it('requires an explicit reply, CLI opening decision, and nullable plan for chat', () => {
@@ -23,7 +27,7 @@ describe('Secretary response schemas', () => {
       required?: string[]
       properties?: { plan?: { anyOf?: unknown[] } }
     }
-    expect(schema.required).toEqual(['reply', 'openKinds', 'plan'])
+    expect(schema.required).toEqual(['reply', 'openKinds', 'plan', 'contextSummary'])
     expect(schema.properties?.plan?.anyOf).toContainEqual({ type: 'null' })
   })
 

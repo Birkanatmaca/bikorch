@@ -1,11 +1,13 @@
 import { app, BrowserWindow, session, shell } from 'electron'
-import { join } from 'path'
+import { join, resolve } from 'path'
+import { fileURLToPath } from 'url'
 import { ptyManager } from './cli/pty-manager'
 import { loadUserShellEnv } from './cli/shell-env'
 import { registerIpcHandlers } from './ipc'
 import { watchWindowChrome } from './ipc/window'
 import { installConsoleCapture, recordRendererConsole } from './logs'
 import { closePersistenceDatabase, initPersistenceDatabase } from './persistence/database'
+import { guardWindowPersistenceClose } from './persistence/close-flush'
 import { loadResourceProfile } from './resources/settings'
 import { APP_DISPLAY_NAME, applyAppBranding, resolveAppIconPath } from './app-branding'
 import { initDeveloperIntelligence } from './developer-intelligence/service'
@@ -19,6 +21,7 @@ import { reconcilePersistedProjects } from './git/reconcile'
 import {
   acquireSingleInstanceLock,
   isAppQuitting,
+  markQuitting,
   registerMainWindow,
   watchPowerEvents
 } from './lifecycle/background'
@@ -27,6 +30,50 @@ import { closeAllNotifications } from './notifications'
 
 const isDev = !app.isPackaged
 const isBackgroundStart = process.argv.includes('--background')
+let quitRequested = false
+let shutdownPrepared = false
+
+function allowedExternalHttpUrl(rawUrl: string): string | null {
+  try {
+    const url = new URL(rawUrl)
+    if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.username || url.password) {
+      return null
+    }
+    return url.toString()
+  } catch {
+    return null
+  }
+}
+
+function isInternalAppUrl(rawUrl: string): boolean {
+  try {
+    const target = new URL(rawUrl)
+    const rendererUrl = process.env['ELECTRON_RENDERER_URL']
+    if (isDev && rendererUrl && target.origin === new URL(rendererUrl).origin) return true
+    return target.protocol === 'file:' &&
+      resolve(fileURLToPath(target)) === resolve(join(__dirname, '../renderer/index.html'))
+  } catch {
+    return false
+  }
+}
+
+app.on('web-contents-created', (_event, contents) => {
+  contents.setWindowOpenHandler(({ url }) => {
+    const safeUrl = allowedExternalHttpUrl(url)
+    if (safeUrl) {
+      void shell.openExternal(safeUrl).catch((error) => {
+        console.error('[security] could not open external link:', error)
+      })
+    }
+    return { action: 'deny' }
+  })
+
+  if (contents.getType() === 'window') {
+    contents.on('will-navigate', (event, url) => {
+      if (!isInternalAppUrl(url)) event.preventDefault()
+    })
+  }
+})
 
 if (!acquireSingleInstanceLock()) {
   // Another instance owns the lock; exit immediately rather than continuing
@@ -75,6 +122,18 @@ function createWindow(): BrowserWindow {
 
   watchWindowChrome(mainWindow)
   registerMainWindow(mainWindow, createWindow)
+  guardWindowPersistenceClose(
+    mainWindow,
+    () => {
+      if (quitRequested) return true
+      try {
+        return !getAutomationSettings().backgroundMode
+      } catch {
+        return true
+      }
+    },
+    () => quitRequested
+  )
 
   mainWindow.on('ready-to-show', () => {
     // A `--background` launch (login start) initializes services and the
@@ -101,11 +160,6 @@ function createWindow(): BrowserWindow {
 
   mainWindow.webContents.on('console-message', (_event, level, message, _line, sourceId) => {
     recordRendererConsole(level, message, sourceId)
-  })
-
-  mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
-    return { action: 'deny' }
   })
 
   if (isDev && process.env['ELECTRON_RENDERER_URL']) {
@@ -173,11 +227,18 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  quitRequested = true
+  markQuitting()
+  if (shutdownPrepared) return
+  shutdownPrepared = true
   disposeAutomationService()
   disposeTray()
   disposeDownloadManager()
   closeAllNotifications()
   // Keep durable host sessions alive so updates/restarts can reattach.
   ptyManager.releaseForAppQuit()
+})
+
+app.on('will-quit', () => {
   closePersistenceDatabase()
 })

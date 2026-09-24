@@ -168,6 +168,8 @@ export interface AutomationDraft {
 }
 
 export interface AutomationStatusSummary {
+  /** False until a real, secured CLI executor is wired into the scheduler. */
+  executionAvailable: boolean
   running: number
   enabled: number
   waitingNetwork: number

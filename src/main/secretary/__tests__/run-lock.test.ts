@@ -15,6 +15,8 @@ function run(id: string, projectId: string): SecretaryRun {
     openKinds: [],
     errorCode: null,
     errorMessage: null,
+    sessionBindings: [],
+    evidence: null,
     createdAt: 1,
     updatedAt: 1
   }

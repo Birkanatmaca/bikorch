@@ -120,7 +120,7 @@ export const useIdeStore = create<IdeStore>((set, get) => ({
 
     try {
       const result = await window.api.fs.readFile({
-        projectRoot: workspaceRoot,
+        projectId,
         filePath: absolutePath
       })
       const binary = isBinary(absolutePath, result.content)
@@ -170,7 +170,7 @@ export const useIdeStore = create<IdeStore>((set, get) => ({
     set({ saving: true })
     try {
       await window.api.fs.writeFile({
-        projectRoot: root,
+        projectId: tab.projectId,
         filePath: tab.absolutePath,
         content: tab.value
       })
@@ -217,7 +217,7 @@ export const useIdeStore = create<IdeStore>((set, get) => ({
     }))
     try {
       const result = await window.api.fs.readFile({
-        projectRoot: root,
+        projectId: tab.projectId,
         filePath: tab.absolutePath
       })
       const binary = isBinary(tab.absolutePath, result.content)

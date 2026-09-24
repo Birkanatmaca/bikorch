@@ -325,7 +325,7 @@ export function PanelShell({
     }
     return 'agent'
   })
-  const canIsolate = (AGENT_WORKTREE_KINDS as readonly string[]).includes(type) && panelRole !== 'resolver'
+  const canIsolate = (AGENT_WORKTREE_KINDS as readonly string[]).includes(type) && panelRole === 'agent'
   const terminalRunning = Boolean(status && status !== 'stopped' && status !== 'error')
   const account = accountKind
     ? accountId
@@ -462,6 +462,11 @@ export function PanelShell({
             {panelRole === 'resolver' && (
               <span className="iso-mode-chip is-shared" title="This session is combining agent changes">
                 Resolving
+              </span>
+            )}
+            {panelRole === 'secretary' && (
+              <span className="iso-mode-chip is-isolated" title="Secretary tasks always use a separate workspace">
+                Separate
               </span>
             )}
             {canIsolate && (

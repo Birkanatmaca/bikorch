@@ -55,6 +55,9 @@ export interface PtySessionSnapshot {
 }
 
 const OUTPUT_BUFFER_LIMIT = 120_000
+// The durable host owns the full replay buffer. Main only needs a short tail
+// for activity checks; keeping both full copies wastes memory per CLI session.
+const DURABLE_TAIL_LIMIT = 8_000
 const HOST_RELEASE_MS = 8_000
 
 class PtyManager {
@@ -129,7 +132,7 @@ class PtyManager {
       if (!session?.durable) return
 
       if (event.type === 'data') {
-        session.outputBuffer = appendOutputBuffer(session.outputBuffer ?? '', event.data, OUTPUT_BUFFER_LIMIT)
+        session.outputBuffer = appendOutputBuffer(session.outputBuffer ?? '', event.data, DURABLE_TAIL_LIMIT)
         this.emit(session.webContents, { type: 'data', sessionId: event.sessionId, data: event.data })
         return
       }
@@ -195,19 +198,23 @@ class PtyManager {
       const nextCols = Math.max(20, Math.min(400, Math.floor(cols) || 80))
       const nextRows = Math.max(6, Math.min(200, Math.floor(rows) || 24))
       if (existing.durable) {
-        if (existing.cols !== nextCols || existing.rows !== nextRows) {
-          existing.cols = nextCols
-          existing.rows = nextRows
-          void ptyHostClient.resize(sessionId, nextCols, nextRows)
-        }
         const connected = await ptyHostClient.ensureConnected()
         if (connected) {
           try {
             const replay = await ptyHostClient.replay(sessionId)
+            if (replay.status !== 'running') throw new Error('Terminal session is no longer running')
             this.emit(webContents, { type: 'status', sessionId, status: existing.status, kind })
             if (replay.outputBuffer) {
-              existing.outputBuffer = replay.outputBuffer.slice(-OUTPUT_BUFFER_LIMIT)
+              existing.outputBuffer = replay.outputBuffer.slice(-DURABLE_TAIL_LIMIT)
               this.emit(webContents, { type: 'data', sessionId, data: replay.outputBuffer })
+            }
+            // A running CLI TUI needs a fresh SIGWINCH after replay even when
+            // the grid is unchanged: the bounded ANSI replay may start midway
+            // through a full-screen frame.
+            if (kind !== 'terminal' || existing.cols !== nextCols || existing.rows !== nextRows) {
+              await ptyHostClient.resize(sessionId, nextCols, nextRows)
+              existing.cols = nextCols
+              existing.rows = nextRows
             }
             recordLog('debug', `${getKindLabel(kind)} session reattached (${sessionId})`, 'pty')
             return { sessionId, status: existing.status, reattached: true }
@@ -218,8 +225,12 @@ class PtyManager {
           this.sessions.delete(sessionId)
         }
       } else {
-        if (existing.process && (existing.cols !== nextCols || existing.rows !== nextRows)) {
-          this.resize(sessionId, nextCols, nextRows)
+        if (existing.process) {
+          if (existing.cols !== nextCols || existing.rows !== nextRows) {
+            await this.resize(sessionId, nextCols, nextRows)
+          } else if (kind !== 'terminal') {
+            existing.process.resize(nextCols, nextRows)
+          }
         }
         this.emit(webContents, { type: 'status', sessionId, status: existing.status, kind })
         if (existing.outputBuffer) {
@@ -365,7 +376,7 @@ class PtyManager {
             status: hosted.status === 'stopped' ? 'stopped' : 'running',
             cols: safeCols,
             rows: safeRows,
-            outputBuffer: hosted.outputBuffer ?? ''
+            outputBuffer: (hosted.outputBuffer ?? '').slice(-DURABLE_TAIL_LIMIT)
           }
           this.sessions.set(sessionId, session)
           this.clearHostRelease()
@@ -479,29 +490,28 @@ class PtyManager {
     }
   }
 
-  write(sessionId: string, data: string): void {
-    const session = this.sessions.get(sessionId)
-    if (!session) return
-    if (session.durable) {
-      void ptyHostClient.write(sessionId, data)
-      return
-    }
-    session.process?.write(data)
+  async write(sessionId: string, data: string): Promise<void> {
+    await this.writeForSecretary(sessionId, data)
   }
 
-  resize(sessionId: string, cols: number, rows: number): void {
+  async resize(sessionId: string, cols: number, rows: number): Promise<void> {
     const session = this.sessions.get(sessionId)
-    if (!session) return
+    if (!session || session.status === 'stopped' || session.status === 'error') {
+      throw new Error('The selected CLI session is no longer available')
+    }
     const nextCols = Math.max(20, Math.min(400, Math.floor(cols)))
     const nextRows = Math.max(6, Math.min(200, Math.floor(rows)))
     if (nextCols === session.cols && nextRows === session.rows) return
-    session.cols = nextCols
-    session.rows = nextRows
     if (session.durable) {
-      void ptyHostClient.resize(sessionId, nextCols, nextRows)
+      await ptyHostClient.resize(sessionId, nextCols, nextRows)
+      session.cols = nextCols
+      session.rows = nextRows
       return
     }
-    session.process?.resize(nextCols, nextRows)
+    if (!session.process) throw new Error('The selected CLI session is no longer available')
+    session.process.resize(nextCols, nextRows)
+    session.cols = nextCols
+    session.rows = nextRows
   }
 
   kill(sessionId: string): void {

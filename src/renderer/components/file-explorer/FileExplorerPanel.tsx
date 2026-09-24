@@ -13,6 +13,7 @@ import { ChevronDown, ChevronRight, Folder, FolderOpen, RefreshCw, Search, X } f
 interface DirectoryNodeProps {
   entry: FileEntry
   depth: number
+  projectId: string
   projectRoot: string
   expandedPaths: Set<string>
   onToggle: (path: string) => void
@@ -42,6 +43,7 @@ function parentDir(relativePath: string): string {
 function DirectoryNode({
   entry,
   depth,
+  projectId,
   projectRoot,
   expandedPaths,
   onToggle,
@@ -58,7 +60,7 @@ function DirectoryNode({
     setLoading(true)
     try {
       const result = await window.api.fs.readDirectory({
-        projectRoot,
+        projectId,
         directoryPath: entry.path
       })
       setChildren(result.entries)
@@ -67,7 +69,7 @@ function DirectoryNode({
     } finally {
       setLoading(false)
     }
-  }, [entry.path, projectRoot])
+  }, [entry.path, projectId])
 
   useEffect(() => {
     if (isExpanded && children.length === 0 && !loading) {
@@ -104,6 +106,7 @@ function DirectoryNode({
                 key={child.path}
                 entry={child}
                 depth={depth + 1}
+                projectId={projectId}
                 projectRoot={projectRoot}
                 expandedPaths={expandedPaths}
                 onToggle={onToggle}
@@ -165,7 +168,7 @@ export function FileExplorerPanel(): React.JSX.Element {
   const gitStateByProject = useGitStore((s) => s.stateByProject)
 
   const loadRoot = useCallback(async () => {
-    if (!projectRoot) {
+    if (!projectRoot || !projectId) {
       setRootEntries([])
       return
     }
@@ -175,7 +178,7 @@ export function FileExplorerPanel(): React.JSX.Element {
 
     try {
       const result = await window.api.fs.readDirectory({
-        projectRoot,
+        projectId,
         directoryPath: projectRoot
       })
       setRootEntries(result.entries)
@@ -186,7 +189,7 @@ export function FileExplorerPanel(): React.JSX.Element {
     } finally {
       setLoading(false)
     }
-  }, [projectRoot])
+  }, [projectId, projectRoot])
 
   useEffect(() => {
     void loadRoot()
@@ -196,7 +199,7 @@ export function FileExplorerPanel(): React.JSX.Element {
   }, [loadRoot, projectId, projectRoot, refreshGit])
 
   useEffect(() => {
-    if (!projectRoot) {
+    if (!projectRoot || !projectId) {
       setSearchResults([])
       return
     }
@@ -212,7 +215,7 @@ export function FileExplorerPanel(): React.JSX.Element {
     setSearching(true)
     const timer = window.setTimeout(() => {
       void window.api.fs
-        .search({ projectRoot, query: trimmed })
+        .search({ projectId, query: trimmed })
         .then((result) => {
           if (!cancelled) setSearchResults(result.entries)
         })
@@ -228,7 +231,7 @@ export function FileExplorerPanel(): React.JSX.Element {
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [projectRoot, query])
+  }, [projectId, projectRoot, query])
 
   const handleToggle = (path: string): void => {
     setExpandedPaths((prev) => {
@@ -262,7 +265,7 @@ export function FileExplorerPanel(): React.JSX.Element {
   const searchItems = useMemo(() => searchResults, [searchResults])
   const isSearching = query.trim().length > 0
 
-  if (!projectRoot) {
+  if (!projectRoot || !projectId) {
     return (
       <EmptyState
         icon={FolderOpen}
@@ -345,6 +348,7 @@ export function FileExplorerPanel(): React.JSX.Element {
                   key={entry.path}
                   entry={entry}
                   depth={0}
+                  projectId={projectId}
                   projectRoot={projectRoot}
                   expandedPaths={expandedPaths}
                   onToggle={handleToggle}

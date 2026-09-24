@@ -1,6 +1,18 @@
 import { app } from 'electron'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync
+} from 'fs'
 import { createRequire } from 'module'
+import { createHash } from 'crypto'
 import { dirname, join } from 'path'
 import initSqlJs, { type Database } from 'sql.js'
 import {
@@ -15,6 +27,7 @@ import {
 import type {
   CliUsageBreakdown,
   CliUsageInfo,
+  CliUsageKind,
   CliUsageStatus,
   CliUsageWindow
 } from '@shared/contracts/usage'
@@ -49,6 +62,11 @@ import { v4 as uuidv4 } from 'uuid'
 
 let db: Database | null = null
 let dbFilePath: string | null = null
+let diskPersistTimer: ReturnType<typeof setTimeout> | null = null
+let diskDirty = false
+let firstDirtyAt: number | null = null
+let lastSnapshotFingerprint: string | null = null
+const MAX_DISK_PERSIST_WAIT_MS = 3_000
 
 const VALID_PANEL_TYPES = new Set<PanelType>([
   'terminal',
@@ -91,11 +109,52 @@ function getWasmPath(file: string): string {
 }
 
 function persistToDisk(): void {
-  if (!db || !dbFilePath) return
+  if (!db || !dbFilePath || !diskDirty) return
   // sql.js keeps the whole DB in RAM. export() allocates a second Uint8Array;
   // write it directly to avoid an extra Buffer copy of the same bytes.
   const data = db.export()
-  writeFileSync(dbFilePath, data)
+  const temporaryPath = `${dbFilePath}.${process.pid}.${uuidv4()}.tmp`
+  let descriptor: number | null = null
+  try {
+    descriptor = openSync(temporaryPath, 'wx', 0o600)
+    writeFileSync(descriptor, data)
+    fsyncSync(descriptor)
+    closeSync(descriptor)
+    descriptor = null
+    renameSync(temporaryPath, dbFilePath)
+
+    // Directory fsync is supported on POSIX but not uniformly on Windows.
+    try {
+      const directoryDescriptor = openSync(dirname(dbFilePath), 'r')
+      try {
+        fsyncSync(directoryDescriptor)
+      } finally {
+        closeSync(directoryDescriptor)
+      }
+    } catch {
+      // The file itself is already synced and atomically replaced.
+    }
+    diskDirty = false
+    firstDirtyAt = null
+    if (diskPersistTimer) {
+      clearTimeout(diskPersistTimer)
+      diskPersistTimer = null
+    }
+  } catch (error) {
+    if (descriptor !== null) {
+      try {
+        closeSync(descriptor)
+      } catch {
+        // Keep the original persistence error.
+      }
+    }
+    try {
+      unlinkSync(temporaryPath)
+    } catch {
+      // The temporary file may already have been renamed or removed.
+    }
+    throw error
+  }
 }
 
 function initSchema(database: Database): void {
@@ -197,13 +256,13 @@ function initSchema(database: Database): void {
   ])
 }
 
-let diskPersistTimer: ReturnType<typeof setTimeout> | null = null
-
 /**
  * Debounced disk write for high-frequency writers (activity events). The snapshot
  * save path still persists immediately; this only coalesces bursts of small writes.
  */
 export function schedulePersistToDisk(delayMs = 800): void {
+  if (firstDirtyAt === null) firstDirtyAt = Date.now()
+  diskDirty = true
   if (diskPersistTimer) clearTimeout(diskPersistTimer)
   diskPersistTimer = setTimeout(() => {
     diskPersistTimer = null
@@ -212,11 +271,28 @@ export function schedulePersistToDisk(delayMs = 800): void {
     } catch (error) {
       console.error('Failed to persist database to disk:', error)
     }
-  }, delayMs)
+  }, Math.max(0, Math.min(delayMs, MAX_DISK_PERSIST_WAIT_MS - (Date.now() - firstDirtyAt))))
+}
+
+/** Use at irreversible workflow boundaries where a debounced write could lose recovery metadata. */
+export function flushPersistenceToDisk(): void {
+  persistToDisk()
 }
 
 export function getPersistenceDatabase(): Database | null {
   return db
+}
+
+export function getPersistenceDiskUsage(): { bytes: number | null; pendingChanges: boolean } {
+  let bytes: number | null = null
+  if (dbFilePath) {
+    try {
+      bytes = statSync(dbFilePath).size
+    } catch {
+      // A new or unavailable database has no readable file size yet.
+    }
+  }
+  return { bytes, pendingChanges: diskDirty }
 }
 
 export function listPersistedProjectFolders(): string[] {
@@ -272,6 +348,7 @@ export async function initPersistenceDatabase(): Promise<void> {
         updated_at INTEGER NOT NULL
       );
     `)
+    diskDirty = true
     persistToDisk()
     setIsolationPersistSink((state) => {
       if (!db) return
@@ -296,6 +373,10 @@ export function closePersistenceDatabase(): void {
     persistToDisk()
     db.close()
     db = null
+    dbFilePath = null
+    diskDirty = false
+    firstDirtyAt = null
+    lastSnapshotFingerprint = null
     setIsolationPersistSink(null)
   }
 }
@@ -337,7 +418,7 @@ function parsePanels(raw: unknown): PanelDefinition[] {
         ...(panel.workspaceIsolation === 'shared' || panel.workspaceIsolation === 'isolated'
           ? { workspaceIsolation: panel.workspaceIsolation }
           : {}),
-        ...(panel.panelRole === 'resolver' || panel.panelRole === 'agent'
+        ...(panel.panelRole === 'resolver' || panel.panelRole === 'agent' || panel.panelRole === 'secretary'
           ? { panelRole: panel.panelRole }
           : {}),
         ...(typeof panel.cwdOverride === 'string' &&
@@ -693,6 +774,13 @@ function parseActiveAccountByKind(raw: unknown, accounts: AiAccount[]): ActiveAc
   return defaults
 }
 
+function parseSuppressedSystemAuthKinds(raw: unknown): CliUsageKind[] {
+  if (!Array.isArray(raw)) return []
+  return [...new Set(raw.filter((kind): kind is CliUsageKind =>
+    typeof kind === 'string' && AI_ACCOUNT_KINDS.includes(kind as CliUsageKind)
+  ))]
+}
+
 function parseTasks(raw: unknown): ProjectTask[] {
   if (!Array.isArray(raw)) return []
 
@@ -747,6 +835,7 @@ export function createDefaultSnapshot(): PersistedSnapshot {
     },
     accounts: [],
     activeAccountByKind: createDefaultActiveAccountByKind(),
+    suppressedSystemAuthKinds: [],
     tasksByProject: {},
     usage: createEmptyUsageSnapshot(),
     subscriptions: []
@@ -861,6 +950,20 @@ export function loadSnapshot(): PersistedSnapshot {
     }
   }
 
+  const suppressedAuthResult = database.exec(
+    "SELECT value FROM meta WHERE key = 'suppressed_system_auth_kinds'"
+  )
+  let suppressedSystemAuthKinds: CliUsageKind[] = []
+  if (suppressedAuthResult.length > 0 && suppressedAuthResult[0]?.values.length > 0) {
+    try {
+      suppressedSystemAuthKinds = parseSuppressedSystemAuthKinds(
+        JSON.parse(suppressedAuthResult[0].values[0][0] as string)
+      )
+    } catch {
+      suppressedSystemAuthKinds = []
+    }
+  }
+
   const tasksByProject: Record<string, ProjectTask[]> = {}
   const tasksResult = database.exec('SELECT project_id, tasks_json FROM project_tasks')
   if (tasksResult.length > 0) {
@@ -901,6 +1004,7 @@ export function loadSnapshot(): PersistedSnapshot {
     editor,
     accounts,
     activeAccountByKind,
+    suppressedSystemAuthKinds,
     tasksByProject,
     usage,
     subscriptions
@@ -909,8 +1013,14 @@ export function loadSnapshot(): PersistedSnapshot {
 
 export function saveSnapshot(snapshot: PersistedSnapshot): void {
   const database = getDb()
+  const fingerprint = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex')
+  if (fingerprint === lastSnapshotFingerprint) {
+    persistToDisk()
+    return
+  }
 
   database.run('BEGIN TRANSACTION')
+  let committed = false
 
   try {
     database.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [
@@ -920,6 +1030,10 @@ export function saveSnapshot(snapshot: PersistedSnapshot): void {
     database.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [
       'active_ai_accounts',
       JSON.stringify(snapshot.activeAccountByKind ?? createDefaultActiveAccountByKind())
+    ])
+    database.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [
+      'suppressed_system_auth_kinds',
+      JSON.stringify(snapshot.suppressedSystemAuthKinds ?? [])
     ])
     database.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [
       'ai_usage',
@@ -986,9 +1100,21 @@ export function saveSnapshot(snapshot: PersistedSnapshot): void {
     })
 
     database.run('COMMIT')
+    committed = true
+    lastSnapshotFingerprint = fingerprint
+    diskDirty = true
     persistToDisk()
   } catch (error) {
-    database.run('ROLLBACK')
+    if (!committed) {
+      try {
+        database.run('ROLLBACK')
+      } catch {
+        // Preserve the original write error.
+      }
+    } else {
+      // The SQL transaction succeeded; retain the dirty image for a later retry.
+      schedulePersistToDisk()
+    }
     throw error
   }
 }

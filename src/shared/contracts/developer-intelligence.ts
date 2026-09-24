@@ -335,12 +335,20 @@ export interface AnalyzeMemoriesResult {
   external: 'unavailable'
 }
 
+export interface LearnMemoriesResult {
+  created: number
+  updated: number
+  skipped: number
+  analyzedPrompts: number
+}
+
 export interface MetricInterpretation {
   text: string
   basis: string
 }
 
 export const MEMORY_CATEGORIES = [
+  'About me',
   'Coding style',
   'Tooling',
   'Workflow',
@@ -524,6 +532,7 @@ export const DEVELOPER_INTELLIGENCE_IPC = {
   EXPORT: 'developer-intelligence:export',
   CLEAR: 'developer-intelligence:clear',
   ANALYZE: 'developer-intelligence:analyze',
+  LEARN_WITH_AI: 'developer-intelligence:learn-with-ai',
   GET_CONTEXT: 'developer-intelligence:get-context',
   LIST_SESSIONS: 'developer-intelligence:list-sessions',
   GET_SESSION: 'developer-intelligence:get-session'

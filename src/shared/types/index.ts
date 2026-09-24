@@ -32,8 +32,8 @@ export interface PanelDefinition {
   worktreePath?: string
   /** Configured isolation. Isolated is the default. Shared uses the main project tree. */
   workspaceIsolation?: 'isolated' | 'shared'
-  /** Resolver sessions run in the integration worktree instead of an agent worktree. */
-  panelRole?: 'agent' | 'resolver'
+  /** Resolver uses the integration worktree; Secretary uses a dedicated isolated worktree. */
+  panelRole?: 'agent' | 'resolver' | 'secretary'
   cwdOverride?: string
   agentRunId?: string
 }

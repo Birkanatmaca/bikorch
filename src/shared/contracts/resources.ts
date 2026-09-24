@@ -109,6 +109,7 @@ export interface ResourceProcessSnapshot {
   profile: ResourceProfile
   electronProcesses: ResourceElectronProcess[]
   electronWorkingSetKb: number
+  workspaceDatabase: { bytes: number | null; pendingChanges: boolean }
   ptyHost: {
     connected: boolean
     alive: boolean

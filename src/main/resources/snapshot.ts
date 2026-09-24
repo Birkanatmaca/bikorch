@@ -3,6 +3,7 @@ import { ptyManager } from '../cli/pty-manager'
 import { ptyHostClient } from '../cli/pty-host/client'
 import type { ResourceElectronProcess, ResourceProcessSnapshot } from '@shared/contracts/resources'
 import { getResourceProfile } from './settings'
+import { getPersistenceDiskUsage } from '../persistence/database'
 
 function readMetrics(): ResourceElectronProcess[] {
   try {
@@ -27,6 +28,7 @@ export function collectResourceSnapshot(): ResourceProcessSnapshot {
     profile: getResourceProfile(),
     electronProcesses,
     electronWorkingSetKb,
+    workspaceDatabase: getPersistenceDiskUsage(),
     ptyHost: {
       connected: ptyHostClient.isConnected(),
       alive: ptyHostClient.isHostAlive(),

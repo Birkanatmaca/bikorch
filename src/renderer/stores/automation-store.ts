@@ -9,6 +9,7 @@ import type {
 import { createDefaultAutomationSettings } from '@shared/contracts/automation'
 
 const IDLE_STATUS: AutomationStatusSummary = {
+  executionAvailable: false,
   running: 0,
   enabled: 0,
   waitingNetwork: 0,

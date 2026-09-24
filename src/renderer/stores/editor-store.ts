@@ -308,7 +308,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
     try {
       const result = await window.api.fs.readFile({
-        projectRoot: workspaceRoot,
+        projectId,
         filePath: absolutePath
       })
 

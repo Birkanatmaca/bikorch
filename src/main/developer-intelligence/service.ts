@@ -3,6 +3,7 @@ import { app } from 'electron'
 import {
   createDefaultDeveloperIntelligenceSettings,
   type AnalyzeMemoriesResult,
+  type LearnMemoriesResult,
   type ClearTarget,
   type DeveloperEvent,
   type DeveloperEventInput,
@@ -17,6 +18,7 @@ import {
   type MemoryContextPackage,
   type MemoryContextRequest,
   type MemoryDraft,
+  type MemoryCandidate,
   type MemoryUpdate,
   type MetricsRequest,
   type PromptHistoryFilter,
@@ -608,6 +610,50 @@ export function getMemoryContext(request: MemoryContextRequest): MemoryContextPa
   const current = getStore()
   const settings = getDeveloperIntelligenceSettings()
   return rankMemoriesForContext(current ? current.listMemories() : [], request, settings.includeMemoryInPrompts)
+}
+
+export function applyAiMemorySuggestions(candidates: MemoryCandidate[], analyzedPrompts: number): LearnMemoriesResult {
+  const current = getStore()
+  if (!current) throw new Error('Developer memory is unavailable')
+  const dismissed = new Set(current.getAnalysisState().dismissedKeys)
+  const existing = current.listMemories()
+  const now = Date.now()
+  let created = 0
+  let updated = 0
+  let skipped = 0
+  for (const candidate of candidates) {
+    if (dismissed.has(candidate.key) || existing.some((memory) =>
+      memory.source === 'user' && memory.content.trim().toLowerCase() === candidate.content.trim().toLowerCase())) {
+      skipped += 1
+      continue
+    }
+    const prior = current.getMemoryByKey(candidate.key)
+    if (prior) {
+      current.upsertMemory({
+        ...prior,
+        evidenceCount: Math.max(prior.evidenceCount, candidate.evidenceCount),
+        lastSeenAt: now,
+        ...(!prior.userEdited ? { content: candidate.content, category: candidate.category } : {})
+      })
+      updated += 1
+    } else {
+      current.upsertMemory({
+        id: memoryIdForKey(candidate.key),
+        scope: 'global',
+        category: candidate.category,
+        content: candidate.content,
+        confidence: candidate.confidence,
+        evidenceCount: candidate.evidenceCount,
+        firstSeenAt: now,
+        lastSeenAt: now,
+        source: 'ai',
+        enabled: true,
+        key: candidate.key
+      })
+      created += 1
+    }
+  }
+  return { created, updated, skipped, analyzedPrompts }
 }
 
 function listKnownProjects(): Array<{ id: string; name: string; folderPath: string | null }> {

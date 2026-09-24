@@ -15,6 +15,12 @@ function formatMb(kb: number): string {
   return `${(kb / 1024).toFixed(1)} MB`
 }
 
+function formatBytes(bytes: number): string {
+  return bytes < 1024 * 1024
+    ? `${(bytes / 1024).toFixed(1)} KB`
+    : `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 export function RuntimePanel(): React.JSX.Element {
   const profile = useResourceStore((state) => state.profile)
   const snapshot = useResourceStore((state) => state.snapshot)
@@ -90,6 +96,14 @@ export function RuntimePanel(): React.JSX.Element {
       </SectionCard>
 
       <SectionCard title="Runtime" action={<Activity className="h-3.5 w-3.5 text-text-muted" aria-hidden />}>
+        <KeyRow
+          label="Workspace database"
+          value={snapshot?.workspaceDatabase.bytes == null ? '—' : formatBytes(snapshot.workspaceDatabase.bytes)}
+        />
+        <KeyRow
+          label="DB export"
+          value={snapshot ? snapshot.workspaceDatabase.pendingChanges ? 'pending' : 'idle' : '—'}
+        />
         <KeyRow
           label="PTY host"
           value={

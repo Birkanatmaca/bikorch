@@ -5,13 +5,21 @@ import { useResourceStore } from '@renderer/stores/resource-store'
 
 const BOOTSTRAP_TIMEOUT_MS = 8000
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      setTimeout(() => reject(new Error('Workspace load timed out')), ms)
-    })
-  ])
+async function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout?: () => void): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          onTimeout?.()
+          reject(new Error('Workspace load timed out'))
+        }, ms)
+      })
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 export function usePersistenceBootstrap(): {
@@ -23,6 +31,8 @@ export function usePersistenceBootstrap(): {
 
   useEffect(() => {
     let mounted = true
+    let hydrated = false
+    let hydrationController: AbortController | null = null
 
     const bootstrap = async (): Promise<void> => {
       try {
@@ -30,11 +40,17 @@ export function usePersistenceBootstrap(): {
           throw new Error('Preload API not ready')
         }
 
-        await withTimeout(hydrateFromDisk(), BOOTSTRAP_TIMEOUT_MS)
+        hydrationController = new AbortController()
+        await withTimeout(
+          hydrateFromDisk(hydrationController.signal),
+          BOOTSTRAP_TIMEOUT_MS,
+          () => hydrationController?.abort()
+        )
         if (!mounted) return
         await withTimeout(useResourceStore.getState().hydrate(), 4000).catch(() => undefined)
         if (!mounted) return
         startPersistenceSync()
+        hydrated = true
         setIsReady(true)
       } catch (err) {
         if (!mounted) return
@@ -45,6 +61,7 @@ export function usePersistenceBootstrap(): {
         useWorkspaceStore.getState().hydrate(createFallbackWorkspace())
         await useResourceStore.getState().hydrate().catch(() => undefined)
         startPersistenceSync()
+        hydrated = true
         setError(message)
         setIsReady(true)
       }
@@ -52,16 +69,30 @@ export function usePersistenceBootstrap(): {
 
     void bootstrap()
 
+    const stopCloseFlush = window.api.persistence.onFlushRequest((token) => {
+      void (async () => {
+        try {
+          if (hydrated) await flushPersistence()
+        } catch (error) {
+          console.error('Could not flush workspace state before close:', error)
+        } finally {
+          window.api.persistence.finishFlush(token)
+        }
+      })()
+    })
+
     const handleBeforeUnload = (): void => {
-      void flushPersistence()
+      void flushPersistence().catch((error) => console.error('Could not flush workspace state:', error))
     }
 
     window.addEventListener('beforeunload', handleBeforeUnload)
 
     return () => {
       mounted = false
+      hydrationController?.abort()
+      stopCloseFlush()
       window.removeEventListener('beforeunload', handleBeforeUnload)
-      void flushPersistence()
+      void flushPersistence().catch((error) => console.error('Could not flush workspace state:', error))
     }
   }, [])
 

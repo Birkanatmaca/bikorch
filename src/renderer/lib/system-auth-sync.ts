@@ -50,7 +50,7 @@ async function importDiscovery(discovery: SystemAuthDiscovery): Promise<AiAccoun
     })
 
     if (!result.ok || !result.ready) {
-      store.removeAccount(accountId)
+      store.removeAccount(accountId, { suppressSystemImport: false })
       return null
     }
 
@@ -63,7 +63,7 @@ async function importDiscovery(discovery: SystemAuthDiscovery): Promise<AiAccoun
       .accounts.find((account) => account.id === accountId)
     return imported ?? null
   } catch {
-    store.removeAccount(accountId)
+    store.removeAccount(accountId, { suppressSystemImport: false })
     return null
   }
 }

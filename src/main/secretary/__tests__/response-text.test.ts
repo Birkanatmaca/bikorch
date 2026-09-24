@@ -50,7 +50,8 @@ describe('readSecretaryReply', () => {
     expect(readSecretaryReply('Just chatting.')).toEqual({
       reply: 'Just chatting.',
       planRaw: null,
-      openKindsRaw: null
+      openKindsRaw: null,
+      contextSummary: null
     })
   })
 
@@ -61,6 +62,16 @@ describe('readSecretaryReply', () => {
       plan: { overview: 'Analyze helper-new', assignments: [] }
     }))
     expect(parsed.openKindsRaw).toEqual(['cursor'])
+  })
+
+  it('reads a bounded continuity note from a chat response', () => {
+    const parsed = readSecretaryReply(JSON.stringify({
+      reply: 'Continuing the work.',
+      openKinds: [],
+      plan: null,
+      contextSummary: 'The user chose to keep terminal sessions.'
+    }))
+    expect(parsed.contextSummary).toBe('The user chose to keep terminal sessions.')
   })
 
   it('parses fenced JSON', () => {

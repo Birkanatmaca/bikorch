@@ -7,7 +7,7 @@ export interface FileEntry {
 }
 
 export interface ReadDirectoryRequest {
-  projectRoot: string
+  projectId: string
   directoryPath: string
 }
 
@@ -16,7 +16,7 @@ export interface ReadDirectoryResponse {
 }
 
 export interface ReadFileRequest {
-  projectRoot: string
+  projectId: string
   filePath: string
 }
 
@@ -26,7 +26,7 @@ export interface ReadFileResponse {
 }
 
 export interface SearchFilesRequest {
-  projectRoot: string
+  projectId: string
   query: string
 }
 
@@ -35,7 +35,7 @@ export interface SearchFilesResponse {
 }
 
 export interface WriteFileRequest {
-  projectRoot: string
+  projectId: string
   filePath: string
   content: string
 }

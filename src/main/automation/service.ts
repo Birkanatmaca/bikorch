@@ -29,18 +29,11 @@ import {
   type ReconcileResult
 } from './scheduler'
 
-/**
- * Real CLI execution stays behind this flag until the security-hardening gate
- * in the product spec (docs/product/2026-09-11_AUTOMATION_SYSTEM.md §12) is
- * complete. Until then, claimed runs are simulated so the scheduler,
- * persistence, and UI loop can be proven end to end.
- */
+/** Real CLI execution stays unavailable until its executor and security gate land. */
 const REAL_EXECUTION_ENABLED = false
-const SIMULATED_RUN_DURATION_MS = 2_500
 
 let scheduler: AutomationScheduler | null = null
 let calculator: ScheduleCalculator | null = null
-const simulatedTimers = new Set<ReturnType<typeof setTimeout>>()
 
 function broadcast(event: AutomationEvent): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -111,7 +104,7 @@ function computeStatus(): AutomationStatusSummary {
     .map((d) => d.nextRunAt as number)
     .sort((a, b) => a - b)[0] ?? null
 
-  return { running, enabled, waitingNetwork, needsAttention, nextRunAt }
+  return { executionAvailable: REAL_EXECUTION_ENABLED, running, enabled, waitingNetwork, needsAttention, nextRunAt }
 }
 
 /** Bridges the narrow scheduler contract onto the two SQL repositories. */
@@ -135,6 +128,7 @@ function createSchedulerRepositoryAdapter(): AutomationSchedulerRepository {
       return requireRuns().hasActiveRun(automationId)
     },
     claimRun(automationId, scheduledFor, trigger) {
+      if (!REAL_EXECUTION_ENABLED) return false
       const definition = requireDefinitions().get(automationId)
       if (!definition) return false
       const slotKey = `${trigger}:${scheduledFor}`
@@ -150,72 +144,22 @@ function createSchedulerRepositoryAdapter(): AutomationSchedulerRepository {
       if (claimed) {
         const run = requireRuns().get(runId)
         if (run) broadcast({ type: 'run-changed', run })
-        simulateExecution(runId)
       }
       return claimed
     }
   }
 }
 
-/**
- * Placeholder executor. Marks a queued run as running, then succeeded, so the
- * end-to-end loop (schedule → claim → run → history) is demonstrable before
- * the real Codex executor (spec §9) and security gate (spec §12) land.
- */
-function simulateExecution(runId: string): void {
-  if (REAL_EXECUTION_ENABLED) return
-  const runs = getAutomationRunRepository()
-  if (!runs) return
-
-  try {
-    runs.update(runId, { status: 'preparing' })
-    const run1 = runs.get(runId)
-    if (run1) broadcast({ type: 'run-changed', run: run1 })
-  } catch (error) {
-    console.error('[automation] failed to start simulated run:', error)
-    return
-  }
-
-  const startTimer = setTimeout(() => {
-    simulatedTimers.delete(startTimer)
-    try {
-      runs.update(runId, { status: 'running', startedAt: Date.now() })
-      const running = runs.get(runId)
-      if (running) broadcast({ type: 'run-changed', run: running })
-    } catch (error) {
-      console.error('[automation] failed to mark run running:', error)
-      return
-    }
-
-    const finishTimer = setTimeout(() => {
-      simulatedTimers.delete(finishTimer)
-      try {
-        runs.update(runId, {
-          status: 'succeeded',
-          finishedAt: Date.now(),
-          exitCode: 0,
-          summary: 'Simulated run — real CLI execution is not enabled yet.'
-        })
-        const finished = runs.get(runId)
-        if (finished) broadcast({ type: 'run-changed', run: finished })
-        emitStatus()
-      } catch (error) {
-        console.error('[automation] failed to finish simulated run:', error)
-      }
-    }, SIMULATED_RUN_DURATION_MS)
-    simulatedTimers.add(finishTimer)
-  }, 400)
-  simulatedTimers.add(startTimer)
-
-  emitStatus()
-}
-
 const connectivity: ConnectivityGate = {
-  canRun: (definition) => definition.networkPolicy !== 'required' || true
+  canRun: () => REAL_EXECUTION_ENABLED
 }
 
 export function initAutomationService(): void {
   const runs = getAutomationRunRepository()
+  const reclassified = runs?.markSimulatedRunsNeedsAttention() ?? 0
+  if (reclassified > 0) {
+    console.warn(`[automation] reclassified ${reclassified} simulated success record(s)`)
+  }
   const interrupted = runs?.markStaleActiveRunsInterrupted() ?? 0
   if (interrupted > 0) {
     console.info(`[automation] marked ${interrupted} stale run(s) as interrupted after restart`)
@@ -239,8 +183,6 @@ export function reconcileAutomationsNow(): ReconcileResult | null {
 export function disposeAutomationService(): void {
   scheduler?.stop()
   scheduler = null
-  for (const timer of simulatedTimers) clearTimeout(timer)
-  simulatedTimers.clear()
 }
 
 function assertKnownProject(projectId: string): void {
@@ -414,6 +356,9 @@ export function setAutomationEnabled(id: string, enabled: boolean): AutomationDe
 }
 
 export function runAutomationNow(id: string): AutomationRun {
+  if (!REAL_EXECUTION_ENABLED) {
+    throw new Error('Automation execution is not available yet. No CLI task was started.')
+  }
   const definition = requireDefinitions().get(id)
   if (!definition) throw new Error('Automation not found')
   const runs = requireRuns()
@@ -429,7 +374,6 @@ export function runAutomationNow(id: string): AutomationRun {
   if (!claimed) throw new Error('Failed to start run')
   const run = runs.get(runId) as AutomationRun
   broadcast({ type: 'run-changed', run })
-  simulateExecution(runId)
   return run
 }
 

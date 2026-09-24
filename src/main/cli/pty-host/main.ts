@@ -131,19 +131,25 @@ class PtyHostRuntime {
         return
       case 'write': {
         const session = this.sessions.get(message.payload.sessionId)
-        session?.process?.write(message.payload.data)
+        if (!session?.process || session.status !== 'running') {
+          socket.write(encodeMessage({ v: 1, id: message.id, type: 'error', error: 'Terminal session is no longer running' }))
+          return
+        }
+        session.process.write(message.payload.data)
         socket.write(encodeMessage({ v: 1, id: message.id, type: 'ok' }))
         return
       }
       case 'resize': {
         const session = this.sessions.get(message.payload.sessionId)
-        if (session?.process) {
-          const cols = Math.max(20, Math.min(400, Math.floor(message.payload.cols)))
-          const rows = Math.max(6, Math.min(200, Math.floor(message.payload.rows)))
-          session.cols = cols
-          session.rows = rows
-          session.process.resize(cols, rows)
+        if (!session?.process || session.status !== 'running') {
+          socket.write(encodeMessage({ v: 1, id: message.id, type: 'error', error: 'Terminal session is no longer running' }))
+          return
         }
+        const cols = Math.max(20, Math.min(400, Math.floor(message.payload.cols)))
+        const rows = Math.max(6, Math.min(200, Math.floor(message.payload.rows)))
+        session.cols = cols
+        session.rows = rows
+        session.process.resize(cols, rows)
         socket.write(encodeMessage({ v: 1, id: message.id, type: 'ok' }))
         return
       }

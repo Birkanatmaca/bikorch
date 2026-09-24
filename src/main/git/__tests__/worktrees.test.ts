@@ -8,7 +8,7 @@ vi.mock('electron', () => ({
   app: { getPath: () => tmpdir() }
 }))
 
-import { ensureAgentWorktree, removeAgentWorktree } from '../worktrees'
+import { ensureAgentWorktree, isRegisteredAgentWorktree, removeAgentWorktree } from '../worktrees'
 
 function run(cwd: string, command: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -65,6 +65,17 @@ describe('agent worktrees', () => {
     expect(created.branch).toBe('bikorch/claude-a1b2c3d4')
     expect(listed).toMatch(/bikorch\/claude-a1b2c3d4/)
 
+    const registered = {
+      projectRoot: repo,
+      kind: 'claude' as const,
+      panelId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+      worktreePath: created.worktreePath,
+      baseDir
+    }
+    expect(await isRegisteredAgentWorktree(registered)).toBe(true)
+    expect(await isRegisteredAgentWorktree({ ...registered, worktreePath: repo })).toBe(false)
+    expect(await isRegisteredAgentWorktree({ ...registered, panelId: 'ffffffff-e5f6-7890-abcd-ef1234567890' })).toBe(false)
+
     const removed = await removeAgentWorktree({
       projectRoot: repo,
       worktreePath: created.worktreePath,
@@ -72,6 +83,7 @@ describe('agent worktrees', () => {
       baseDir
     })
     expect(removed.ok).toBe(true)
+    expect(await isRegisteredAgentWorktree(registered)).toBe(false)
   })
 
   it('commits dirty work before removing a worktree', async () => {

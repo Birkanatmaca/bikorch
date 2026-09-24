@@ -68,12 +68,12 @@ export function registerPtyHandlers(): void {
 
   ipcMain.handle(PTY_IPC.WRITE, (_event, payload: unknown) => {
     if (!validateWriteRequest(payload)) return
-    ptyManager.write(payload.sessionId, payload.data)
+    return ptyManager.write(payload.sessionId, payload.data)
   })
 
   ipcMain.handle(PTY_IPC.RESIZE, (_event, payload: unknown) => {
     if (!validateResizeRequest(payload)) return
-    ptyManager.resize(payload.sessionId, payload.cols, payload.rows)
+    return ptyManager.resize(payload.sessionId, payload.cols, payload.rows)
   })
 
   ipcMain.handle(PTY_IPC.KILL, (_event, payload: unknown) => {

@@ -556,8 +556,8 @@ export function AiAccountsPanel(): React.JSX.Element {
     if (
       !window.confirm(
         account.kind === 'antigravity'
-          ? `Sign out and remove ${account.name}? This signs ${AI_ACCOUNT_LABELS[account.kind]} out on this computer and closes open sessions.`
-          : `Sign out and remove ${account.name}? Open sessions for this account will be closed.`
+          ? `Remove ${account.name} from Bikorch? Its local profile will be deleted. If the active Antigravity CLI login belongs to this account, Bikorch will also sign it out; another account's active login will be left alone.`
+          : `Remove ${account.name} from Bikorch? This removes the Bikorch-managed ${AI_ACCOUNT_LABELS[account.kind]} profile and closes its open sessions. It does not sign out of the system-wide CLI login.`
       )
     ) {
       return
@@ -572,7 +572,7 @@ export function AiAccountsPanel(): React.JSX.Element {
         kind: account.kind,
         accountId: account.id
       })
-      if (!result.ok) throw new Error(result.error ?? 'Could not sign out this CLI account')
+      if (!result.ok) throw new Error(result.error ?? 'Could not remove this CLI profile')
 
       removeAccount(account.id)
       removeUsageAccount(account.id)

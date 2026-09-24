@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Bot, Pencil, Plus, Trash2, UserRound, X } from 'lucide-react'
+import { Bot, BrainCircuit, Pencil, Plus, Sparkles, Trash2, UserRound, X } from 'lucide-react'
 import {
   MEMORY_CATEGORIES,
   type DeveloperMemory,
@@ -8,9 +8,11 @@ import {
 } from '@shared/contracts/developer-intelligence'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
+import { useSecretaryStore } from '@renderer/stores/secretary-store'
 import { buttonStyles } from '@renderer/components/ui/Button'
 import { cn } from '@renderer/lib/utils'
 import { SectionCard, Toggle } from './ProfilePrimitives'
+import { MemoryBrain } from './MemoryBrain'
 
 type MemoryFilter = 'all' | 'global' | 'project' | 'you' | 'ai'
 
@@ -52,12 +54,12 @@ function MemoryForm({
     <div className="profile-form-overlay">
       <form onSubmit={(event) => void submit(event)} className="profile-subscription-form">
         <div className="profile-form-heading">
-          <h3 className="min-w-0 flex-1">Edit memory</h3>
+          <h3 className="min-w-0 flex-1">Anıyı düzenle</h3>
           <button
             type="button"
             onClick={onClose}
             className={buttonStyles({ variant: 'ghost', size: 'icon-sm' })}
-            aria-label="Close memory form"
+            aria-label="Anı formunu kapat"
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -65,14 +67,14 @@ function MemoryForm({
         <div className="profile-form-fields">
           <div className="profile-form-row">
             <label>
-              <span>Scope</span>
+              <span>Kapsam</span>
               <select value={scope} onChange={(event) => setScope(event.target.value as MemoryScope)}>
-                <option value="global">Global</option>
-                <option value="project" disabled={projects.length === 0}>Project</option>
+                <option value="global">Genel</option>
+                <option value="project" disabled={projects.length === 0}>Proje</option>
               </select>
             </label>
             <label>
-              <span>Category</span>
+              <span>Kategori</span>
               <select value={category} onChange={(event) => setCategory(event.target.value)}>
                 {MEMORY_CATEGORIES.map((item) => (
                   <option key={item} value={item}>{item}</option>
@@ -82,7 +84,7 @@ function MemoryForm({
           </div>
           {scope === 'project' && (
             <label>
-              <span>Project</span>
+            <span>Proje</span>
               <select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>{project.name}</option>
@@ -91,11 +93,11 @@ function MemoryForm({
             </label>
           )}
           <label>
-            <span>Memory</span>
+            <span>Anı</span>
             <textarea
               value={content}
               onChange={(event) => setContent(event.target.value)}
-              placeholder="A preference or fact"
+              placeholder="Seni anlatan bir bilgi veya tercih"
               rows={4}
               maxLength={2000}
               required
@@ -103,9 +105,9 @@ function MemoryForm({
           </label>
         </div>
         <div className="profile-form-actions">
-          <button type="button" onClick={onClose} className={buttonStyles()}>Cancel</button>
+          <button type="button" onClick={onClose} className={buttonStyles()}>Vazgeç</button>
           <button type="submit" className={buttonStyles({ variant: 'primary' })} disabled={saving}>
-            Save
+            Kaydet
           </button>
         </div>
       </form>
@@ -148,16 +150,16 @@ function MemoryComposer(): React.JSX.Element {
       <select
         value={scope}
         onChange={(event) => setScope(event.target.value as MemoryScope)}
-        aria-label="Memory scope"
+        aria-label="Anı kapsamı"
       >
-        <option value="global">Global</option>
-        <option value="project" disabled={projects.length === 0}>Project</option>
+        <option value="global">Genel</option>
+        <option value="project" disabled={projects.length === 0}>Proje</option>
       </select>
       {scope === 'project' && (
         <select
           value={projectId}
           onChange={(event) => setProjectId(event.target.value)}
-          aria-label="Memory project"
+          aria-label="Anı projesi"
         >
           {projects.map((project) => (
             <option key={project.id} value={project.id}>{project.name}</option>
@@ -167,7 +169,7 @@ function MemoryComposer(): React.JSX.Element {
       <select
         value={category}
         onChange={(event) => setCategory(event.target.value)}
-        aria-label="Memory category"
+        aria-label="Anı kategorisi"
       >
         {MEMORY_CATEGORIES.map((item) => (
           <option key={item} value={item}>{item}</option>
@@ -176,15 +178,15 @@ function MemoryComposer(): React.JSX.Element {
       <input
         value={content}
         onChange={(event) => setContent(event.target.value)}
-        placeholder="A preference or fact"
+        placeholder={category === 'About me' ? 'Örn. Adım Birkan; ürün geliştiricisiyim…' : 'Bir tercih veya gerçek ekle…'}
         maxLength={2000}
-        aria-label="New memory"
+        aria-label="Yeni anı"
       />
       <button
         type="submit"
         className={buttonStyles({ variant: 'ghost', size: 'icon-sm' })}
         disabled={saving || !content.trim()}
-        aria-label="Add memory"
+        aria-label="Anı ekle"
       >
         <Plus className="h-3.5 w-3.5" />
       </button>
@@ -255,14 +257,26 @@ export function MemoryManager(): React.JSX.Element {
   const loadContextPreview = useDeveloperIntelligenceStore((state) => state.loadContextPreview)
   const settings = useDeveloperIntelligenceStore((state) => state.settings)
   const updateSettings = useDeveloperIntelligenceStore((state) => state.updateSettings)
+  const setSection = useDeveloperIntelligenceStore((state) => state.setSection)
   const projects = useWorkspaceStore((state) => state.projects)
   const activeProjectId = useWorkspaceStore((state) => state.activeProjectId)
   const [editing, setEditing] = useState<DeveloperMemory | null>(null)
   const [filter, setFilter] = useState<MemoryFilter>('all')
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [learning, setLearning] = useState(false)
+  const [feedback, setFeedback] = useState<string | null>(null)
+  const secretarySettings = useSecretaryStore((state) => state.settings)
+  const secretaryLoaded = useSecretaryStore((state) => state.loaded)
+  const loadSecretary = useSecretaryStore((state) => state.load)
 
   useEffect(() => {
     if (!memoriesLoaded) void loadMemories()
   }, [memoriesLoaded, loadMemories])
+
+  useEffect(() => {
+    if (!secretaryLoaded) void loadSecretary()
+  }, [secretaryLoaded, loadSecretary])
 
   useEffect(() => {
     void loadContextPreview({
@@ -273,7 +287,7 @@ export function MemoryManager(): React.JSX.Element {
 
   const projectNames = useMemo(() => new Map(projects.map((project) => [project.id, project.name])), [projects])
   const aiCount = memories.filter((memory) => memory.source === 'ai').length
-  const visible = useMemo(() => {
+  const scopeVisible = useMemo(() => {
     return memories.filter((memory) => {
       if (filter === 'global') return memory.scope === 'global'
       if (filter === 'project') return memory.scope === 'project'
@@ -282,6 +296,9 @@ export function MemoryManager(): React.JSX.Element {
       return true
     })
   }, [memories, filter])
+  const visible = useMemo(() => scopeVisible.filter((memory) => !selectedCategory || memory.category === selectedCategory), [scopeVisible, selectedCategory])
+  const selected = memories.find((memory) => memory.id === selectedId) ?? null
+  const canLearn = secretarySettings.configured && settings.savePromptHistory && settings.analyzePromptsWithAi
 
   const groups = useMemo(() => {
     const buckets = new Map<string, DeveloperMemory[]>()
@@ -306,84 +323,134 @@ export function MemoryManager(): React.JSX.Element {
   }, [visible, activeProjectId, projectNames])
 
   const runAnalysis = async (): Promise<void> => {
-    await analyzeMemories(
+    setFeedback(null)
+    const result = await analyzeMemories(
       projects.map((project) => ({ id: project.id, name: project.name, folderPath: project.folderPath }))
     )
+    setFeedback(result ? `${result.created} yeni, ${result.updated} güncellenen anı` : 'Yerel keşif tamamlanamadı.')
+  }
+
+  const learnWithAi = async (): Promise<void> => {
+    setLearning(true)
+    setFeedback(null)
+    try {
+      const result = await window.api.developerIntelligence.learnMemoriesWithAi()
+      await Promise.all([loadMemories(), useSecretaryStore.getState().load()])
+      setFeedback(`${result.analyzedPrompts} prompt incelendi · ${result.created} yeni anı, ${result.updated} güncelleme`)
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : 'AI öğrenme tamamlanamadı.')
+    } finally {
+      setLearning(false)
+    }
   }
 
   const filters: Array<{ id: MemoryFilter; label: string }> = [
-    { id: 'all', label: 'All' },
-    { id: 'global', label: 'Global' },
-    { id: 'project', label: 'Project' },
-    { id: 'you', label: 'You' },
+    { id: 'all', label: 'Tümü' },
+    { id: 'global', label: 'Genel' },
+    { id: 'project', label: 'Proje' },
+    { id: 'you', label: 'Sen' },
     { id: 'ai', label: 'AI' }
   ]
 
   return (
     <>
-      <SectionCard
-        title="Memory"
-        action={
-          <button
-            type="button"
-            className={buttonStyles({ variant: 'secondary', size: 'sm' })}
-            disabled={analyzing}
-            onClick={() => void runAnalysis()}
-          >
-            {analyzing ? 'Updating…' : 'Update'}
-          </button>
-        }
-      >
-        <div className="profile-memory-use">
+      <section className="profile-brain-shell">
+        <div className="profile-brain-heading">
+          <div className="profile-brain-heading-icon"><BrainCircuit aria-hidden="true" /></div>
+          <div>
+            <span className="profile-brain-eyebrow">DEVELOPER INTELLIGENCE</span>
+            <h3>Memory Brain</h3>
+            <p>Çalışma tarzın, tercihlerin ve projelerin tek haritada.</p>
+          </div>
+        </div>
+        <div className="profile-brain-metrics">
+          <span><strong>{memories.length}</strong> anı</span>
+          <span><strong>{new Set(memories.map((memory) => memory.category)).size}</strong> bağlantı kümesi</span>
+          <span className={cn('profile-brain-key-status', secretarySettings.configured && 'is-connected')}>
+            <i />{secretarySettings.configured ? 'Anahtar kayıtlı' : 'Anahtar yok'}
+          </span>
+        </div>
+        <MemoryBrain
+          memories={scopeVisible}
+          selectedId={selectedId}
+          selectedCategory={selectedCategory}
+          onSelectMemory={setSelectedId}
+          onSelectCategory={setSelectedCategory}
+        />
+        <div className="profile-brain-legend">
+          <span><i className="is-user" /> Senin eklediğin</span>
+          <span><i className="is-ai" /> AI keşfi</span>
+          <span><i className="is-off" /> Kapalı</span>
+        </div>
+        {selected && (
+          <div className="profile-brain-detail">
+            <div className="profile-brain-detail-top">
+              <span className="profile-prompt-tag">{selected.category}</span>
+              <span>{selected.scope === 'project' ? projectNames.get(selected.projectId ?? '') ?? 'Proje' : 'Genel'}</span>
+              <button type="button" onClick={() => setSelectedId(null)} aria-label="Seçimi kapat"><X aria-hidden="true" /></button>
+            </div>
+            <p>{selected.content}</p>
+            <div className="profile-brain-detail-actions">
+              <span>{selected.source === 'ai' ? `AI keşfi · %${Math.round(selected.confidence * 100)} güven` : 'Senin eklediğin anı'}</span>
+              <button type="button" onClick={() => setEditing(selected)} aria-label="Anıyı düzenle"><Pencil aria-hidden="true" /></button>
+              <button type="button" onClick={() => {
+                if (window.confirm('Bu anı silinsin mi?')) {
+                  void deleteMemory(selected.id)
+                  setSelectedId(null)
+                }
+              }} aria-label="Anıyı sil"><Trash2 aria-hidden="true" /></button>
+            </div>
+          </div>
+        )}
+        <div className="profile-brain-controls">
           <Toggle
             checked={settings.includeMemoryInPrompts}
             onChange={(value) => void updateSettings({ includeMemoryInPrompts: value })}
-            label="Use in CLI"
+            label="Sekreter ve CLI bu anıları kullansın"
           />
+          <p>{settings.includeMemoryInPrompts
+            ? `${contextPreview?.memories.length ?? 0} uygun anı bu projede bağlama girebilir. Yalnızca etkin anılar paylaşılır.`
+            : 'Kapalıyken anılar sadece bu cihazda kalır; Sekreter’e veya CLI’a eklenmez.'}</p>
         </div>
+        <div className="profile-brain-actions">
+          <button type="button" className={buttonStyles({ variant: 'secondary', size: 'sm' })} disabled={analyzing || learning} onClick={() => void runAnalysis()}>
+            {analyzing ? 'Keşfediliyor…' : 'Yerel keşif'}
+          </button>
+          <button type="button" className={buttonStyles({ variant: 'secondary', size: 'sm' })} disabled={learning || analyzing || !canLearn} onClick={() => void learnWithAi()}>
+            <Sparkles className="h-3 w-3" aria-hidden="true" />{learning ? 'Öğreniyor…' : 'AI ile öğren'}
+          </button>
+        </div>
+        {!canLearn && <p className="profile-brain-note">AI öğrenme için Sekreter API anahtarı ile Gizlilik bölümündeki “Prompt text” ve “Analyze with AI” izinleri gerekli. <button type="button" onClick={() => setSection(secretarySettings.configured ? 'privacy' : 'secretary')}>Ayarları aç</button></p>}
+        {canLearn && <p className="profile-brain-note">“AI ile öğren” seçildiğinde yalnızca saklanan, gizli bilgileri temizlenmiş promptlar API’ye gönderilir.</p>}
+        {feedback && <p className="profile-brain-feedback" role="status">{feedback}</p>}
+      </section>
+
+      <SectionCard title="Anı kütüphanesi" description="Düğümleri incele, tercihlerini elle ekle veya düzelt." className="mt-2.5">
         <MemoryComposer />
 
-        {contextPreview && contextPreview.memories.length > 0 && (
-          <div className={cn('profile-memory-inject', !settings.includeMemoryInPrompts && 'is-off')}>
-            <p>
-              {settings.includeMemoryInPrompts
-                ? `CLI prompts get ${contextPreview.memories.length}`
-                : `Would add ${contextPreview.memories.length} to CLI prompts`}
-            </p>
-            <ul>
-              {contextPreview.memories.map((item) => (
-                <li key={item.id}>
-                  <span className="profile-prompt-tag">{item.category}</span>
-                  <span>{item.content}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
         {memories.length > 0 && (
-          <div className="profile-memory-filters" role="tablist" aria-label="Memory filters">
+          <div className="profile-memory-filters" role="group" aria-label="Anı filtreleri">
             {filters.map((item) => (
               <button
                 key={item.id}
                 type="button"
-                role="tab"
-                aria-selected={filter === item.id}
+                aria-pressed={filter === item.id}
                 className={cn('profile-seg-btn', filter === item.id && 'is-active')}
                 onClick={() => setFilter(item.id)}
               >
                 {item.label}
               </button>
             ))}
+            {selectedCategory && <button type="button" className="profile-seg-btn is-active" onClick={() => setSelectedCategory(null)}>{selectedCategory} ×</button>}
             {aiCount > 0 && (
               <button
                 type="button"
                 className="profile-seg-btn profile-seg-danger"
                 onClick={() => {
-                  if (window.confirm(`Remove all ${aiCount} AI-generated memories?`)) void clear('ai-memories')
+                  if (window.confirm(`${aiCount} AI anısı silinsin mi?`)) void clear('ai-memories')
                 }}
               >
-                Clear AI
+                AI anılarını sil
               </button>
             )}
           </div>
@@ -392,8 +459,8 @@ export function MemoryManager(): React.JSX.Element {
         {visible.length === 0 ? (
           <div className="profile-empty-state">
             {memories.length === 0
-              ? (analysis ? 'None' : 'Add one, or Update from local activity')
-              : 'None'}
+              ? (analysis ? 'Henüz anı yok.' : 'Bir anı ekle veya yerel keşfi çalıştır.')
+              : 'Bu filtrede anı yok.'}
           </div>
         ) : (
           <div className="profile-memory-list">

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { v4 as uuidv4 } from 'uuid'
 import {
+  AI_ACCOUNT_KINDS,
   createDefaultActiveAccountByKind,
   type AiAccount,
   type ActiveAccountByKind,
@@ -17,7 +18,7 @@ interface AiAccountsStore extends AiAccountsSnapshot {
   getSnapshot: () => AiAccountsSnapshot
   addAccount: (draft: AiAccountDraft) => string
   updateAccount: (accountId: string, updates: Partial<AiAccountDraft>) => void
-  removeAccount: (accountId: string) => void
+  removeAccount: (accountId: string, options?: { suppressSystemImport?: boolean }) => void
   setActiveAccount: (kind: CliUsageKind, accountId: string) => void
   markAccountAuthenticated: (
     accountId: string,
@@ -35,6 +36,17 @@ function createDefaultSuppressSystemImport(): Record<CliUsageKind, boolean> {
     antigravity: false,
     codex: false
   }
+}
+
+function suppressSystemImportFromSnapshot(kinds: unknown): Record<CliUsageKind, boolean> {
+  const suppressed = createDefaultSuppressSystemImport()
+  if (!Array.isArray(kinds)) return suppressed
+  for (const kind of kinds) {
+    if (typeof kind === 'string' && AI_ACCOUNT_KINDS.includes(kind as CliUsageKind)) {
+      suppressed[kind as CliUsageKind] = true
+    }
+  }
+  return suppressed
 }
 
 function initialState(): AiAccountsSnapshot & {
@@ -59,13 +71,17 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
     set({
       accounts,
       activeAccountByKind,
-      suppressSystemImportByKind: createDefaultSuppressSystemImport()
+      suppressSystemImportByKind: suppressSystemImportFromSnapshot(snapshot.suppressedSystemAuthKinds)
     })
   },
 
   getSnapshot: () => {
-    const { accounts, activeAccountByKind } = get()
-    return { accounts, activeAccountByKind }
+    const { accounts, activeAccountByKind, suppressSystemImportByKind } = get()
+    return {
+      accounts,
+      activeAccountByKind,
+      suppressedSystemAuthKinds: AI_ACCOUNT_KINDS.filter((kind) => suppressSystemImportByKind[kind])
+    }
   },
 
   addAccount: (draft) => {
@@ -104,7 +120,7 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
     }))
   },
 
-  removeAccount: (accountId) => {
+  removeAccount: (accountId, options) => {
     const current = get()
     const removed = current.accounts.find((account) => account.id === accountId)
     if (!removed) return
@@ -114,15 +130,14 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
     if (activeAccountByKind[removed.kind] === accountId) {
       activeAccountByKind[removed.kind] = null
     }
-    const hasRemainingReady = accounts.some(
-      (account) => account.kind === removed.kind && account.profileReady
-    )
     set({
       accounts,
       activeAccountByKind,
       suppressSystemImportByKind: {
         ...current.suppressSystemImportByKind,
-        [removed.kind]: !hasRemainingReady
+        [removed.kind]: options?.suppressSystemImport === false
+          ? current.suppressSystemImportByKind[removed.kind]
+          : true
       }
     })
   },

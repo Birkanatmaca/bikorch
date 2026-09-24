@@ -35,6 +35,8 @@ export type ActiveAccountByKind = Record<CliUsageKind, string | null>
 export interface AiAccountsSnapshot {
   accounts: AiAccount[]
   activeAccountByKind: ActiveAccountByKind
+  /** CLI kinds whose system-level credentials the user explicitly removed from Bikorch. */
+  suppressedSystemAuthKinds?: CliUsageKind[]
 }
 
 export function createDefaultActiveAccountByKind(): ActiveAccountByKind {

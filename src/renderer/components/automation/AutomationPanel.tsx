@@ -309,6 +309,7 @@ function AutomationCard({ automation }: { automation: AutomationDefinition }): R
   const setEnabled = useAutomationStore((state) => state.setEnabled)
   const runNow = useAutomationStore((state) => state.runNow)
   const loadRuns = useAutomationStore((state) => state.loadRuns)
+  const executionAvailable = useAutomationStore((state) => state.status.executionAvailable)
   const project = useWorkspaceStore((state) => state.projects.find((item) => item.id === automation?.projectId))
   const runs = useAutomationStore((state) => state.runsByAutomation[automation?.id ?? ''] ?? [])
   const [expanded, setExpanded] = useState(false)
@@ -385,7 +386,14 @@ function AutomationCard({ automation }: { automation: AutomationDefinition }): R
       </div>
 
       <div className="automation-card-footer">
-        <Button type="button" variant="primary" size="sm" onClick={handleRunNow} disabled={running}>
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          onClick={handleRunNow}
+          disabled={running || !executionAvailable}
+          title={!executionAvailable ? 'CLI execution is not available yet' : undefined}
+        >
           {running ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Run now'}
         </Button>
         <button
@@ -452,6 +460,13 @@ export function AutomationPanel(): React.JSX.Element {
           New
         </Button>
       </div>
+
+      {!status.executionAvailable ? (
+        <div className="automation-execution-notice" role="status">
+          <CircleAlert className="h-4 w-4 shrink-0" />
+          <span>CLI execution is not connected yet. Schedules are saved, but tasks will not run until execution is available.</span>
+        </div>
+      ) : null}
 
       {creating && (
         <div className="shrink-0 border-b border-white/5">

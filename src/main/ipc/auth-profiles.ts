@@ -88,6 +88,8 @@ export function registerAuthProfileHandlers(): void {
       ptyManager.killForAccount(payload.kind, payload.accountId)
       return removeAuthProfile(payload)
     }
-    return payload.kind === 'cursor' ? withCursorAccountLock(payload.accountId, remove) : remove()
+    if (payload.kind === 'cursor') return withCursorAccountLock(payload.accountId, remove)
+    if (payload.kind === 'antigravity') return withAntigravityCredentialLock(remove)
+    return remove()
   })
 }

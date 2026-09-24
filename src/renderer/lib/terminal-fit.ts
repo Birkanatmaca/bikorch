@@ -3,8 +3,9 @@ export const TERMINAL_GRID = {
   minRows: 6,
   maxCols: 400,
   maxRows: 200,
-  minHostWidth: 80,
-  minHostHeight: 40
+  // Smaller hosts still render a minimum PTY grid; the host can scroll it.
+  minHostWidth: 24,
+  minHostHeight: 16
 } as const
 
 /** Extra fits after a layout change so CSS transitions and TUI redraws can settle. */
@@ -63,8 +64,10 @@ export function viewportIsAtBottom(viewport: TerminalViewportBox, slopPx = 36): 
   return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= slopPx
 }
 
-export function shouldPinTerminalToBottom(cliKind: boolean, wasAtBottom: boolean): boolean {
-  return cliKind || wasAtBottom
+export function shouldPinTerminalToBottom(alternateBuffer: boolean, wasAtBottom: boolean): boolean {
+  // Full-screen TUIs use the alternate buffer. Normal-buffer CLI history should
+  // retain the user's scroll position just like a shell terminal.
+  return alternateBuffer || wasAtBottom
 }
 
 export function pinViewportToBottom(viewport: HTMLElement): void {

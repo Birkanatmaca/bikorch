@@ -47,7 +47,7 @@ export function parseJsonObject(text: string): unknown {
   return null
 }
 
-export function readSecretaryReply(text: string): { reply: string; planRaw: unknown; openKindsRaw: unknown } {
+export function readSecretaryReply(text: string): { reply: string; planRaw: unknown; openKindsRaw: unknown; contextSummary: string | null } {
   const parsed = parseJsonObject(text)
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     const body = parsed as Record<string, unknown>
@@ -55,8 +55,9 @@ export function readSecretaryReply(text: string): { reply: string; planRaw: unkn
     return {
       reply: reply || (typeof body.overview === 'string' ? body.overview.trim() : '') || text.trim(),
       planRaw: body.plan ?? (Array.isArray(body.assignments) ? parsed : null),
-      openKindsRaw: body.openKinds ?? body.openPanels ?? null
+      openKindsRaw: body.openKinds ?? body.openPanels ?? null,
+      contextSummary: typeof body.contextSummary === 'string' ? body.contextSummary.trim() : null
     }
   }
-  return { reply: text.trim(), planRaw: null, openKindsRaw: null }
+  return { reply: text.trim(), planRaw: null, openKindsRaw: null, contextSummary: null }
 }

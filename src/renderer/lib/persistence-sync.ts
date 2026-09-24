@@ -9,8 +9,10 @@ import { useSubscriptionStore } from '@renderer/stores/subscription-store'
 import { AI_ACCOUNTS_REFRESH_EVENT } from './app-events'
 
 const SAVE_DEBOUNCE_MS = 400
+const MAX_SAVE_WAIT_MS = 2_000
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+let firstSaveScheduledAt: number | null = null
 let isHydrating = false
 let syncStarted = false
 
@@ -29,32 +31,37 @@ export function buildPersistedSnapshot(): PersistedSnapshot {
     editor,
     accounts: accounts.accounts,
     activeAccountByKind: accounts.activeAccountByKind,
+    suppressedSystemAuthKinds: accounts.suppressedSystemAuthKinds,
     tasksByProject: tasks.tasksByProject,
     usage,
     subscriptions
   }
 }
 
-export async function hydrateFromDisk(): Promise<void> {
+export async function hydrateFromDisk(signal?: AbortSignal): Promise<void> {
   const profilesPromise = window.api.authProfiles.list().catch(() => null)
   const snapshot = await window.api.persistence.load()
+  if (signal?.aborted) return
   isHydrating = true
+  try {
+    useWorkspaceStore.getState().hydrate({
+      projects: snapshot.projects,
+      activeProjectId: snapshot.activeProjectId,
+      workspaces: snapshot.workspaces
+    })
 
-  useWorkspaceStore.getState().hydrate({
-    projects: snapshot.projects,
-    activeProjectId: snapshot.activeProjectId,
-    workspaces: snapshot.workspaces
-  })
-
-  useEditorStore.getState().hydrate(snapshot.editor)
-  useAiAccountsStore.getState().hydrate({
-    accounts: snapshot.accounts,
-    activeAccountByKind: snapshot.activeAccountByKind
-  })
-  useTasksStore.getState().hydrate({ tasksByProject: snapshot.tasksByProject ?? {} })
-  useUsageStore.getState().hydrate(snapshot.usage)
-  useSubscriptionStore.getState().hydrate(snapshot.subscriptions)
-  isHydrating = false
+    useEditorStore.getState().hydrate(snapshot.editor)
+    useAiAccountsStore.getState().hydrate({
+      accounts: snapshot.accounts,
+      activeAccountByKind: snapshot.activeAccountByKind,
+      suppressedSystemAuthKinds: snapshot.suppressedSystemAuthKinds
+    })
+    useTasksStore.getState().hydrate({ tasksByProject: snapshot.tasksByProject ?? {} })
+    useUsageStore.getState().hydrate(snapshot.usage)
+    useSubscriptionStore.getState().hydrate(snapshot.subscriptions)
+  } finally {
+    isHydrating = false
+  }
 
   // Legacy account verification can involve a remote service; never hold up workspace loading.
   void profilesPromise.then((profiles) => {
@@ -111,6 +118,7 @@ async function restorePersistedEditorSession(): Promise<void> {
 
 function scheduleSave(): void {
   if (isHydrating) return
+  if (firstSaveScheduledAt === null) firstSaveScheduledAt = Date.now()
 
   if (saveTimer) {
     clearTimeout(saveTimer)
@@ -118,8 +126,11 @@ function scheduleSave(): void {
 
   saveTimer = setTimeout(() => {
     saveTimer = null
-    void window.api.persistence.save(buildPersistedSnapshot())
-  }, SAVE_DEBOUNCE_MS)
+    firstSaveScheduledAt = null
+    void window.api.persistence.save(buildPersistedSnapshot()).catch((error) => {
+      console.error('Failed to save workspace snapshot:', error)
+    })
+  }, Math.max(0, Math.min(SAVE_DEBOUNCE_MS, MAX_SAVE_WAIT_MS - (Date.now() - firstSaveScheduledAt))))
 }
 
 export function startPersistenceSync(): void {
@@ -146,7 +157,8 @@ export function startPersistenceSync(): void {
   useAiAccountsStore.subscribe((state, prevState) => {
     if (
       state.accounts === prevState.accounts &&
-      state.activeAccountByKind === prevState.activeAccountByKind
+      state.activeAccountByKind === prevState.activeAccountByKind &&
+      state.suppressSystemImportByKind === prevState.suppressSystemImportByKind
     ) {
       return
     }
@@ -179,6 +191,7 @@ export async function flushPersistence(): Promise<void> {
     clearTimeout(saveTimer)
     saveTimer = null
   }
+  firstSaveScheduledAt = null
 
   await window.api.persistence.save(buildPersistedSnapshot())
 }

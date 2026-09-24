@@ -24,6 +24,22 @@ function runGit(cwd: string, args: string[]): Promise<string> {
 
 const EMPTY: GitSessionSnapshot = { headSha: null, changedFiles: [], commits: [] }
 
+/** Read-only, bounded whitespace check for tracked changes in an agent worktree. */
+export function checkAgentGitPatch(cwd: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    if (!cwd) return resolve(null)
+    const proc = spawn('git', ['diff', '--check', 'HEAD'], { cwd, windowsHide: true, timeout: 10_000 })
+    let settled = false
+    const finish = (code: number | null): void => {
+      if (settled) return
+      settled = true
+      resolve(code)
+    }
+    proc.on('error', () => finish(null))
+    proc.on('close', (code, signal) => finish(signal ? null : code))
+  })
+}
+
 export async function snapshotAgentGit(cwd: string, sinceSha?: string): Promise<GitSessionSnapshot> {
   if (!cwd) return EMPTY
   try {

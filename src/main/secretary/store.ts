@@ -1,14 +1,19 @@
 import { createHash, randomUUID } from 'crypto'
 import type { Database } from 'sql.js'
 import {
+  SECRETARY_ASSIGNMENT_MODES,
   SECRETARY_SCHEMA_VERSION,
+  type SecretaryAssignmentMode,
   type SecretaryChatTurn,
   type SecretaryMessage,
+  type SecretaryMessageCursor,
   type SecretaryMessageRole,
   type SecretaryMessageType,
   type SecretaryPlan,
   type SecretaryRun,
+  type SecretaryRunEvidence,
   type SecretaryRunStatus,
+  type SecretarySessionBinding,
   type SecretaryThread,
   type SecretaryThreadStatus
 } from '@shared/contracts/secretary'
@@ -90,8 +95,14 @@ function parsePlan(value: unknown): SecretaryPlan | null {
         id: typeof item.id === 'string' && item.id ? item.id.slice(0, 100) : `assignment-${index + 1}`,
         panelId: typeof item.panelId === 'string' && item.panelId ? item.panelId.slice(0, 100) : null,
         kind: item.kind as CliUsageKind,
+        mode: typeof item.mode === 'string' && SECRETARY_ASSIGNMENT_MODES.includes(item.mode as SecretaryAssignmentMode)
+          ? item.mode as SecretaryAssignmentMode
+          : 'implement',
         title: typeof item.title === 'string' && item.title.trim() ? item.title.trim().slice(0, 120) : `Task ${index + 1}`,
         instruction: item.instruction.trim().slice(0, 6000),
+        expectedResult: typeof item.expectedResult === 'string' && item.expectedResult.trim()
+          ? item.expectedResult.trim().slice(0, 1000)
+          : 'Complete the assigned task and provide a concise, evidence-based result.',
         rationale: typeof item.rationale === 'string' ? item.rationale.slice(0, 500) : 'Selected by the planner.',
         usageNote: typeof item.usageNote === 'string' ? item.usageNote.slice(0, 240) : 'Review account availability before dispatching.',
         dependsOn: Array.isArray(item.dependsOn)
@@ -138,6 +149,39 @@ function parseOpenKinds(value: unknown): CliUsageKind[] {
   }
 }
 
+function parseSessionBindings(value: unknown): SecretarySessionBinding[] {
+  if (typeof value !== 'string') return []
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!Array.isArray(parsed)) return []
+    return parsed.slice(0, 8).flatMap((item) => {
+      if (!item || typeof item !== 'object') return []
+      const binding = item as Partial<SecretarySessionBinding>
+      if (typeof binding.assignmentId !== 'string' || typeof binding.sessionId !== 'string') return []
+      return [{
+        assignmentId: binding.assignmentId.slice(0, 100),
+        sessionId: binding.sessionId.slice(0, 100),
+        accountId: typeof binding.accountId === 'string' ? binding.accountId.slice(0, 100) : null
+      }]
+    })
+  } catch {
+    return []
+  }
+}
+
+function parseRunEvidence(value: unknown): SecretaryRunEvidence | null {
+  if (typeof value !== 'string') return null
+  try {
+    const parsed = JSON.parse(value) as Partial<SecretaryRunEvidence>
+    if (!parsed || !Array.isArray(parsed.assignments) || !Array.isArray(parsed.changedFiles) ||
+        !Array.isArray(parsed.unverifiedReportedFiles) ||
+        !['git-observed', 'cli-reported', 'inferred'].includes(parsed.verificationLevel ?? '')) return null
+    return parsed as SecretaryRunEvidence
+  } catch {
+    return null
+  }
+}
+
 function rowToThread(row: Row): SecretaryThread | null {
   const id = text(row['id'])
   const projectId = text(row['project_id'])
@@ -159,7 +203,7 @@ function rowToMessage(row: Row): SecretaryMessage | null {
   if (!id || !threadId || !role || !MESSAGE_ROLES.has(role) || !type || !MESSAGE_TYPES.has(type) || content === null || createdAt === null) {
     return null
   }
-  return { id, threadId, runId: text(row['run_id']), role, type, content, createdAt }
+  return { id, threadId, runId: text(row['run_id']), assignmentId: text(row['assignment_id']), role, type, content, createdAt }
 }
 
 function rowToRun(row: Row): SecretaryRun | null {
@@ -186,6 +230,8 @@ function rowToRun(row: Row): SecretaryRun | null {
     openKinds: parseOpenKinds(row['open_kinds_json']),
     errorCode: text(row['error_code']),
     errorMessage: text(row['error_message']),
+    sessionBindings: parseSessionBindings(row['session_bindings_json']),
+    evidence: parseRunEvidence(row['evidence_json']),
     createdAt,
     updatedAt
   }
@@ -202,10 +248,15 @@ export function initSecretarySchema(db: Database): void {
       project_id TEXT NOT NULL,
       title TEXT NOT NULL,
       status TEXT NOT NULL,
+      context_summary TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
   `)
+  const threadColumns = toRows(db, 'PRAGMA table_info(secretary_threads)')
+  if (!threadColumns.some((column) => text(column['name']) === 'context_summary')) {
+    db.run("ALTER TABLE secretary_threads ADD COLUMN context_summary TEXT NOT NULL DEFAULT ''")
+  }
   db.run('CREATE INDEX IF NOT EXISTS secretary_threads_project ON secretary_threads (project_id, updated_at DESC);')
 
   db.run(`
@@ -213,12 +264,17 @@ export function initSecretarySchema(db: Database): void {
       id TEXT PRIMARY KEY,
       thread_id TEXT NOT NULL,
       run_id TEXT,
+      assignment_id TEXT,
       role TEXT NOT NULL,
       type TEXT NOT NULL,
       content TEXT NOT NULL,
       created_at INTEGER NOT NULL
     );
   `)
+  const messageColumns = toRows(db, 'PRAGMA table_info(secretary_messages)')
+  if (!messageColumns.some((column) => text(column['name']) === 'assignment_id')) {
+    db.run('ALTER TABLE secretary_messages ADD COLUMN assignment_id TEXT')
+  }
   db.run('CREATE INDEX IF NOT EXISTS secretary_messages_thread ON secretary_messages (thread_id, created_at);')
 
   db.run(`
@@ -234,6 +290,8 @@ export function initSecretarySchema(db: Database): void {
       open_kinds_json TEXT NOT NULL DEFAULT '[]',
       error_code TEXT,
       error_message TEXT,
+      session_bindings_json TEXT NOT NULL DEFAULT '[]',
+      evidence_json TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -241,6 +299,12 @@ export function initSecretarySchema(db: Database): void {
   const runColumns = toRows(db, 'PRAGMA table_info(secretary_runs)')
   if (!runColumns.some((column) => text(column['name']) === 'plan_revision')) {
     db.run('ALTER TABLE secretary_runs ADD COLUMN plan_revision INTEGER NOT NULL DEFAULT 0')
+  }
+  if (!runColumns.some((column) => text(column['name']) === 'session_bindings_json')) {
+    db.run("ALTER TABLE secretary_runs ADD COLUMN session_bindings_json TEXT NOT NULL DEFAULT '[]'")
+  }
+  if (!runColumns.some((column) => text(column['name']) === 'evidence_json')) {
+    db.run('ALTER TABLE secretary_runs ADD COLUMN evidence_json TEXT')
   }
   db.run('CREATE INDEX IF NOT EXISTS secretary_runs_project ON secretary_runs (project_id, created_at DESC);')
   db.run('CREATE INDEX IF NOT EXISTS secretary_runs_thread ON secretary_runs (thread_id, created_at);')
@@ -283,23 +347,31 @@ export interface SecretaryRunPatch {
   openKinds?: CliUsageKind[]
   errorCode?: string | null
   errorMessage?: string | null
+  sessionBindings?: SecretarySessionBinding[]
+  evidence?: SecretaryRunEvidence | null
 }
 
 export interface SecretaryStore {
   createThread(input: { projectId: string; title: string }): SecretaryThread
   listThreads(projectId: string): SecretaryThread[]
   getThread(id: string): SecretaryThread | null
+  getThreadContextSummary(id: string): string
+  setThreadContextSummary(id: string, summary: string): void
   appendMessage(input: {
     threadId: string
     runId?: string | null
+    assignmentId?: string | null
     role: SecretaryMessageRole
     type: SecretaryMessageType
     content: string
   }): SecretaryMessage
-  listMessages(threadId: string, limit?: number): SecretaryMessage[]
+  listMessages(threadId: string, limit?: number, before?: SecretaryMessageCursor): SecretaryMessage[]
+  listContextMessages(threadId: string, limit?: number): SecretaryMessage[]
   createRun(input: { threadId: string; projectId: string; requestText: string }): SecretaryRun
   getRun(id: string): SecretaryRun | null
   listRuns(projectId: string, threadId?: string): SecretaryRun[]
+  listRunsByIds(threadId: string, runIds: string[]): SecretaryRun[]
+  countFollowUpRuns(threadId: string): number
   updateRun(id: string, patch: SecretaryRunPatch): SecretaryRun | null
   decidePlan(id: string, decision: 'approved' | 'rejected'): SecretaryRun | null
   markStaleRunsInterrupted(): number
@@ -338,9 +410,22 @@ export class SqlSecretaryStore implements SecretaryStore {
     return row ? rowToThread(row) : null
   }
 
+  getThreadContextSummary(id: string): string {
+    const row = toRows(this.db, 'SELECT context_summary FROM secretary_threads WHERE id = ?', [id])[0]
+    return text(row?.['context_summary']) ?? ''
+  }
+
+  setThreadContextSummary(id: string, summary: string): void {
+    const safe = sanitizedText(summary, 2_000)
+    if (safe === this.getThreadContextSummary(id)) return
+    this.db.run('UPDATE secretary_threads SET context_summary = ? WHERE id = ?', [safe, id])
+    schedulePersistToDisk()
+  }
+
   appendMessage(input: {
     threadId: string
     runId?: string | null
+    assignmentId?: string | null
     role: SecretaryMessageRole
     type: SecretaryMessageType
     content: string
@@ -350,25 +435,42 @@ export class SqlSecretaryStore implements SecretaryStore {
       id: randomUUID(),
       threadId: input.threadId,
       runId: input.runId ?? null,
+      assignmentId: input.assignmentId ?? null,
       role: input.role,
       type: input.type,
       content: sanitizedText(input.content, 8_000),
       createdAt: now
     }
     this.db.run(
-      'INSERT INTO secretary_messages (id, thread_id, run_id, role, type, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [message.id, message.threadId, message.runId, message.role, message.type, message.content, message.createdAt]
+      'INSERT INTO secretary_messages (id, thread_id, run_id, assignment_id, role, type, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [message.id, message.threadId, message.runId, message.assignmentId, message.role, message.type, message.content, message.createdAt]
     )
     this.db.run('UPDATE secretary_threads SET updated_at = ? WHERE id = ?', [now, message.threadId])
     schedulePersistToDisk()
     return message
   }
 
-  listMessages(threadId: string, limit = 100): SecretaryMessage[] {
+  listMessages(threadId: string, limit = 100, before?: SecretaryMessageCursor): SecretaryMessage[] {
     const normalizedLimit = Math.min(Math.max(1, Math.floor(limit)), 200)
     return toRows(
       this.db,
-      'SELECT * FROM secretary_messages WHERE thread_id = ? ORDER BY created_at DESC LIMIT ?',
+      `SELECT * FROM secretary_messages WHERE thread_id = ?
+       ${before ? 'AND (created_at < ? OR (created_at = ? AND id < ?))' : ''}
+       ORDER BY created_at DESC, id DESC LIMIT ?`,
+      before
+        ? [threadId, before.createdAt, before.createdAt, before.id, normalizedLimit]
+        : [threadId, normalizedLimit]
+    )
+      .map(rowToMessage)
+      .filter((message): message is SecretaryMessage => Boolean(message))
+      .reverse()
+  }
+
+  listContextMessages(threadId: string, limit = 20): SecretaryMessage[] {
+    const normalizedLimit = Math.min(Math.max(1, Math.floor(limit)), 40)
+    return toRows(
+      this.db,
+      "SELECT * FROM secretary_messages WHERE thread_id = ? AND type IN ('chat', 'final-report') ORDER BY created_at DESC, id DESC LIMIT ?",
       [threadId, normalizedLimit]
     )
       .map(rowToMessage)
@@ -390,6 +492,8 @@ export class SqlSecretaryStore implements SecretaryStore {
       openKinds: [],
       errorCode: null,
       errorMessage: null,
+      sessionBindings: [],
+      evidence: null,
       createdAt: now,
       updatedAt: now
     }
@@ -419,6 +523,27 @@ export class SqlSecretaryStore implements SecretaryStore {
       .filter((run): run is SecretaryRun => Boolean(run))
   }
 
+  listRunsByIds(threadId: string, runIds: string[]): SecretaryRun[] {
+    const ids = [...new Set(runIds)].slice(0, 101)
+    if (ids.length === 0) return []
+    return toRows(
+      this.db,
+      `SELECT * FROM secretary_runs WHERE thread_id = ? AND id IN (${ids.map(() => '?').join(', ')})`,
+      [threadId, ...ids]
+    )
+      .map(rowToRun)
+      .filter((run): run is SecretaryRun => Boolean(run))
+  }
+
+  countFollowUpRuns(threadId: string): number {
+    const row = toRows(
+      this.db,
+      'SELECT COUNT(*) AS total FROM secretary_runs WHERE thread_id = ? AND request_text LIKE ?',
+      [threadId, 'Follow-up requested after CLI result for:%']
+    )[0]
+    return integer(row?.['total']) ?? 0
+  }
+
   updateRun(id: string, patch: SecretaryRunPatch): SecretaryRun | null {
     const existing = this.getRun(id)
     if (!existing) return null
@@ -435,11 +560,17 @@ export class SqlSecretaryStore implements SecretaryStore {
       plan,
       planRevision: planChanged ? existing.planRevision + 1 : existing.planRevision,
       openKinds: patch.openKinds === undefined ? existing.openKinds : parseOpenKinds(JSON.stringify(patch.openKinds)),
+      sessionBindings: patch.sessionBindings === undefined
+        ? existing.sessionBindings
+        : parseSessionBindings(JSON.stringify(patch.sessionBindings)),
+      evidence: patch.evidence === undefined
+        ? existing.evidence
+        : patch.evidence === null ? null : parseRunEvidence(redactSecrets(JSON.stringify(patch.evidence)).text),
       updatedAt: now
     }
     this.db.run(
       `UPDATE secretary_runs SET
-        status = ?, reply = ?, plan_json = ?, plan_revision = ?, open_kinds_json = ?, error_code = ?, error_message = ?, updated_at = ?
+        status = ?, reply = ?, plan_json = ?, plan_revision = ?, open_kinds_json = ?, error_code = ?, error_message = ?, session_bindings_json = ?, evidence_json = ?, updated_at = ?
       WHERE id = ?`,
       [
         next.status,
@@ -449,6 +580,8 @@ export class SqlSecretaryStore implements SecretaryStore {
         JSON.stringify(next.openKinds),
         next.errorCode,
         next.errorMessage,
+        JSON.stringify(next.sessionBindings),
+        next.evidence ? JSON.stringify(next.evidence) : null,
         next.updatedAt,
         id
       ]
@@ -482,12 +615,29 @@ export class SqlSecretaryStore implements SecretaryStore {
   }
 
   markStaleRunsInterrupted(): number {
-    const rows = toRows(this.db, "SELECT id FROM secretary_runs WHERE status IN ('planning', 'running')")
+    const rows = toRows(this.db, "SELECT id FROM secretary_runs WHERE status IN ('planning', 'running', 'needs-user')")
+    let interrupted = 0
     for (const row of rows) {
       const id = text(row['id'])
-      if (id) this.updateRun(id, { status: 'interrupted' })
+      if (!id) continue
+      const run = this.getRun(id)
+      const message = 'Bikorch restarted while this task was active, so its CLI result listener could not be restored. The CLI terminal may still be open; inspect it before starting another task.'
+      const updated = this.updateRun(id, {
+        status: 'interrupted',
+        errorCode: 'APP_RESTARTED',
+        errorMessage: message
+      })
+      if (!updated) continue
+      interrupted += 1
+      this.appendMessage({
+        threadId: run?.threadId ?? updated.threadId,
+        runId: id,
+        role: 'assistant',
+        type: 'error',
+        content: message
+      })
     }
-    return rows.length
+    return interrupted
   }
 
   deleteExpired(cutoff: number): { runs: number; messages: number; assignments: number; approvals: number; threads: number } {
@@ -496,14 +646,8 @@ export class SqlSecretaryStore implements SecretaryStore {
       this.db.run(sql, params)
       return this.db.getRowsModified()
     }
-    const messages = deleteRows(
-      `DELETE FROM secretary_messages
-       WHERE created_at < ?
-         AND (run_id IS NULL OR run_id IN (
-           SELECT id FROM secretary_runs WHERE updated_at < ? AND status IN (${terminalStatuses})
-         ))`,
-      [cutoff, cutoff, ...RETAINABLE_RUN_STATUSES]
-    )
+    // Conversation text and run plans remain available across long projects.
+    // These rows duplicate the plan/decision already present in secretary_runs.
     const assignments = deleteRows(
       `DELETE FROM secretary_assignments
        WHERE run_id IN (SELECT id FROM secretary_runs WHERE updated_at < ? AND status IN (${terminalStatuses}))`,
@@ -514,19 +658,8 @@ export class SqlSecretaryStore implements SecretaryStore {
        WHERE run_id IN (SELECT id FROM secretary_runs WHERE updated_at < ? AND status IN (${terminalStatuses}))`,
       [cutoff, ...RETAINABLE_RUN_STATUSES]
     )
-    const runs = deleteRows(
-      `DELETE FROM secretary_runs WHERE updated_at < ? AND status IN (${terminalStatuses})`,
-      [cutoff, ...RETAINABLE_RUN_STATUSES]
-    )
-    const threads = deleteRows(
-      `DELETE FROM secretary_threads
-       WHERE status = 'archived' AND updated_at < ?
-         AND id NOT IN (SELECT thread_id FROM secretary_runs)
-         AND id NOT IN (SELECT thread_id FROM secretary_messages)`,
-      [cutoff]
-    )
-    if (runs || messages || assignments || approvals || threads) schedulePersistToDisk()
-    return { runs, messages, assignments, approvals, threads }
+    if (assignments || approvals) schedulePersistToDisk()
+    return { runs: 0, messages: 0, assignments, approvals, threads: 0 }
   }
 }
 
@@ -537,7 +670,7 @@ export function getSecretaryStore(): SecretaryStore | null {
 
 export function messagesToChatTurns(messages: SecretaryMessage[]): SecretaryChatTurn[] {
   return messages
-    .filter((message) => message.type === 'chat' && message.content.trim())
+    .filter((message) => (message.type === 'chat' || message.type === 'final-report') && message.content.trim())
     .slice(-20)
-    .map((message) => ({ role: message.role, content: message.content }))
+    .map((message) => ({ role: message.role, content: message.content.slice(0, 2_400) }))
 }

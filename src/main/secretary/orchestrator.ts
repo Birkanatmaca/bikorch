@@ -9,9 +9,11 @@ import type {
 import { isSameFilePath } from '../cli/path-validator'
 import { ptyManager, type PtySessionSnapshot } from '../cli/pty-manager'
 import { snapshotAgentGit } from '../git/session-snapshot'
-import { loadSnapshot } from '../persistence/database'
+import { isRegisteredAgentWorktree } from '../git/worktrees'
+import { canonicalRepoRoot } from '../git/worktree-paths'
+import { flushPersistenceToDisk, loadSnapshot } from '../persistence/database'
 import { getSecretaryStore } from './store'
-import { trackSecretaryRun } from './result-collector'
+import { cancelTrackedSecretaryRun, trackSecretaryRun } from './result-collector'
 import { releaseSecretaryRunLock, reserveSecretaryRunLock } from './run-lock'
 
 const SUBMIT_DELAY_MS = 120
@@ -47,11 +49,11 @@ function samePath(left: string, right: string): boolean {
   return isSameFilePath(left, right)
 }
 
-function assertSessionOwnership(
+async function assertSessionOwnership(
   run: SecretaryRun,
   assignment: NonNullable<SecretaryRun['plan']>['assignments'][number],
   sessionId: string
-): PtySessionSnapshot {
+): Promise<PtySessionSnapshot> {
   const session = ptyManager.getSessionSnapshot(sessionId)
   if (!session || session.kind !== assignment.kind || session.status === 'stopped' || session.status === 'error') {
     throw new Error(`The selected ${assignment.kind} CLI session is unavailable`)
@@ -71,20 +73,35 @@ function assertSessionOwnership(
   if (panel.accountId !== session.accountId) {
     throw new Error('The selected CLI session is using a different account than its project panel')
   }
-  const expectedCwds = panel.panelRole === 'resolver'
-    ? [panel.cwdOverride]
-    : [panel.worktreePath, panel.cwdOverride, project.folderPath]
-  if (!expectedCwds.some((expected) => expected && samePath(session.cwd, expected))) {
-    throw new Error('The selected CLI session is running in a different workspace')
-  }
   if (
-    panel.worktreePath &&
-    session.worktreePath &&
-    !samePath(session.worktreePath, panel.worktreePath)
+    panel.panelRole !== 'secretary' ||
+    panel.workspaceIsolation !== 'isolated' ||
+    panel.cwdOverride ||
+    !panel.worktreePath ||
+    !session.worktreePath ||
+    !samePath(session.cwd, panel.worktreePath) ||
+    !samePath(session.worktreePath, panel.worktreePath) ||
+    samePath(session.cwd, project.folderPath)
   ) {
-    throw new Error('The selected CLI session is missing its expected isolated worktree')
+    throw new Error('Secretary tasks require a dedicated isolated worktree; the project folder or a shared CLI session cannot be used')
+  }
+  if (!(await isRegisteredAgentWorktree({
+    projectRoot: project.folderPath,
+    kind: assignment.kind,
+    panelId: sessionId,
+    worktreePath: session.cwd
+  }))) {
+    throw new Error('The selected CLI session is not in its registered Git worktree')
   }
   return session
+}
+
+function assertDistinctWorktrees(cwds: string[]): void {
+  if (cwds.some((cwd, index) => cwds.slice(0, index).some((other) =>
+    samePath(canonicalRepoRoot(cwd), canonicalRepoRoot(other))
+  ))) {
+    throw new Error('Each Secretary assignment requires a different isolated worktree')
+  }
 }
 
 /**
@@ -92,7 +109,7 @@ function assertSessionOwnership(
  * This makes panel launch and session ownership an explicit handshake instead
  * of relying only on the later terminal write.
  */
-export function prepareSecretaryRun(payload: unknown): SecretaryRunPreparationResult {
+export async function prepareSecretaryRun(payload: unknown): Promise<SecretaryRunPreparationResult> {
   const request = parseDispatchRequest(payload)
   const store = getSecretaryStore()
   if (!store) throw new Error('Secretary storage is not ready yet')
@@ -111,14 +128,16 @@ export function prepareSecretaryRun(payload: unknown): SecretaryRunPreparationRe
     if (bindings.has(binding.assignmentId)) throw new Error('An assignment was prepared more than once')
     bindings.set(binding.assignmentId, binding.sessionId)
   }
+  const preparedCwds: string[] = []
   for (const assignment of run.plan.assignments) {
     const sessionId = bindings.get(assignment.id)
     if (!sessionId) throw new Error('An approved assignment has no prepared CLI session')
-    assertSessionOwnership(run, assignment, sessionId)
+    preparedCwds.push((await assertSessionOwnership(run, assignment, sessionId)).cwd)
   }
   if (new Set(request.assignments.map((binding) => binding.sessionId)).size !== request.assignments.length) {
     throw new Error('Each assignment must use a different CLI session')
   }
+  assertDistinctWorktrees(preparedCwds)
   return {
     runId: run.id,
     projectId: run.projectId,
@@ -158,7 +177,7 @@ export async function dispatchSecretaryRun(payload: unknown): Promise<SecretaryR
   for (const assignment of run.plan.assignments) {
     const sessionId = bindings.get(assignment.id)
     if (!sessionId) throw new Error('An approved assignment has no CLI session')
-    const session = assertSessionOwnership(run, assignment, sessionId)
+    const session = await assertSessionOwnership(run, assignment, sessionId)
     // Capture each step immediately before it is dispatched. Pending steps
     // must not treat earlier assignments' edits as their own baseline.
     steps.push({ assignment, sessionId, cwd: session.cwd, gitStart: null })
@@ -166,32 +185,56 @@ export async function dispatchSecretaryRun(payload: unknown): Promise<SecretaryR
   if (new Set(steps.map((step) => step.sessionId)).size !== steps.length) {
     throw new Error('Each approved assignment must use a different CLI session')
   }
+  assertDistinctWorktrees(steps.map((step) => step.cwd))
 
   reserveSecretaryRunLock(run, steps.map((step) => step.sessionId))
-  const running = store.updateRun(run.id, { status: 'running' })
+  const running = store.updateRun(run.id, {
+    status: 'running',
+    sessionBindings: steps.map((step) => ({
+      assignmentId: step.assignment.id,
+      sessionId: step.sessionId,
+      accountId: ptyManager.getSessionSnapshot(step.sessionId)?.accountId ?? null
+    }))
+  })
   if (!running) releaseSecretaryRunLock(run.id)
   if (!running) throw new Error('Could not start the approved run')
   const dispatchedAssignmentIds: string[] = []
   const dispatchedSessionIds: string[] = []
+  let collectorStarted = false
   try {
+    // Recovery bindings must survive a crash before the first terminal write.
+    flushPersistenceToDisk()
     // Start every dependency-root task now. The collector releases dependent
     // tasks only after all of their prerequisites report a result.
     const ready = steps.filter((step) => (step.assignment.dependsOn ?? []).length === 0)
     if (ready.length === 0) throw new Error('An approved plan has no dispatchable dependency root')
+    for (const step of ready) step.gitStart = await snapshotAgentGit(step.cwd)
+    const updated = store.getRun(run.id)
+    if (!updated) throw new Error('Could not load the running Secretary task')
+    // Observe all root sessions before the first irreversible terminal write;
+    // otherwise a fast CLI can finish before its output is being collected.
+    trackSecretaryRun(updated, steps)
+    collectorStarted = true
     for (const step of ready) {
-      step.gitStart = await snapshotAgentGit(step.cwd)
       dispatchedSessionIds.push(step.sessionId)
       await ptyManager.writeForSecretary(
         step.sessionId,
-        formatCliPaste(wrapSecretaryCliInstruction(step.assignment.instruction))
+        formatCliPaste(wrapSecretaryCliInstruction(step.assignment.instruction, {
+          mode: step.assignment.mode,
+          expectedResult: step.assignment.expectedResult
+        }))
       )
       await waitForPasteCommit()
       await ptyManager.writeForSecretary(step.sessionId, '\r')
       dispatchedAssignmentIds.push(step.assignment.id)
     }
   } catch (cause) {
+    if (collectorStarted) {
+      cancelTrackedSecretaryRun(run.id)
+    } else {
+      releaseSecretaryRunLock(run.id)
+    }
     void Promise.all(dispatchedSessionIds.map((sessionId) => ptyManager.writeForSecretary(sessionId, '\u0003').catch(() => undefined)))
-    releaseSecretaryRunLock(run.id)
     const message = cause instanceof Error ? cause.message : 'Could not send the approved prompt to the CLI'
     store.updateRun(run.id, { status: 'failed', errorCode: 'CLI_DISPATCH_FAILED', errorMessage: message })
     store.appendMessage({ threadId: run.threadId, runId: run.id, role: 'assistant', type: 'error', content: message })
@@ -199,7 +242,6 @@ export async function dispatchSecretaryRun(payload: unknown): Promise<SecretaryR
   }
   const updated = store.getRun(run.id)
   if (!updated) throw new Error('Could not load the dispatched run')
-  trackSecretaryRun(updated, steps)
   store.appendMessage({
     threadId: updated.threadId,
     runId: updated.id,

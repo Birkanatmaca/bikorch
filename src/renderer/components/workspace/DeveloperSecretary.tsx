@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, Check, Loader2, PanelRightClose, Pencil, Save, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import type { PanelDefinition, Project } from '@shared/types'
-import type { SecretaryPlan, SecretaryRunStatus, SecretaryThreadDetail } from '@shared/contracts/secretary'
+import type { SecretaryMessageCursor, SecretaryPlan, SecretaryRun, SecretaryRunEvidence, SecretaryRunStatus, SecretaryThreadDetail } from '@shared/contracts/secretary'
 import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
 import type { PtySessionStatus } from '@shared/contracts/pty'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import { pickCliAccountId } from '@shared/cli-account'
 import { AppLogo } from '@renderer/components/brand/AppLogo'
+import { SecretaryAvatar, type SecretaryAvatarMood } from './SecretaryAvatar'
 import { focusTerminal, focusWorkspacePanel } from '@renderer/lib/app-events'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import { useSecretaryStore } from '@renderer/stores/secretary-store'
@@ -29,28 +30,46 @@ interface ChatItem {
   runId?: string
   planRevision?: number
   planOpenKinds?: CliUsageKind[]
-  planStatus?: 'awaiting-approval' | 'dispatching' | 'sent' | 'rejected' | 'cancelled' | 'failed'
-  report?: {
-    changedFiles: string[]
-    unverifiedReportedFiles: string[]
-    panelIds: string[]
-  }
+  planStatus?: 'awaiting-approval' | 'dispatching' | 'sent' | 'completed' | 'rejected' | 'cancelled' | 'failed' | 'interrupted'
+  awaitingAnswer?: boolean
+  awaitingAssignmentId?: string
+  report?: SecretaryRunEvidence
   error?: boolean
 }
 
 function planStatusForRun(status: SecretaryRunStatus): ChatItem['planStatus'] {
   if (status === 'awaiting-approval') return 'awaiting-approval'
+  if (status === 'completed') return 'completed'
   if (status === 'rejected') return 'rejected'
   if (status === 'cancelled') return 'cancelled'
-  if (status === 'failed' || status === 'interrupted') return 'failed'
+  if (status === 'interrupted') return 'interrupted'
+  if (status === 'failed') return 'failed'
   return 'sent'
 }
 
 function chatItemsFromThread(detail: SecretaryThreadDetail): ChatItem[] {
   const runs = new Map(detail.runs.map((run) => [run.id, run]))
+  const unansweredQuestions = new Map<string, string>()
+  for (const message of detail.messages) {
+    if (!message.runId) continue
+    const key = message.assignmentId ? `${message.runId}:${message.assignmentId}` : message.runId
+    if (message.role === 'assistant' && message.type === 'needs-user') {
+      unansweredQuestions.set(key, message.id)
+    } else if (message.role === 'user' && message.assignmentId) {
+      unansweredQuestions.delete(key)
+    }
+  }
   return detail.messages.map((message) => {
     const run = message.runId ? runs.get(message.runId) : undefined
     const plan = message.role === 'assistant' && message.type === 'chat' ? run?.plan ?? null : null
+    const questionKey = message.runId
+      ? message.assignmentId ? `${message.runId}:${message.assignmentId}` : message.runId
+      : null
+    const isUnansweredQuestion = Boolean(
+      questionKey &&
+      run?.status === 'needs-user' &&
+      unansweredQuestions.get(questionKey) === message.id
+    )
     return {
       id: message.id,
       role: message.role,
@@ -65,6 +84,16 @@ function chatItemsFromThread(detail: SecretaryThreadDetail): ChatItem[] {
               planStatus: planStatusForRun(run.status)
             } : {})
           }
+        : {}),
+      ...(isUnansweredQuestion && run
+        ? {
+            runId: run.id,
+            awaitingAnswer: true,
+            ...(message.assignmentId ? { awaitingAssignmentId: message.assignmentId } : {})
+          }
+        : {}),
+      ...(message.role === 'assistant' && message.type === 'final-report' && run?.evidence
+        ? { report: run.evidence }
         : {}),
       error: message.type === 'error'
     }
@@ -143,19 +172,26 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   const addPanel = useWorkspaceStore((state) => state.addPanel)
   const settings = useSecretaryStore((state) => state.settings)
   const settingsLoaded = useSecretaryStore((state) => state.loaded)
+  const accounts = useAiAccountsStore((state) => state.accounts)
   const loadSettings = useSecretaryStore((state) => state.load)
   const [brief, setBrief] = useState('')
   const [messages, setMessages] = useState<ChatItem[]>([])
+  const [oldestMessageCursor, setOldestMessageCursor] = useState<SecretaryMessageCursor | null>(null)
+  const [hasOlderMessages, setHasOlderMessages] = useState(false)
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false)
   const [open, setOpen] = useState(readSecretaryOpen)
   const [loading, setLoading] = useState(false)
+  const [answering, setAnswering] = useState(false)
   const [sending, setSending] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [threadId, setThreadId] = useState<string | null>(null)
+  const [recoveryRuns, setRecoveryRuns] = useState<SecretaryRun[]>([])
   const [editingPlanMessageId, setEditingPlanMessageId] = useState<string | null>(null)
   const [planDraft, setPlanDraft] = useState<SecretaryPlan | null>(null)
   const [revisingPlan, setRevisingPlan] = useState(false)
   const [cancellingRunId, setCancellingRunId] = useState<string | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
+  const preservedScrollRef = useRef<{ height: number; top: number } | null>(null)
   const runRef = useRef(0)
   const approvingPlanIdsRef = useRef(new Set<string>())
 
@@ -179,9 +215,17 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   useEffect(() => {
     runRef.current += 1
     setMessages([])
+    setOldestMessageCursor(null)
+    setHasOlderMessages(false)
+    setLoadingOlderMessages(false)
+    preservedScrollRef.current = null
     setBrief('')
+    setLoading(false)
+    setSending(false)
+    setAnswering(false)
     setFeedback(null)
     setThreadId(null)
+    setRecoveryRuns([])
     setEditingPlanMessageId(null)
     setPlanDraft(null)
     setRevisingPlan(false)
@@ -199,13 +243,22 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     const run = runRef.current
     const restoreMostRecentThread = async (): Promise<void> => {
       try {
-        const threads = await window.api.secretary.listThreads(project.id)
+        const [threads, runs] = await Promise.all([
+          window.api.secretary.listThreads(project.id),
+          window.api.secretary.listRuns(project.id)
+        ])
+        if (run !== runRef.current) return
+        setRecoveryRuns(runs.filter((item) => item.status === 'interrupted' && item.sessionBindings.length > 0).slice(0, 3))
         const thread = threads[0]
         if (!thread) return
         const detail = await window.api.secretary.getThread(thread.id)
         if (!detail || run !== runRef.current) return
         setThreadId(detail.thread.id)
         setMessages(chatItemsFromThread(detail))
+        setOldestMessageCursor(detail.messages[0]
+          ? { createdAt: detail.messages[0].createdAt, id: detail.messages[0].id }
+          : null)
+        setHasOlderMessages(detail.hasOlderMessages)
       } catch {
         // Secretary remains usable without local conversation history.
       }
@@ -218,16 +271,14 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     if (event.type === 'run-report') {
       setSidebarOpen(true)
       setMessages((current) => [
-        ...current.map((item) => item.runId === event.runId ? { ...item, planStatus: 'sent' as const } : item),
+        ...current.map((item) => item.runId === event.runId
+          ? { ...item, planStatus: 'completed' as const, awaitingAnswer: false }
+          : item),
         {
           id: newId(),
           role: 'assistant',
           content: event.reply,
-          report: {
-            changedFiles: event.changedFiles,
-            unverifiedReportedFiles: event.unverifiedReportedFiles,
-            panelIds: event.panelIds
-          }
+          report: event.evidence
         }
       ])
       setFeedback(null)
@@ -236,7 +287,10 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     if (event.type === 'run-followup') {
       setSidebarOpen(true)
       setMessages((current) => [
-        ...current.map((item) => item.runId === event.completedRunId ? { ...item, planStatus: 'sent' as const } : item),
+        ...current.map((item) => item.runId === event.completedRunId
+          ? { ...item, planStatus: 'completed' as const, awaitingAnswer: false }
+          : item),
+        { id: newId(), role: 'assistant', content: event.reply, report: event.completedEvidence },
         {
           id: newId(),
           role: 'assistant',
@@ -254,23 +308,59 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       setSidebarOpen(true)
       setMessages((current) => [
         ...current,
-        { id: newId(), role: 'assistant', content: event.message }
+        {
+          id: newId(),
+          role: 'assistant',
+          content: `${event.assignmentTitle}: ${event.message}`,
+          runId: event.runId,
+          awaitingAnswer: true,
+          awaitingAssignmentId: event.assignmentId
+        }
       ])
-      setFeedback('Secretary is waiting for your answer in the CLI terminal.')
+      setFeedback('The CLI needs input. Reply here and Secretary will forward it to the waiting session.')
       return
     }
     setMessages((current) => [
-      ...current.map((item) => item.runId === event.runId ? { ...item, planStatus: 'failed' as const } : item),
+      ...current.map((item) => item.runId === event.runId
+        ? { ...item, planStatus: 'failed' as const, awaitingAnswer: false }
+        : item),
       { id: newId(), role: 'assistant', content: event.message, error: true }
     ])
     setFeedback(null)
   }), [project.id])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = logRef.current
     if (!node) return
+    const preserved = preservedScrollRef.current
+    if (preserved) {
+      node.scrollTop = preserved.top + node.scrollHeight - preserved.height
+      preservedScrollRef.current = null
+      return
+    }
     node.scrollTop = node.scrollHeight
   }, [messages, loading, open])
+
+  const loadOlderMessages = async (): Promise<void> => {
+    if (!threadId || !oldestMessageCursor || !hasOlderMessages || loadingOlderMessages) return
+    const run = runRef.current
+    setLoadingOlderMessages(true)
+    try {
+      const detail = await window.api.secretary.getThread(threadId, oldestMessageCursor)
+      if (!detail || run !== runRef.current) return
+      const node = logRef.current
+      if (node) preservedScrollRef.current = { height: node.scrollHeight, top: node.scrollTop }
+      setMessages((current) => [...chatItemsFromThread(detail), ...current])
+      setOldestMessageCursor(detail.messages[0]
+        ? { createdAt: detail.messages[0].createdAt, id: detail.messages[0].id }
+        : null)
+      setHasOlderMessages(detail.hasOlderMessages)
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : 'Could not load earlier messages.')
+    } finally {
+      if (run === runRef.current) setLoadingOlderMessages(false)
+    }
+  }
 
   const applyWorkspaceActions = (openKinds: CliUsageKind[], plan: SecretaryPlan | null): {
     plan: SecretaryPlan | null
@@ -284,13 +374,20 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     const usedPanelIds = new Set<string>()
     const openedPanelIds: string[] = []
 
-    const bindPanel = (kind: CliUsageKind, preferredPanelId?: string | null): string => {
+    const bindPanel = (
+      kind: CliUsageKind,
+      preferredPanelId?: string | null,
+      taskTitle?: string,
+      preferFreshSession = false
+    ): string => {
       const accountId = pickCliAccountId(kind, accounts, usage, activeByKind[kind])
       const livePanels = useWorkspaceStore.getState().getActiveWorkspace()?.panels ?? panels
       const sessionStatus = (panelId: string) => useTerminalStore.getState().getStatus(panelId)
       const usable = (panel: PanelDefinition): boolean =>
         panel.type === kind &&
-        panel.panelRole !== 'resolver' &&
+        panel.panelRole === 'secretary' &&
+        panel.workspaceIsolation === 'isolated' &&
+        !panel.cwdOverride &&
         !usedPanelIds.has(panel.id)
       const healthy = (panel: PanelDefinition): boolean => {
         const status = sessionStatus(panel.id)
@@ -305,10 +402,11 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
         if (status === 'starting') score += 10
         if (status === 'error' || status === 'stopped') score -= 50
         if (accountId && panel.accountId === accountId) score += 8
-        if (panel.workspaceIsolation === 'shared') score += 4
         return score
       }
-      const candidates = livePanels.filter(usable)
+      const candidates = livePanels.filter(usable).filter((panel) => (
+        !preferFreshSession || sessionStatus(panel.id) === 'waiting'
+      ))
       const existing = (candidates.some(healthy) ? candidates.filter(healthy) : candidates)
         .sort((left, right) => rank(right) - rank(left) || left.id.localeCompare(right.id))[0]
       const panelId = existing?.id ?? addPanel(
@@ -317,10 +415,10 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
         undefined,
         undefined,
         accountId,
-        `Secretary · ${AI_ACCOUNT_LABELS[kind]}`,
+        `Secretary · ${taskTitle?.trim() || AI_ACCOUNT_LABELS[kind]}`,
         {
-          panelRole: 'agent',
-          workspaceIsolation: 'shared'
+          panelRole: 'secretary',
+          workspaceIsolation: 'isolated'
         }
       )
       if (panelId) {
@@ -335,9 +433,18 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       return { plan: null, openedPanelIds }
     }
 
+    const assignmentKindCounts = plan.assignments.reduce((counts, assignment) => {
+      counts.set(assignment.kind, (counts.get(assignment.kind) ?? 0) + 1)
+      return counts
+    }, new Map<CliUsageKind, number>())
     const assignments = plan.assignments.map((assignment) => ({
       ...assignment,
-      panelId: bindPanel(assignment.kind, assignment.panelId)
+      panelId: bindPanel(
+        assignment.kind,
+        assignment.panelId,
+        assignment.title,
+        (assignmentKindCounts.get(assignment.kind) ?? 0) > 1
+      )
     }))
 
     const assignedKinds = new Set(assignments.map((assignment) => assignment.kind))
@@ -602,7 +709,47 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   const sendMessage = async (): Promise<void> => {
     const text = brief.trim()
     if (!text || !settings.configured || loading) return
+    const waitingItem = [...messages].reverse().find((item) => item.awaitingAnswer && item.runId)
     const run = ++runRef.current
+    if (waitingItem?.runId) {
+      const userItem: ChatItem = { id: newId(), role: 'user', content: text, runId: waitingItem.runId }
+      setBrief('')
+      setSidebarOpen(true)
+      setLoading(true)
+      setAnswering(true)
+      setFeedback(null)
+      setMessages((current) => [...current, userItem])
+      try {
+        await window.api.secretary.answerRun({
+          runId: waitingItem.runId,
+          projectId: project.id,
+          ...(waitingItem.awaitingAssignmentId ? { assignmentId: waitingItem.awaitingAssignmentId } : {}),
+          message: text
+        })
+        if (run !== runRef.current) return
+        setMessages((current) => current.map((item) => (
+          item.id === waitingItem.id ? { ...item, awaitingAnswer: false } : item
+        )))
+        setFeedback('Answer sent. Secretary is watching the CLI for the next result.')
+      } catch (cause) {
+        if (run !== runRef.current) return
+        setMessages((current) => [
+          ...current,
+          {
+            id: newId(),
+            role: 'assistant',
+            content: cause instanceof Error ? cause.message : 'Could not send the answer to the waiting CLI',
+            error: true
+          }
+        ])
+      } finally {
+        if (run === runRef.current) {
+          setLoading(false)
+          setAnswering(false)
+        }
+      }
+      return
+    }
     const history = messages
       .filter((item) => !item.error && item.content.trim())
       .map((item) => ({ role: item.role, content: item.content }))
@@ -657,14 +804,22 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     }
   }
 
-  const waitingForUser = messages.some((item) => item.planStatus === 'sent') || feedback?.includes('waiting for your answer')
+  const waitingForUser = messages.some((item) => item.awaitingAnswer)
+  const activeRuns = messages.some((item) => item.planStatus === 'sent' || item.planStatus === 'dispatching')
   const pendingApprovals = messages.filter((item) => item.planStatus === 'awaiting-approval').length
   const liveOps = cliPanels.filter((panel) => panel.status === 'busy' || panel.status === 'running' || panel.status === 'starting').length
-  const railAttention = loading || waitingForUser || pendingApprovals > 0 || liveOps > 0
+  const railAttention = loading || waitingForUser || activeRuns || pendingApprovals > 0 || liveOps > 0 || recoveryRuns.length > 0
+  const secretaryMood: SecretaryAvatarMood = answering
+    ? 'working'
+    : loading || revisingPlan
+      ? 'thinking'
+    : sending || activeRuns || liveOps > 0 || pendingApprovals > 0 || waitingForUser
+      ? 'working'
+      : 'idle'
   const placeholder = !settings.configured
     ? 'Connect Developer Secretary in Profile to start…'
     : waitingForUser
-      ? 'Tell Secretary what to do next…'
+      ? 'Answer the waiting CLI here…'
       : `Ask Secretary about ${project.name}…`
 
   const revealCli = (panelId: string): void => {
@@ -728,7 +883,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       <aside className="secretary-sidebar">
         <header className="secretary-chat-header">
           <span className="secretary-chat-title">
-            <span className="secretary-mark is-static"><AppLogo size="xs" /></span>
+            <SecretaryAvatar mood={secretaryMood} variant="mini" />
             <span>
               <strong>Secretary</strong>
               <small>{project.name}</small>
@@ -769,12 +924,64 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           {pendingApprovals > 0 ? (
             <p className="secretary-ops-note">{pendingApprovals} plan{pendingApprovals === 1 ? '' : 's'} waiting for approval</p>
           ) : null}
+          {recoveryRuns.length > 0 ? (
+            <div className="secretary-recovery" aria-label="Interrupted Secretary work">
+              <strong>Recovery · {recoveryRuns.length} interrupted</strong>
+              <small>Terminal sessions may still be running. Inspect them before starting a new task; prompts are never replayed automatically.</small>
+              {recoveryRuns.map((run) => (
+                <div className="secretary-recovery-run" key={run.id}>
+                  <span>{run.requestText.slice(0, 85)}</span>
+                  <div>
+                    {run.sessionBindings.map((binding) => (
+                      <button
+                        type="button"
+                        key={binding.assignmentId}
+                        onClick={() => revealCli(binding.sessionId)}
+                        disabled={!panels.some((panel) => panel.id === binding.sessionId)}
+                        title="Inspect the original CLI terminal"
+                      >
+                        {run.plan?.assignments.find((item) => item.id === binding.assignmentId)?.title ?? 'CLI terminal'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
         <div className="secretary-chat-log" ref={logRef}>
+          {hasOlderMessages ? (
+            <button
+              type="button"
+              className="secretary-load-older"
+              onClick={() => void loadOlderMessages()}
+              disabled={loadingOlderMessages}
+            >
+              {loadingOlderMessages ? 'Loading earlier messages…' : 'Load earlier messages'}
+            </button>
+          ) : null}
           {messages.length === 0 && !loading ? (
             <div className="secretary-empty">
-              <strong>Command center</strong>
-              <p>Tell Secretary what you want. It will talk, plan CLI work, and keep the live terminals here so you can manage every step.</p>
+              <div className="secretary-empty-stage">
+                <SecretaryAvatar mood="idle" variant="hero" />
+                <div className="secretary-empty-intro">
+                  <span>Workspace copilot</span>
+                  <strong>Ready to coordinate.</strong>
+                  <p>One brief in. A clear, reviewable CLI plan out.</p>
+                </div>
+                <span className="secretary-empty-status"><i /> Online</span>
+              </div>
+              <div className="secretary-empty-copy">
+                <div>
+                  <strong>Start with the outcome</strong>
+                  <p>Secretary plans the work, waits for your approval, then follows the live terminals through completion.</p>
+                </div>
+                <div className="secretary-empty-flow" aria-label="Secretary workflow">
+                  <span><b>01</b> Brief</span>
+                  <span><b>02</b> Approve</span>
+                  <span><b>03</b> Review</span>
+                </div>
+              </div>
             </div>
           ) : null}
             {messages.map((item) => (
@@ -788,9 +995,47 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
               >
                 <p>{item.content}</p>
                 {item.report ? (
-                  <div className="secretary-report-facts">
+                  <div className="secretary-report-facts secretary-run-card">
+                    <div className="secretary-run-card-header">
+                      <strong>Mission outcome</strong>
+                      <span>{item.report.verificationLevel === 'git-observed' ? 'Git activity observed' : item.report.verificationLevel === 'cli-reported' ? 'CLI-reported' : 'Unverified signal'}</span>
+                    </div>
+                    <div className="secretary-run-timeline" aria-label="Task progress">
+                      <span>Plan approved</span>
+                      <span>CLI responded</span>
+                      <span className={item.report.assignments.every((assignment) => assignment.patchCheckExitCode === 0) ? 'is-observed' : 'is-pending'}>
+                        {item.report.assignments.every((assignment) => assignment.patchCheckExitCode === 0) ? 'Tracked patch check passed' : item.report.assignments.some((assignment) => assignment.patchCheckExitCode !== null && assignment.patchCheckExitCode !== 0) ? 'Tracked patch check failed' : 'Patch check unavailable'}
+                      </span>
+                      <span className="is-pending">Tests not run by Bikorch</span>
+                    </div>
+                    <div className="secretary-run-assignments">
+                      {item.report.assignments.map((assignment) => {
+                        const account = accounts.find((candidate) => candidate.id === assignment.accountId)
+                        return (
+                          <div key={assignment.assignmentId}>
+                            <strong>{assignment.title}</strong>
+                            <small>{AI_ACCOUNT_LABELS[assignment.kind]} · {account?.name ?? (assignment.accountId ? 'Account removed' : 'Default account')} · {assignment.completionEvidence === 'cli-reported' ? 'CLI claim' : 'Idle inferred'}</small>
+                            {assignment.preexistingChangedFiles.length > 0 ? (
+                              <small>{assignment.preexistingChangedFiles.length} file(s) were already changed before this assignment.</small>
+                            ) : null}
+                            {assignment.sessionId && panels.some((panel) => panel.id === assignment.sessionId) ? (
+                              <button type="button" onClick={() => revealCli(assignment.sessionId)}>Open terminal</button>
+                            ) : null}
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <div className="secretary-completion-evidence">
+                      <span>Completion signal</span>
+                      <strong>
+                        {item.report.assignments.filter((assignment) => assignment.completionEvidence === 'cli-reported').length} CLI-reported
+                        {' · '}
+                        {item.report.assignments.filter((assignment) => assignment.completionEvidence === 'terminal-idle-inferred').length} terminal-idle inferred
+                      </strong>
+                      <small>Git is observed independently, but task success and test/build results have not been independently verified.</small>
+                    </div>
                     <div className="secretary-report-facts-heading">
-                      <span>Verified Git changes</span>
+                      <span>Git snapshot files (may include earlier edits)</span>
                       <strong>{item.report.changedFiles.length}</strong>
                     </div>
                     {item.report.changedFiles.length > 0 ? (
@@ -807,7 +1052,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
                     <button
                       type="button"
                       className="secretary-review-changes"
-                      onClick={() => reviewSecretaryChanges(item.report?.panelIds ?? [])}
+                      onClick={() => reviewSecretaryChanges(item.report?.assignments.map((assignment) => assignment.sessionId).filter(Boolean) ?? [])}
                     >
                       Review changes in Git
                     </button>
@@ -867,14 +1112,22 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
                           <div>
                             <span>{sending ? 'Sending to CLI' : `CLI run${item.planRevision ? ` · revision ${item.planRevision}` : ''}`}</span>
                             <p>{item.plan.overview}</p>
+                            <small className="secretary-plan-topology">
+                              {item.plan.assignments.length} task{item.plan.assignments.length === 1 ? '' : 's'} · {' '}
+                              {item.plan.assignments.filter((assignment) => !assignment.dependsOn?.length).length} parallel root{item.plan.assignments.filter((assignment) => !assignment.dependsOn?.length).length === 1 ? '' : 's'}
+                            </small>
                           </div>
+                          <SecretaryAvatar mood="working" variant="card" decorative />
                         </div>
                         <div className="secretary-assignments">
                           {item.plan.assignments.map((assignment) => (
                             <article key={assignment.id}>
-                              <div><span>{AI_ACCOUNT_LABELS[assignment.kind]}</span><small>{assignment.usageNote}</small></div>
+                              <div><span>{AI_ACCOUNT_LABELS[assignment.kind]} · {assignment.mode}</span><small>{assignment.usageNote}</small></div>
                               <strong>{assignment.title}</strong>
                               <p>{assignment.instruction}</p>
+                              <small className="secretary-assignment-expected">
+                                Expected: {assignment.expectedResult}
+                              </small>
                               {assignment.dependsOn && assignment.dependsOn.length > 0 ? (
                                 <small className="secretary-assignment-dependency">
                                   After: {assignment.dependsOn.map((dependency) => item.plan!.assignments.find((entry) => entry.id === dependency)?.title ?? dependency).join(', ')}
@@ -922,6 +1175,9 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
                           ) : null}
                         </>
                       ) : null}
+                      {item.planStatus === 'completed' ? (
+                        <span><Check className="h-3.5 w-3.5" /> CLI completion received; review the outcome card for verification limits.</span>
+                      ) : null}
                       {item.planStatus === 'rejected' ? (
                         <span>Plan rejected; no CLI was started.</span>
                       ) : null}
@@ -929,7 +1185,10 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
                         <span>Run cancelled; no further Secretary prompts will be sent.</span>
                       ) : null}
                       {item.planStatus === 'failed' ? (
-                        <span>Plan did not start. Create a fresh plan after resolving the issue.</span>
+                        <span>Run failed. Inspect its terminal and error before starting new work.</span>
+                      ) : null}
+                      {item.planStatus === 'interrupted' ? (
+                        <span>Observation stopped when Bikorch restarted. Inspect the original CLI terminal in Recovery before doing more work.</span>
                       ) : null}
                     </div>
                     ) : null}
@@ -939,8 +1198,12 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
             ))}
             {loading ? (
               <div className="secretary-bubble is-assistant is-pending">
+                <SecretaryAvatar mood={answering ? 'working' : 'thinking'} variant="mini" decorative />
+                <span>
+                  <strong>{answering ? 'Forwarding answer' : 'Thinking'}</strong>
+                  <small>{answering ? 'Sending your response to the correct CLI task…' : 'Reading project context and preparing the next step…'}</small>
+                </span>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>Thinking…</span>
               </div>
             ) : null}
             {feedback ? (

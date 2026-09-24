@@ -38,3 +38,18 @@ it('loads the workspace without waiting for account verification and applies pro
   await vi.waitFor(() => expect(states.accounts.syncAuthProfiles).toHaveBeenCalledWith(profiles))
   expect(dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'bikorch:refresh-ai-accounts' }))
 })
+
+it('does not replace fallback state when a timed-out disk load finally resolves', async () => {
+  let resolveSnapshot!: (snapshot: unknown) => void
+  const delayed = new Promise<unknown>((resolve) => { resolveSnapshot = resolve })
+  vi.stubGlobal('window', { api: {
+    persistence: { load: vi.fn(() => delayed) },
+    authProfiles: { list: vi.fn(async () => []) }
+  } })
+  const controller = new AbortController()
+  const hydration = hydrateFromDisk(controller.signal)
+  controller.abort()
+  resolveSnapshot({ projects: [{ id: 'stale-project' }], activeProjectId: 'stale-project', workspaces: {} })
+  await hydration
+  expect(states.workspace.hydrate).not.toHaveBeenCalled()
+})

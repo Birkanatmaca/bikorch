@@ -28,14 +28,14 @@ import {
   hasCursorProfileCredentials, inspectSystemCursor, logoutCursorProfile, prepareCursorProfile,
   withCursorAccountLock
 } from './cursor-profile'
-import { withAntigravityCredentialLock } from './credential-lock'
 import { logoutAntigravityCli } from './antigravity-logout'
 import {
   applyAntigravityCredentialsForAccount,
   captureAntigravityCredentialsForAccount,
   getAntigravitySessionAccount,
   hasStoredAntigravityCredentials,
-  markAntigravitySessionAccount
+  markAntigravitySessionAccount,
+  readStoredAntigravitySecret
 } from './antigravity-credential'
 
 type JsonRecord = Record<string, unknown>
@@ -433,8 +433,12 @@ export async function listAuthProfiles(): Promise<AuthProfileSummary[]> {
 export async function removeAuthProfile(request: AuthProfileRequest): Promise<AuthProfileResult> {
   try {
     if (request.kind === 'antigravity') {
-      markAntigravitySessionAccount(null)
-      await withAntigravityCredentialLock(() => logoutAntigravityCli())
+      const profileSecret = readStoredAntigravitySecret(request.accountId)
+      const liveSecret = await readAntigravityCredential().catch(() => null)
+      if (profileSecret && liveSecret === profileSecret) {
+        markAntigravitySessionAccount(null)
+        await logoutAntigravityCli()
+      }
     }
     if (request.kind === 'cursor') {
       logoutCursorProfile(request.accountId)

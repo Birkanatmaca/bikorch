@@ -1,4 +1,5 @@
 import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
+import { SECRETARY_ASSIGNMENT_MODES } from '@shared/contracts/secretary'
 
 export interface SecretaryResponseFormat {
   name: string
@@ -8,12 +9,14 @@ export interface SecretaryResponseFormat {
 const assignmentSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['panelId', 'kind', 'title', 'instruction', 'rationale', 'usageNote', 'dependsOn'],
+  required: ['panelId', 'kind', 'mode', 'title', 'instruction', 'expectedResult', 'rationale', 'usageNote', 'dependsOn'],
   properties: {
     panelId: { type: ['string', 'null'] },
     kind: { type: 'string', enum: AI_ACCOUNT_KINDS },
+    mode: { type: 'string', enum: SECRETARY_ASSIGNMENT_MODES },
     title: { type: 'string' },
     instruction: { type: 'string' },
+    expectedResult: { type: 'string' },
     rationale: { type: 'string' },
     usageNote: { type: 'string' },
     dependsOn: {
@@ -52,9 +55,10 @@ export const SECRETARY_CHAT_RESPONSE_FORMAT: SecretaryResponseFormat = {
   schema: {
     type: 'object',
     additionalProperties: false,
-    required: ['reply', 'openKinds', 'plan'],
+    required: ['reply', 'openKinds', 'plan', 'contextSummary'],
     properties: {
       reply: { type: 'string' },
+      contextSummary: { type: 'string' },
       openKinds: {
         type: 'array',
         items: { type: 'string', enum: AI_ACCOUNT_KINDS }

@@ -354,6 +354,7 @@ export interface AutomationRunRepository {
   }): boolean
   update(id: string, patch: Partial<AutomationRun>): void
   markStaleActiveRunsInterrupted(): number
+  markSimulatedRunsNeedsAttention(): number
 }
 
 export class SqlAutomationRunRepository implements AutomationRunRepository {
@@ -454,6 +455,28 @@ export class SqlAutomationRunRepository implements AutomationRunRepository {
       const id = text(row['id'])
       if (id) this.update(id, { status: 'interrupted' })
     }
+    return rows.length
+  }
+
+  markSimulatedRunsNeedsAttention(): number {
+    const rows = toRows(
+      this.db,
+      `SELECT id FROM automation_runs
+      WHERE status = 'succeeded'
+        AND summary LIKE 'Simulated run — real CLI execution is not enabled yet.%'`
+    )
+    if (rows.length === 0) return 0
+    this.db.run(
+      `UPDATE automation_runs SET
+        status = 'needs-attention', exit_code = NULL,
+        error_code = 'executor-unavailable',
+        error_message = 'The CLI was not run. This historical simulated result has been reclassified.',
+        updated_at = ?
+      WHERE status = 'succeeded'
+        AND summary LIKE 'Simulated run — real CLI execution is not enabled yet.%'`,
+      [Date.now()]
+    )
+    schedulePersistToDisk()
     return rows.length
   }
 }

@@ -6,7 +6,8 @@ import { upsertAgentRun, loadRepoIsolation, saveRepoIsolation } from './agent-ru
 import { commitIfDirty, currentBranch, headSha, isWorkingTreeDirty, pathExists, tryRepoRoot, runGit } from './git-exec'
 import { provisionWorktree, type WorktreeProvisionResult } from './worktree-setup'
 import { buildResumeContext } from './agent-lifecycle'
-import { agentBranchName, buildAgentWorktreePath, isManagedWorktreePath } from './worktree-paths'
+import { agentBranchName, buildAgentWorktreePath, canonicalRepoRoot, isManagedWorktreePath } from './worktree-paths'
+import { isSameFilePath } from '../cli/path-validator'
 
 function worktreeBaseDir(override?: string): string {
   return override ?? app.getPath('userData')
@@ -18,6 +19,35 @@ function listWorktreePaths(porcelain: string): string[] {
     .filter((line) => line.startsWith('worktree '))
     .map((line) => line.slice('worktree '.length).trim())
     .filter(Boolean)
+}
+
+function sameExistingPath(left: string, right: string): boolean {
+  return isSameFilePath(left, right) || isSameFilePath(canonicalRepoRoot(left), canonicalRepoRoot(right))
+}
+
+/** Check a Secretary writer against Git's registered worktrees, not renderer metadata alone. */
+export async function isRegisteredAgentWorktree(input: {
+  projectRoot: string
+  kind: AgentWorktreeKind
+  panelId: string
+  worktreePath: string
+  baseDir?: string
+}): Promise<boolean> {
+  const repoRoot = await tryRepoRoot(input.projectRoot)
+  if (!repoRoot) return false
+  const expected = buildAgentWorktreePath(
+    worktreeBaseDir(input.baseDir), repoRoot, input.kind, input.panelId
+  )
+  if (
+    sameExistingPath(expected, repoRoot) ||
+    !sameExistingPath(expected, input.worktreePath) ||
+    !(await pathExists(expected))
+  ) return false
+  const listed = listWorktreePaths(
+    await runGit(repoRoot, ['worktree', 'list', '--porcelain']).catch(() => '')
+  )
+  if (!listed.some((path) => sameExistingPath(path, expected))) return false
+  return (await currentBranch(expected)) === agentBranchName(input.kind, input.panelId)
 }
 
 async function applyWorktreeProvision(

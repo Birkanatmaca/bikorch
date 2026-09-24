@@ -28,10 +28,6 @@ export function registerPersistenceHandlers(): void {
     if (!validateSnapshot(payload)) {
       throw new Error('Invalid persistence snapshot')
     }
-    try {
-      saveSnapshot(payload)
-    } catch (error) {
-      console.error('Failed to save snapshot:', error)
-    }
+    saveSnapshot(payload)
   })
 }

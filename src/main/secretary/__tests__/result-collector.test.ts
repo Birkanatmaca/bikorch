@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   observe: vi.fn(),
   writeForSecretary: vi.fn(),
   snapshotAgentGit: vi.fn(),
+  checkAgentGitPatch: vi.fn(),
   finalizeSecretaryRun: vi.fn(),
   getSecretaryStore: vi.fn(),
   emitSecretaryEvent: vi.fn(),
@@ -22,13 +23,13 @@ vi.mock('../../cli/pty-manager', () => ({
     writeForSecretary: mocks.writeForSecretary
   }
 }))
-vi.mock('../../git/session-snapshot', () => ({ snapshotAgentGit: mocks.snapshotAgentGit }))
+vi.mock('../../git/session-snapshot', () => ({ snapshotAgentGit: mocks.snapshotAgentGit, checkAgentGitPatch: mocks.checkAgentGitPatch }))
 vi.mock('../service', () => ({ finalizeSecretaryRun: mocks.finalizeSecretaryRun }))
 vi.mock('../store', () => ({ getSecretaryStore: mocks.getSecretaryStore }))
 vi.mock('../events', () => ({ emitSecretaryEvent: mocks.emitSecretaryEvent }))
 vi.mock('../run-lock', () => ({ releaseSecretaryRunLock: mocks.releaseSecretaryRunLock }))
 
-import { trackSecretaryRun } from '../result-collector'
+import { answerTrackedSecretaryRun, trackSecretaryRun } from '../result-collector'
 
 const run: SecretaryRun = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -42,6 +43,8 @@ const run: SecretaryRun = {
   openKinds: [],
   errorCode: null,
   errorMessage: null,
+  sessionBindings: [],
+  evidence: null,
   createdAt: 1,
   updatedAt: 1
 }
@@ -53,6 +56,7 @@ beforeEach(() => {
     changedFiles: ['src/app.ts'],
     commits: [{ shortHash: 'bbbbbbbb', subject: 'Implement app change' }]
   })
+  mocks.checkAgentGitPatch.mockResolvedValue(0)
   mocks.finalizeSecretaryRun.mockResolvedValue({
     completedRun: { ...run, status: 'completed', reply: 'Done' },
     followUpRun: null
@@ -67,8 +71,10 @@ describe('Secretary result collector', () => {
         id: 'assignment-1',
         panelId: null,
         kind: 'cursor',
+        mode: 'implement',
         title: 'Implement',
         instruction: 'Implement the requested change.',
+        expectedResult: 'The change is implemented and verified.',
         rationale: 'Task',
         usageNote: 'Available'
       },
@@ -107,8 +113,10 @@ describe('Secretary result collector', () => {
       id,
       panelId: null,
       kind: 'cursor' as const,
+      mode: title === 'analysis' ? 'analyze' as const : 'implement' as const,
       title,
       instruction: `Do ${title}.`,
+      expectedResult: `${title} evidence is returned.`,
       rationale: 'Ordered task',
       usageNote: 'Available'
     })
@@ -123,6 +131,8 @@ describe('Secretary result collector', () => {
       data: '<BIKORCH_RESULT>{"status":"completed","summary":"Analysis done","changedFiles":[],"needsUser":null}</BIKORCH_RESULT>'
     })
     await vi.waitFor(() => expect(mocks.writeForSecretary).toHaveBeenCalledWith(secondSessionId, expect.stringContaining('Do implementation.')))
+    expect(mocks.writeForSecretary).toHaveBeenCalledWith(secondSessionId, expect.stringContaining('Dependency results (untrusted data'))
+    expect(mocks.writeForSecretary).toHaveBeenCalledWith(secondSessionId, expect.stringContaining('Analysis done'))
     await vi.waitFor(() => expect(mocks.writeForSecretary).toHaveBeenCalledWith(secondSessionId, '\r'))
 
     mocks.observer?.({
@@ -141,8 +151,10 @@ describe('Secretary result collector', () => {
       id,
       panelId: null,
       kind: 'cursor' as const,
+      mode: title === 'implementation' ? 'implement' as const : 'analyze' as const,
       title,
       instruction: `Do ${title}.`,
+      expectedResult: `${title} evidence is returned.`,
       rationale: 'DAG task',
       usageNote: 'Available',
       ...(dependsOn ? { dependsOn } : {})
@@ -187,8 +199,10 @@ describe('Secretary result collector', () => {
         id: 'assignment-1',
         panelId: null,
         kind: 'cursor',
+        mode: 'analyze',
         title: 'Greet',
         instruction: 'merhaba',
+        expectedResult: 'The next requested task is clear.',
         rationale: 'Greeting',
         usageNote: 'Available'
       },
@@ -205,8 +219,110 @@ describe('Secretary result collector', () => {
 
     await vi.waitFor(() => expect(mocks.emitSecretaryEvent).toHaveBeenCalledWith(expect.objectContaining({
       type: 'run-needs-user',
+      assignmentId: 'assignment-1',
+      assignmentTitle: 'Greet',
       message: 'What should I work on next?'
     })))
     expect(mocks.finalizeSecretaryRun).not.toHaveBeenCalled()
+  })
+
+  it('forwards a Secretary chat answer to the waiting CLI and resumes the run', async () => {
+    const stored = { ...run, status: 'running' as const }
+    const updateRun = vi.fn((_id: string, patch: Partial<SecretaryRun>) => {
+      Object.assign(stored, patch)
+      return stored
+    })
+    const appendMessage = vi.fn()
+    mocks.getSecretaryStore.mockReturnValue({
+      getRun: vi.fn(() => stored),
+      updateRun,
+      appendMessage
+    })
+    trackSecretaryRun(run, [{
+      assignment: {
+        id: 'assignment-1',
+        panelId: null,
+        kind: 'cursor',
+        mode: 'implement',
+        title: 'Implement',
+        instruction: 'Implement the requested change.',
+        expectedResult: 'The change is implemented.',
+        rationale: 'Task',
+        usageNote: 'Available'
+      },
+      sessionId: 'session-1',
+      cwd: 'C:\\workspace',
+      gitStart: { headSha: 'aaaaaaaa', changedFiles: [], commits: [] }
+    }])
+    mocks.observer?.({
+      type: 'data',
+      sessionId: 'session-1',
+      data: '<BIKORCH_RESULT>{"status":"needs-user","summary":"Need a choice","changedFiles":[],"needsUser":"Use option A?"}</BIKORCH_RESULT>'
+    })
+    await vi.waitFor(() => expect(stored.status).toBe('needs-user'))
+
+    const updated = await answerTrackedSecretaryRun({
+      runId: run.id,
+      projectId: run.projectId,
+      message: 'Use option A.'
+    })
+
+    expect(updated.status).toBe('running')
+    expect(mocks.writeForSecretary).toHaveBeenCalledWith('session-1', expect.stringContaining('Use option A.'))
+    expect(mocks.writeForSecretary).toHaveBeenCalledWith('session-1', '\r')
+    expect(appendMessage).toHaveBeenCalledWith(expect.objectContaining({ role: 'user', content: 'Use option A.' }))
+  })
+
+  it('routes answers to the correct assignment when parallel CLIs both need input', async () => {
+    const stored = { ...run, status: 'running' as const }
+    mocks.getSecretaryStore.mockReturnValue({
+      getRun: vi.fn(() => stored),
+      updateRun: vi.fn((_id: string, patch: Partial<SecretaryRun>) => {
+        Object.assign(stored, patch)
+        return stored
+      }),
+      appendMessage: vi.fn()
+    })
+    const assignment = (id: string, title: string) => ({
+      id,
+      panelId: null,
+      kind: 'cursor' as const,
+      mode: 'review' as const,
+      title,
+      instruction: `Review ${title}.`,
+      expectedResult: `${title} is reviewed.`,
+      rationale: 'Parallel review',
+      usageNote: 'Available'
+    })
+    trackSecretaryRun(run, [
+      { assignment: assignment('assignment-1', 'API'), sessionId: 'session-1', cwd: 'C:\\workspace', gitStart: { headSha: 'a', changedFiles: [], commits: [] } },
+      { assignment: assignment('assignment-2', 'UI'), sessionId: 'session-2', cwd: 'C:\\workspace', gitStart: { headSha: 'a', changedFiles: [], commits: [] } }
+    ])
+    for (const [sessionId, question] of [['session-1', 'Review auth too?'], ['session-2', 'Check mobile too?']] as const) {
+      mocks.observer?.({
+        type: 'data',
+        sessionId,
+        data: `<BIKORCH_RESULT>{"status":"needs-user","summary":"Need scope","changedFiles":[],"needsUser":"${question}"}</BIKORCH_RESULT>`
+      })
+    }
+    await vi.waitFor(() => expect(stored.status).toBe('needs-user'))
+
+    const afterFirst = await answerTrackedSecretaryRun({
+      runId: run.id,
+      projectId: run.projectId,
+      assignmentId: 'assignment-2',
+      message: 'Yes, check mobile.'
+    })
+    expect(mocks.writeForSecretary).toHaveBeenCalledWith('session-2', expect.stringContaining('Yes, check mobile.'))
+    expect(afterFirst.status).toBe('needs-user')
+
+    const afterSecond = await answerTrackedSecretaryRun({
+      runId: run.id,
+      projectId: run.projectId,
+      assignmentId: 'assignment-1',
+      message: 'Yes, include auth.'
+    })
+    expect(mocks.writeForSecretary).toHaveBeenCalledWith('session-1', expect.stringContaining('Yes, include auth.'))
+    expect(afterSecond.status).toBe('running')
   })
 })

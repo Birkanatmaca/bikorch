@@ -1,13 +1,16 @@
 import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
 import type {
   SecretaryAssignment,
+  SecretaryAssignmentMode,
   SecretaryPanelContext,
   SecretaryPlan,
   SecretaryPlanRequest
 } from '@shared/contracts/secretary'
+import { SECRETARY_ASSIGNMENT_MODES } from '@shared/contracts/secretary'
 import type { CliUsageInfo, CliUsageKind } from '@shared/contracts/usage'
 
 const MAX_ASSIGNMENTS = 8
+const MAX_ASSIGNMENTS_PER_KIND = 3
 
 function assertAcyclic(assignments: SecretaryAssignment[]): void {
   const byId = new Map(assignments.map((assignment) => [assignment.id, assignment]))
@@ -51,9 +54,14 @@ function panelUsedPercent(panel: SecretaryPanelContext, usage: CliUsageInfo[]): 
  * The model never gets to choose an account or an arbitrary terminal. Pick a
  * compatible existing panel predictably, preferring an idle and less-used one.
  */
-export function routeSecretaryPanel(kind: CliUsageKind, panels: SecretaryPanelContext[], usage: CliUsageInfo[]): string | null {
+export function routeSecretaryPanel(
+  kind: CliUsageKind,
+  panels: SecretaryPanelContext[],
+  usage: CliUsageInfo[],
+  excludedPanelIds: ReadonlySet<string> = new Set()
+): string | null {
   const candidates = panels
-    .filter((panel) => panel.kind === kind)
+    .filter((panel) => panel.kind === kind && !excludedPanelIds.has(panel.id))
     .sort((left, right) => (
       panelStatusRank(left.status) - panelStatusRank(right.status) ||
       panelUsedPercent(left, usage) - panelUsedPercent(right, usage) ||
@@ -89,15 +97,23 @@ export function validateSecretaryPlan(
   }
 
   const assignments: SecretaryAssignment[] = []
-  const assignedKinds = new Set<CliUsageKind>()
+  const usedPanelIds = new Set<string>()
+  const assignmentsByKind = new Map<CliUsageKind, number>()
+  const requestedKinds = (parsed.assignments as unknown[]).flatMap((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+    const kind = (value as { kind?: unknown }).kind
+    return typeof kind === 'string' && AI_ACCOUNT_KINDS.includes(kind as CliUsageKind) ? [kind as CliUsageKind] : []
+  })
   for (const [index, value] of parsed.assignments.slice(0, MAX_ASSIGNMENTS).entries()) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       throw new Error('The planning response was incomplete')
     }
     const item = value as {
       kind?: unknown
+      mode?: unknown
       title?: unknown
       instruction?: unknown
+      expectedResult?: unknown
       rationale?: unknown
       usageNote?: unknown
       dependsOn?: unknown
@@ -108,13 +124,28 @@ export function validateSecretaryPlan(
     if (!kind || typeof item.instruction !== 'string' || !item.instruction.trim()) {
       throw new Error('The planning response was incomplete')
     }
-    if (assignedKinds.has(kind)) {
-      throw new Error('The planner assigned more than one task to the same CLI kind')
+    const kindCount = (assignmentsByKind.get(kind) ?? 0) + 1
+    if (kindCount > MAX_ASSIGNMENTS_PER_KIND) {
+      throw new Error(`The planner assigned too many tasks to the same ${kind} CLI kind`)
     }
-    if (!isSafeSecretaryInstruction(item.instruction)) {
+    const mode = typeof item.mode === 'string' && SECRETARY_ASSIGNMENT_MODES.includes(item.mode as SecretaryAssignmentMode)
+      ? item.mode as SecretaryAssignmentMode
+      : 'implement'
+    const expectedResult = typeof item.expectedResult === 'string' && item.expectedResult.trim()
+      ? item.expectedResult.trim().slice(0, 1_000)
+      : mode === 'implement'
+        ? 'The requested change is implemented and the relevant verification is reported.'
+        : 'A concise, evidence-based result is returned for the assigned task.'
+    if (!isSafeSecretaryInstruction(item.instruction) || !isSafeSecretaryInstruction(expectedResult)) {
       throw new Error('The plan contains a disallowed CLI instruction')
     }
-    const panelId = routeSecretaryPanel(kind, request.panels, request.usage)
+    const repeatedKind = requestedKinds.filter((candidate) => candidate === kind).length > 1
+    const routingPanels = repeatedKind
+      ? request.panels.filter((panel) => panel.status === 'waiting')
+      : request.panels
+    const panelId = routeSecretaryPanel(kind, routingPanels, request.usage, usedPanelIds)
+    if (panelId) usedPanelIds.add(panelId)
+    assignmentsByKind.set(kind, kindCount)
     const routedPanel = panelId ? request.panels.find((panel) => panel.id === panelId) : undefined
     const usedPercent = routedPanel
       ? panelUsedPercent(routedPanel, request.usage)
@@ -131,10 +162,12 @@ export function validateSecretaryPlan(
       id: `assignment-${index + 1}`,
       panelId,
       kind,
+      mode,
       title: typeof item.title === 'string' && item.title.trim()
         ? item.title.trim().slice(0, 120)
         : `Task ${index + 1}`,
       instruction: item.instruction.trim().slice(0, 6000),
+      expectedResult,
       rationale: typeof item.rationale === 'string'
         ? item.rationale.slice(0, 500)
         : 'Selected by the planner.',
@@ -145,7 +178,6 @@ export function validateSecretaryPlan(
           : 'Review account availability before dispatching.',
       dependsOn
     })
-    assignedKinds.add(kind)
   }
   if (assignments.length === 0) {
     throw new Error('The planner did not select an available CLI task')

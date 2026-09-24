@@ -129,7 +129,7 @@ export function registerAutomationHandlers(): void {
     try {
       return getAutomationStatus()
     } catch {
-      return { running: 0, enabled: 0, waitingNetwork: 0, needsAttention: 0, nextRunAt: null }
+      return { executionAvailable: false, running: 0, enabled: 0, waitingNetwork: 0, needsAttention: 0, nextRunAt: null }
     }
   })
 }

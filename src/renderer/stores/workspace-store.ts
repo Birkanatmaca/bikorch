@@ -187,7 +187,7 @@ interface WorkspaceStore extends WorkspaceSnapshot {
     titleOverride?: string,
     options?: {
       id?: string
-      panelRole?: 'agent' | 'resolver'
+      panelRole?: PanelDefinition['panelRole']
       cwdOverride?: string
       workspaceIsolation?: WorkspaceIsolation
       cliModel?: string
@@ -1147,6 +1147,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   setPanelIsolation: (panelId, isolation) => {
     const { workspaces } = get()
+    if (isolation === 'shared' && Object.values(workspaces).some((workspace) =>
+      workspace.panels.some((panel) => panel.id === panelId && panel.panelRole === 'secretary')
+    )) return
     let changed = false
     const nextWorkspaces: Record<string, ProjectWorkspaceState> = {}
     for (const [projectId, workspace] of Object.entries(workspaces)) {

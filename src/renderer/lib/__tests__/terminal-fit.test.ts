@@ -16,13 +16,25 @@ describe('clampTerminalGrid', () => {
 })
 
 describe('measureTerminalGrid', () => {
-  it('returns null when the host is too small to fit a CLI chrome', () => {
+  it('returns null only when the host is effectively invisible', () => {
     expect(
-      measureTerminalGrid({ clientWidth: 40, clientHeight: 200 }, { width: 8, height: 16 })
+      measureTerminalGrid({ clientWidth: 10, clientHeight: 200 }, { width: 8, height: 16 })
     ).toBeNull()
     expect(
-      measureTerminalGrid({ clientWidth: 400, clientHeight: 20 }, { width: 8, height: 16 })
+      measureTerminalGrid({ clientWidth: 400, clientHeight: 10 }, { width: 8, height: 16 })
     ).toBeNull()
+  })
+
+  it('keeps xterm and PTY on the same supported minimum grid in a tiny pane', () => {
+    expect(measureTerminalGrid({ clientWidth: 40, clientHeight: 25 }, null, { cols: 2, rows: 1 }))
+      .toEqual({ cols: 20, rows: 6 })
+  })
+
+  it('handles narrow-tall and wide-short hosts independently', () => {
+    expect(measureTerminalGrid({ clientWidth: 90, clientHeight: 500 }, null, { cols: 9, rows: 41 }))
+      .toEqual({ cols: 20, rows: 41 })
+    expect(measureTerminalGrid({ clientWidth: 1000, clientHeight: 32 }, null, { cols: 110, rows: 2 }))
+      .toEqual({ cols: 110, rows: 6 })
   })
 
   it('prefers real cell metrics over FitAddon rounding', () => {
@@ -52,7 +64,7 @@ describe('viewport pinning', () => {
     ).toBe(false)
   })
 
-  it('always pins CLI TUIs after resize, and keeps a shell pinned if it was at the bottom', () => {
+  it('pins full-screen alternate-buffer TUIs but preserves normal scroll history', () => {
     expect(shouldPinTerminalToBottom(true, false)).toBe(true)
     expect(shouldPinTerminalToBottom(false, true)).toBe(true)
     expect(shouldPinTerminalToBottom(false, false)).toBe(false)

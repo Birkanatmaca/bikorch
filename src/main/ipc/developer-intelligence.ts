@@ -34,6 +34,7 @@ import {
   parseSettingsUpdate,
   parseSessionListRequest
 } from '../developer-intelligence/validation'
+import { learnDeveloperMemoriesWithAi } from '../secretary/service'
 
 export function registerDeveloperIntelligenceHandlers(): void {
   ipcMain.handle(DEVELOPER_INTELLIGENCE_IPC.RECORD_EVENT, (_event, payload: unknown) => {
@@ -125,6 +126,11 @@ export function registerDeveloperIntelligenceHandlers(): void {
     const request = parseMetricsRequest(payload)
     if (!request) throw new Error('Invalid analysis request')
     return analyzeMemories(request)
+  })
+
+  ipcMain.handle(DEVELOPER_INTELLIGENCE_IPC.LEARN_WITH_AI, (event) => {
+    if (event.sender.isDestroyed() || !BrowserWindow.fromWebContents(event.sender)) throw new Error('Unauthorized sender')
+    return learnDeveloperMemoriesWithAi()
   })
 
   ipcMain.handle(DEVELOPER_INTELLIGENCE_IPC.GET_CONTEXT, (_event, payload: unknown) => {

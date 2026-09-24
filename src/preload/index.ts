@@ -78,6 +78,7 @@ import {
 import {
   DEVELOPER_INTELLIGENCE_IPC,
   type AnalyzeMemoriesResult,
+  type LearnMemoriesResult,
   type ClearTarget,
   type DeveloperEventInput,
   type DeveloperIntelligenceExportResult,
@@ -145,7 +146,9 @@ import {
   type SecretaryThread,
   type SecretaryThreadCreateRequest,
   type SecretaryThreadDetail,
+  type SecretaryMessageCursor,
   type SecretaryRun,
+  type SecretaryRunAnswerRequest,
   type SecretaryRunCancelRequest,
   type SecretaryRunDispatchRequest,
   type SecretaryRunDispatchResult,
@@ -301,6 +304,8 @@ export interface GitApi {
 export interface PersistenceApi {
   load: () => Promise<PersistedSnapshot>
   save: (snapshot: PersistedSnapshot) => Promise<void>
+  onFlushRequest: (callback: (token: string) => void) => () => void
+  finishFlush: (token: string) => void
 }
 
 export interface WindowApi {
@@ -354,6 +359,7 @@ export interface DeveloperIntelligenceApi {
   exportData: () => Promise<DeveloperIntelligenceExportResult>
   clear: (target: ClearTarget) => Promise<{ ok: true }>
   analyzeMemories: (request: MetricsRequest) => Promise<AnalyzeMemoriesResult>
+  learnMemoriesWithAi: () => Promise<LearnMemoriesResult>
   getContext: (request?: MemoryContextRequest) => Promise<MemoryContextPackage>
   listSessions: (request?: AgentSessionListRequest) => Promise<AgentSessionListPage>
   getSession: (id: string) => Promise<AgentSessionDetail | null>
@@ -385,12 +391,13 @@ export interface SecretaryApi {
   chat: (request: SecretaryChatRequest) => Promise<SecretaryChatResponse>
   listThreads: (projectId: string) => Promise<SecretaryThread[]>
   createThread: (request: SecretaryThreadCreateRequest) => Promise<SecretaryThread>
-  getThread: (threadId: string) => Promise<SecretaryThreadDetail | null>
+  getThread: (threadId: string, before?: SecretaryMessageCursor) => Promise<SecretaryThreadDetail | null>
   listRuns: (projectId: string) => Promise<SecretaryRun[]>
   getRun: (runId: string) => Promise<SecretaryRun | null>
   approvePlan: (runId: string) => Promise<SecretaryRun>
   rejectPlan: (runId: string) => Promise<SecretaryRun>
   revisePlan: (request: SecretaryPlanRevisionRequest) => Promise<SecretaryRun>
+  answerRun: (request: SecretaryRunAnswerRequest) => Promise<SecretaryRun>
   cancelRun: (request: SecretaryRunCancelRequest) => Promise<SecretaryRun>
   prepareRun: (request: SecretaryRunDispatchRequest) => Promise<SecretaryRunPreparationResult>
   failApprovedRun: (runId: string, reason: string) => Promise<SecretaryRun>
@@ -495,7 +502,15 @@ const gitApi: GitApi = {
 
 const persistenceApi: PersistenceApi = {
   load: () => ipcRenderer.invoke(PERSISTENCE_IPC.LOAD),
-  save: (snapshot) => ipcRenderer.invoke(PERSISTENCE_IPC.SAVE, snapshot)
+  save: (snapshot) => ipcRenderer.invoke(PERSISTENCE_IPC.SAVE, snapshot),
+  onFlushRequest: (callback) => {
+    const listener = (_event: IpcRendererEvent, token: unknown): void => {
+      if (typeof token === 'string') callback(token)
+    }
+    ipcRenderer.on(PERSISTENCE_IPC.FLUSH_REQUEST, listener)
+    return () => ipcRenderer.removeListener(PERSISTENCE_IPC.FLUSH_REQUEST, listener)
+  },
+  finishFlush: (token) => ipcRenderer.send(PERSISTENCE_IPC.FLUSH_COMPLETE, token)
 }
 
 const usageApi: UsageApi = {
@@ -564,6 +579,7 @@ const developerIntelligenceApi: DeveloperIntelligenceApi = {
   exportData: () => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.EXPORT),
   clear: (target) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.CLEAR, target),
   analyzeMemories: (request) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.ANALYZE, request),
+  learnMemoriesWithAi: () => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.LEARN_WITH_AI),
   getContext: (request) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.GET_CONTEXT, request ?? {}),
   listSessions: (request) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.LIST_SESSIONS, request ?? {}),
   getSession: (id) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.GET_SESSION, id)
@@ -689,12 +705,13 @@ const secretaryApi: SecretaryApi = {
   chat: (request) => ipcRenderer.invoke(SECRETARY_IPC.CHAT, request),
   listThreads: (projectId) => ipcRenderer.invoke(SECRETARY_IPC.LIST_THREADS, projectId),
   createThread: (request) => ipcRenderer.invoke(SECRETARY_IPC.CREATE_THREAD, request),
-  getThread: (threadId) => ipcRenderer.invoke(SECRETARY_IPC.GET_THREAD, threadId),
+  getThread: (threadId, before) => ipcRenderer.invoke(SECRETARY_IPC.GET_THREAD, threadId, before),
   listRuns: (projectId) => ipcRenderer.invoke(SECRETARY_IPC.LIST_RUNS, projectId),
   getRun: (runId) => ipcRenderer.invoke(SECRETARY_IPC.GET_RUN, runId),
   approvePlan: (runId) => ipcRenderer.invoke(SECRETARY_IPC.APPROVE_PLAN, runId),
   rejectPlan: (runId) => ipcRenderer.invoke(SECRETARY_IPC.REJECT_PLAN, runId),
   revisePlan: (request) => ipcRenderer.invoke(SECRETARY_IPC.REVISE_PLAN, request),
+  answerRun: (request) => ipcRenderer.invoke(SECRETARY_IPC.ANSWER_RUN, request),
   cancelRun: (request) => ipcRenderer.invoke(SECRETARY_IPC.CANCEL_RUN, request),
   prepareRun: (request) => ipcRenderer.invoke(SECRETARY_IPC.PREPARE_RUN, request),
   failApprovedRun: (runId, reason) => ipcRenderer.invoke(SECRETARY_IPC.FAIL_APPROVED_RUN, runId, reason),

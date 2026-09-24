@@ -11,7 +11,7 @@ import {
   Trash2,
   Zap
 } from 'lucide-react'
-import { AppLogo } from '@renderer/components/brand/AppLogo'
+import { SecretaryAvatar } from '@renderer/components/workspace/SecretaryAvatar'
 import { useSecretaryStore } from '@renderer/stores/secretary-store'
 import { SectionCard } from './ProfilePrimitives'
 
@@ -74,12 +74,12 @@ export function SecretarySettings(): React.JSX.Element {
   return (
     <div className="secretary-profile">
       <section className="secretary-profile-hero">
-        <span className="secretary-profile-logo"><AppLogo size="sm" /></span>
-        <div>
+        <div className="secretary-profile-copy">
           <span className="secretary-profile-eyebrow">Workspace assistant</span>
           <h3>Developer Secretary</h3>
           <p>Plans work and delegates it to your open CLI agents.</p>
         </div>
+        <SecretaryAvatar mood="working" variant="profile" />
         <span className={settings.configured ? 'secretary-profile-status is-ready' : 'secretary-profile-status'}>
           <i />{settings.configured ? 'Connected' : 'Not connected'}
         </span>

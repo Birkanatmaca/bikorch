@@ -1,6 +1,6 @@
 import type { CliUsageInfo, CliUsageKind } from './usage'
 
-export const SECRETARY_SCHEMA_VERSION = 3
+export const SECRETARY_SCHEMA_VERSION = 6
 
 export type SecretaryThreadStatus = 'active' | 'archived'
 
@@ -15,6 +15,39 @@ export type SecretaryRunStatus =
   | 'failed'
   | 'cancelled'
   | 'interrupted'
+
+/** How the Secretary learned that a CLI assignment had finished. Neither value is independent validation. */
+export type SecretaryCompletionEvidence = 'cli-reported' | 'terminal-idle-inferred'
+
+/** A terminal completion signal never proves the requested work succeeded. */
+export type SecretaryVerificationLevel = 'git-observed' | 'cli-reported' | 'inferred'
+
+export interface SecretarySessionBinding {
+  assignmentId: string
+  sessionId: string
+  accountId: string | null
+}
+
+export interface SecretaryRunEvidence {
+  capturedAt: number
+  verificationLevel: SecretaryVerificationLevel
+  changedFiles: string[]
+  unverifiedReportedFiles: string[]
+  assignments: Array<{
+    assignmentId: string
+    sessionId: string
+    accountId: string | null
+    kind: CliUsageKind
+    title: string
+    outcome: 'completed' | 'failed' | 'needs-user'
+    completionEvidence: SecretaryCompletionEvidence
+    changedFiles: string[]
+    preexistingChangedFiles: string[]
+    commits: Array<{ shortHash: string; subject: string }>
+    /** git diff --check HEAD checks tracked patch whitespace, not tests or untracked files. */
+    patchCheckExitCode: number | null
+  }>
+}
 
 export type SecretaryMessageRole = 'user' | 'assistant'
 
@@ -57,12 +90,19 @@ export interface SecretaryPlanRequest {
   usage: CliUsageInfo[]
 }
 
+export const SECRETARY_ASSIGNMENT_MODES = ['analyze', 'implement', 'review', 'validate'] as const
+export type SecretaryAssignmentMode = typeof SECRETARY_ASSIGNMENT_MODES[number]
+
 export interface SecretaryAssignment {
   id: string
   panelId: string | null
   kind: CliUsageKind
+  /** Defines how this CLI contributes to the orchestration instead of treating every prompt alike. */
+  mode: SecretaryAssignmentMode
   title: string
   instruction: string
+  /** Concrete completion evidence the Secretary will evaluate after the CLI responds. */
+  expectedResult: string
   rationale: string
   usageNote: string
   /** Validated assignment IDs that must complete before this task starts. */
@@ -117,6 +157,8 @@ export interface SecretaryMessage {
   id: string
   threadId: string
   runId: string | null
+  /** Present for CLI questions and the user answers routed back to that assignment. */
+  assignmentId: string | null
   role: SecretaryMessageRole
   type: SecretaryMessageType
   /** Stored after local secret redaction. */
@@ -137,6 +179,10 @@ export interface SecretaryRun {
   openKinds: CliUsageKind[]
   errorCode: string | null
   errorMessage: string | null
+  /** Persisted before dispatch so an interrupted task can still point to its CLI panels. */
+  sessionBindings: SecretarySessionBinding[]
+  /** Git observations and CLI claims only; no independently executed tests are implied. */
+  evidence: SecretaryRunEvidence | null
   createdAt: number
   updatedAt: number
 }
@@ -145,6 +191,12 @@ export interface SecretaryThreadDetail {
   thread: SecretaryThread
   messages: SecretaryMessage[]
   runs: SecretaryRun[]
+  hasOlderMessages: boolean
+}
+
+export interface SecretaryMessageCursor {
+  createdAt: number
+  id: string
 }
 
 export interface SecretaryThreadCreateRequest {
@@ -198,6 +250,14 @@ export interface SecretaryRunCancelRequest {
   projectId: string
 }
 
+export interface SecretaryRunAnswerRequest {
+  runId: string
+  projectId: string
+  /** Routes the answer when more than one parallel assignment is waiting. */
+  assignmentId?: string
+  message: string
+}
+
 export type SecretaryEvent =
   | {
       type: 'run-report'
@@ -207,8 +267,11 @@ export type SecretaryEvent =
       /** Git snapshot facts captured by the main process, not CLI claims. */
       changedFiles: string[]
       unverifiedReportedFiles: string[]
+      /** Completion signals from CLI protocol output versus terminal-activity inference. */
+      completionEvidence: { cliReported: number; terminalIdleInferred: number }
       /** Panel/session IDs that produced the report facts. */
       panelIds: string[]
+      evidence: SecretaryRunEvidence
     }
   | {
       type: 'run-followup'
@@ -218,11 +281,14 @@ export type SecretaryEvent =
       reply: string
       plan: SecretaryPlan
       openKinds: CliUsageKind[]
+      completedEvidence: SecretaryRunEvidence
     }
   | {
       type: 'run-needs-user'
       projectId: string
       runId: string
+      assignmentId: string
+      assignmentTitle: string
       message: string
     }
   | {
@@ -249,6 +315,7 @@ export const SECRETARY_IPC = {
   REJECT_PLAN: 'secretary:rejectPlan',
   REVISE_PLAN: 'secretary:revisePlan',
   CANCEL_RUN: 'secretary:cancelRun',
+  ANSWER_RUN: 'secretary:answerRun',
   PREPARE_RUN: 'secretary:prepareRun',
   FAIL_APPROVED_RUN: 'secretary:failApprovedRun',
   DISPATCH_RUN: 'secretary:dispatchRun',

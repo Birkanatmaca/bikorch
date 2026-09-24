@@ -68,6 +68,7 @@ export interface PersistedSnapshot {
   editor: PersistedEditorState
   accounts: AiAccount[]
   activeAccountByKind: ActiveAccountByKind
+  suppressedSystemAuthKinds?: CliUsageKind[]
   tasksByProject: Record<string, ProjectTask[]>
   usage: PersistedUsageSnapshot
   subscriptions: SubscriptionRecord[]
@@ -75,7 +76,9 @@ export interface PersistedSnapshot {
 
 export const PERSISTENCE_IPC = {
   LOAD: 'persistence:load',
-  SAVE: 'persistence:save'
+  SAVE: 'persistence:save',
+  FLUSH_REQUEST: 'persistence:flushRequest',
+  FLUSH_COMPLETE: 'persistence:flushComplete'
 } as const
 
 export const PERSISTENCE_SCHEMA_VERSION = 1

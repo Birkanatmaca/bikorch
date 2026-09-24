@@ -5,7 +5,10 @@ const mocks = vi.hoisted(() => ({
   getSessionSnapshot: vi.fn(),
   writeForSecretary: vi.fn(),
   trackSecretaryRun: vi.fn(),
-  loadSnapshot: vi.fn()
+  cancelTrackedSecretaryRun: vi.fn(),
+  loadSnapshot: vi.fn(),
+  flushPersistenceToDisk: vi.fn(),
+  isRegisteredAgentWorktree: vi.fn()
 }))
 
 vi.mock('../store', () => ({ getSecretaryStore: mocks.getSecretaryStore }))
@@ -15,8 +18,12 @@ vi.mock('../../cli/pty-manager', () => ({
     writeForSecretary: mocks.writeForSecretary
   }
 }))
-vi.mock('../result-collector', () => ({ trackSecretaryRun: mocks.trackSecretaryRun }))
-vi.mock('../../persistence/database', () => ({ loadSnapshot: mocks.loadSnapshot }))
+vi.mock('../result-collector', () => ({
+  trackSecretaryRun: mocks.trackSecretaryRun,
+  cancelTrackedSecretaryRun: mocks.cancelTrackedSecretaryRun
+}))
+vi.mock('../../persistence/database', () => ({ loadSnapshot: mocks.loadSnapshot, flushPersistenceToDisk: mocks.flushPersistenceToDisk }))
+vi.mock('../../git/worktrees', () => ({ isRegisteredAgentWorktree: mocks.isRegisteredAgentWorktree }))
 
 import { dispatchSecretaryRun, prepareSecretaryRun } from '../orchestrator'
 
@@ -24,6 +31,8 @@ const runId = '11111111-1111-4111-8111-111111111111'
 const threadId = '22222222-2222-4222-8222-222222222222'
 const assignmentId = 'assignment-1'
 const sessionId = '33333333-3333-4333-8333-333333333333'
+const projectPath = 'C:\\secretary-project'
+const worktreePath = 'C:\\bikorch-worktrees\\cursor-33333333'
 
 function approvedRun() {
   return {
@@ -40,8 +49,10 @@ function approvedRun() {
         id: assignmentId,
         panelId: null,
         kind: 'cursor' as const,
+        mode: 'review' as const,
         title: 'Review',
         instruction: 'Review the current implementation.',
+        expectedResult: 'A concise review with evidence.',
         rationale: 'Independent review',
         usageNote: 'Available'
       }],
@@ -59,11 +70,12 @@ function approvedRun() {
 describe('Secretary orchestrator', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.isRegisteredAgentWorktree.mockResolvedValue(true)
     mocks.loadSnapshot.mockReturnValue({
-      projects: [{ id: '44444444-4444-4444-8444-444444444444', name: 'Secretary project', folderPath: 'C:\\secretary-project' }],
+      projects: [{ id: '44444444-4444-4444-8444-444444444444', name: 'Secretary project', folderPath: projectPath }],
       workspaces: {
         '44444444-4444-4444-8444-444444444444': {
-          panels: [{ id: sessionId, type: 'cursor', title: 'Cursor', zone: 'center' }]
+          panels: [{ id: sessionId, type: 'cursor', title: 'Cursor', zone: 'center', panelRole: 'secretary', workspaceIsolation: 'isolated', worktreePath }]
         }
       }
     })
@@ -74,7 +86,8 @@ describe('Secretary orchestrator', () => {
     const store = {
       getRun: vi.fn()
         .mockReturnValueOnce(run)
-        .mockReturnValueOnce({ ...run, status: 'running' }),
+        .mockReturnValueOnce({ ...run, status: 'running' })
+        .mockReturnValue({ ...run, status: 'running' }),
       updateRun: vi.fn().mockReturnValue({ ...run, status: 'running' }),
       appendMessage: vi.fn()
     }
@@ -83,7 +96,8 @@ describe('Secretary orchestrator', () => {
       sessionId,
       projectId: run.projectId,
       kind: 'cursor',
-      cwd: 'C:\\secretary-project',
+      cwd: worktreePath,
+      worktreePath,
       status: 'waiting'
     })
     mocks.writeForSecretary.mockResolvedValue(undefined)
@@ -95,32 +109,43 @@ describe('Secretary orchestrator', () => {
     })
 
     expect(result.dispatchedAssignmentIds).toEqual([assignmentId])
-    expect(mocks.writeForSecretary).toHaveBeenNthCalledWith(1, sessionId, expect.stringContaining(
-      '\u001b[200~Review the current implementation.\n\nWhen the task is finished, print one final <BIKORCH_RESULT>'
-    ))
+    expect(mocks.writeForSecretary).toHaveBeenNthCalledWith(1, sessionId, expect.stringContaining('Task mode: review'))
+    expect(mocks.writeForSecretary).toHaveBeenNthCalledWith(1, sessionId, expect.stringContaining('Expected result: A concise review with evidence.'))
+    expect(mocks.writeForSecretary).toHaveBeenNthCalledWith(1, sessionId, expect.stringContaining('Review the current implementation.'))
     expect(mocks.writeForSecretary).toHaveBeenNthCalledWith(2, sessionId, '\r')
-    expect(store.updateRun).toHaveBeenCalledWith(runId, { status: 'running' })
+    expect(store.updateRun).toHaveBeenCalledWith(runId, expect.objectContaining({
+      status: 'running',
+      sessionBindings: [expect.objectContaining({ assignmentId: 'assignment-1', sessionId })]
+    }))
+    expect(mocks.flushPersistenceToDisk.mock.invocationCallOrder[0]).toBeLessThan(mocks.writeForSecretary.mock.invocationCallOrder[0]!)
   })
 
-  it('requires a valid project/session handshake before approval', () => {
+  it('requires a valid project/session handshake before approval', async () => {
     const run = { ...approvedRun(), status: 'awaiting-approval' as const }
     mocks.getSecretaryStore.mockReturnValue({ getRun: vi.fn().mockReturnValue(run) })
     mocks.getSessionSnapshot.mockReturnValue({
       sessionId,
       projectId: run.projectId,
       kind: 'cursor',
-      cwd: 'C:\\secretary-project',
+      cwd: worktreePath,
+      worktreePath,
       status: 'waiting'
     })
 
-    expect(prepareSecretaryRun({
+    await expect(prepareSecretaryRun({
       runId,
       projectId: run.projectId,
       assignments: [{ assignmentId, sessionId }]
-    })).toEqual({
+    })).resolves.toEqual({
       runId,
       projectId: run.projectId,
       preparedAssignmentIds: [assignmentId]
+    })
+    expect(mocks.isRegisteredAgentWorktree).toHaveBeenCalledWith({
+      projectRoot: projectPath,
+      kind: 'cursor',
+      panelId: sessionId,
+      worktreePath
     })
   })
 
@@ -148,11 +173,11 @@ describe('Secretary orchestrator', () => {
     expect(mocks.writeForSecretary).not.toHaveBeenCalled()
   })
 
-  it('accepts a session that is already in the project folder even if the panel has a worktree', () => {
+  it('rejects a session in the project folder even if the panel claims to have a worktree', async () => {
     const run = { ...approvedRun(), status: 'awaiting-approval' as const }
     mocks.getSecretaryStore.mockReturnValue({ getRun: vi.fn().mockReturnValue(run) })
     mocks.loadSnapshot.mockReturnValue({
-      projects: [{ id: run.projectId, name: 'Secretary project', folderPath: 'C:\\secretary-project' }],
+      projects: [{ id: run.projectId, name: 'Secretary project', folderPath: projectPath }],
       workspaces: {
         [run.projectId]: {
           panels: [{
@@ -160,7 +185,9 @@ describe('Secretary orchestrator', () => {
             type: 'cursor',
             title: 'Cursor',
             zone: 'center',
-            worktreePath: 'C:\\secretary-project\\.bikorch\\cursor-1'
+            panelRole: 'secretary',
+            workspaceIsolation: 'isolated',
+            worktreePath
           }]
         }
       }
@@ -169,15 +196,157 @@ describe('Secretary orchestrator', () => {
       sessionId,
       projectId: run.projectId,
       kind: 'cursor',
-      cwd: 'C:\\secretary-project',
+      cwd: projectPath,
       status: 'waiting'
     })
 
-    expect(prepareSecretaryRun({
+    await expect(prepareSecretaryRun({
       runId,
       projectId: run.projectId,
       assignments: [{ assignmentId, sessionId }]
-    }).preparedAssignmentIds).toEqual([assignmentId])
+    })).rejects.toThrow(/isolated worktree/i)
+    expect(mocks.isRegisteredAgentWorktree).not.toHaveBeenCalled()
+  })
+
+  it('does not approve a shared Secretary panel', async () => {
+    const run = { ...approvedRun(), status: 'awaiting-approval' as const }
+    mocks.getSecretaryStore.mockReturnValue({ getRun: vi.fn().mockReturnValue(run) })
+    mocks.loadSnapshot().workspaces[run.projectId].panels[0].workspaceIsolation = 'shared'
+    mocks.getSessionSnapshot.mockReturnValue({
+      sessionId,
+      projectId: run.projectId,
+      kind: 'cursor',
+      cwd: worktreePath,
+      worktreePath,
+      status: 'waiting'
+    })
+
+    await expect(prepareSecretaryRun({
+      runId,
+      projectId: run.projectId,
+      assignments: [{ assignmentId, sessionId }]
+    })).rejects.toThrow(/isolated worktree/i)
+  })
+
+  it('does not dispatch when the claimed worktree is not registered with Git', async () => {
+    const run = approvedRun()
+    mocks.getSecretaryStore.mockReturnValue({ getRun: vi.fn().mockReturnValue(run) })
+    mocks.getSessionSnapshot.mockReturnValue({
+      sessionId,
+      projectId: run.projectId,
+      kind: 'cursor',
+      cwd: worktreePath,
+      worktreePath,
+      status: 'waiting'
+    })
+    mocks.isRegisteredAgentWorktree.mockResolvedValue(false)
+
+    await expect(dispatchSecretaryRun({
+      runId,
+      projectId: run.projectId,
+      assignments: [{ assignmentId, sessionId }]
+    })).rejects.toThrow(/registered Git worktree/i)
+    expect(mocks.writeForSecretary).not.toHaveBeenCalled()
+  })
+
+  it('requires separate worktrees for parallel assignments', async () => {
+    const run = { ...approvedRun(), status: 'awaiting-approval' as const }
+    const secondSessionId = '66666666-6666-4666-8666-666666666666'
+    const secondAssignmentId = 'assignment-2'
+    run.plan.assignments.push({
+      ...run.plan.assignments[0],
+      id: secondAssignmentId,
+      panelId: null
+    })
+    mocks.getSecretaryStore.mockReturnValue({ getRun: vi.fn().mockReturnValue(run) })
+    mocks.loadSnapshot().workspaces[run.projectId].panels.push({
+      id: secondSessionId,
+      type: 'cursor',
+      title: 'Second Cursor',
+      zone: 'center',
+      panelRole: 'secretary',
+      workspaceIsolation: 'isolated',
+      worktreePath
+    })
+    mocks.getSessionSnapshot.mockImplementation((id: string) => ({
+      sessionId: id,
+      projectId: run.projectId,
+      kind: 'cursor',
+      cwd: worktreePath,
+      worktreePath,
+      status: 'waiting'
+    }))
+
+    await expect(prepareSecretaryRun({
+      runId,
+      projectId: run.projectId,
+      assignments: [
+        { assignmentId, sessionId },
+        { assignmentId: secondAssignmentId, sessionId: secondSessionId }
+      ]
+    })).rejects.toThrow(/different isolated worktree/i)
+  })
+
+  it('starts independent assignments in different registered worktrees', async () => {
+    const run = approvedRun()
+    const secondSessionId = '66666666-6666-4666-8666-666666666666'
+    const secondAssignmentId = 'assignment-2'
+    const secondWorktreePath = 'C:\\bikorch-worktrees\\cursor-66666666'
+    run.plan.assignments.push({
+      ...run.plan.assignments[0],
+      id: secondAssignmentId,
+      title: 'Second independent task'
+    })
+    mocks.loadSnapshot().workspaces[run.projectId].panels.push({
+      id: secondSessionId,
+      type: 'cursor',
+      title: 'Second Cursor',
+      zone: 'center',
+      panelRole: 'secretary',
+      workspaceIsolation: 'isolated',
+      worktreePath: secondWorktreePath
+    })
+    mocks.getSecretaryStore.mockReturnValue({
+      getRun: vi.fn()
+        .mockReturnValueOnce(run)
+        .mockReturnValueOnce({ ...run, status: 'running' })
+        .mockReturnValue({ ...run, status: 'running' }),
+      updateRun: vi.fn().mockReturnValue({ ...run, status: 'running' }),
+      appendMessage: vi.fn()
+    })
+    mocks.getSessionSnapshot.mockImplementation((id: string) => {
+      const cwd = id === sessionId ? worktreePath : secondWorktreePath
+      return {
+        sessionId: id,
+        projectId: run.projectId,
+        kind: 'cursor',
+        cwd,
+        worktreePath: cwd,
+        status: 'waiting'
+      }
+    })
+    mocks.writeForSecretary.mockResolvedValue(undefined)
+
+    const result = await dispatchSecretaryRun({
+      runId,
+      projectId: run.projectId,
+      assignments: [
+        { assignmentId, sessionId },
+        { assignmentId: secondAssignmentId, sessionId: secondSessionId }
+      ]
+    })
+
+    expect(result.dispatchedAssignmentIds).toEqual([assignmentId, secondAssignmentId])
+    expect(mocks.isRegisteredAgentWorktree).toHaveBeenCalledWith(expect.objectContaining({
+      panelId: sessionId,
+      worktreePath
+    }))
+    expect(mocks.isRegisteredAgentWorktree).toHaveBeenCalledWith(expect.objectContaining({
+      panelId: secondSessionId,
+      worktreePath: secondWorktreePath
+    }))
+    expect(mocks.writeForSecretary).toHaveBeenCalledWith(sessionId, '\r')
+    expect(mocks.writeForSecretary).toHaveBeenCalledWith(secondSessionId, '\r')
   })
 
   it('does not dispatch a CLI session owned by another project', async () => {
@@ -187,7 +356,8 @@ describe('Secretary orchestrator', () => {
       sessionId,
       projectId: '55555555-5555-4555-8555-555555555555',
       kind: 'cursor',
-      cwd: 'C:\\secretary-project',
+      cwd: worktreePath,
+      worktreePath,
       status: 'waiting'
     })
 

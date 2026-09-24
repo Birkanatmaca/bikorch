@@ -238,11 +238,13 @@ class PtyHostClient {
   }
 
   async write(sessionId: string, data: string): Promise<void> {
-    await this.request({ v: 1, id: this.nextId(), type: 'write', payload: { sessionId, data } })
+    const response = await this.request({ v: 1, id: this.nextId(), type: 'write', payload: { sessionId, data } })
+    if (response.type === 'error') throw new Error(response.error)
   }
 
   async resize(sessionId: string, cols: number, rows: number): Promise<void> {
-    await this.request({ v: 1, id: this.nextId(), type: 'resize', payload: { sessionId, cols, rows } })
+    const response = await this.request({ v: 1, id: this.nextId(), type: 'resize', payload: { sessionId, cols, rows } })
+    if (response.type === 'error') throw new Error(response.error)
   }
 
   async kill(sessionId: string): Promise<void> {

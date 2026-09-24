@@ -37,15 +37,25 @@ describe('Secretary plan validation', () => {
     }, { panels, usage: [] }, true)).toThrow(/disallowed/i)
   })
 
-  it('requires separate CLI kinds for parallel assignments', () => {
-    expect(() => validateSecretaryPlan({
+  it('routes repeated CLI kinds to separate sessions and caps runaway fan-out', () => {
+    const plan = validateSecretaryPlan({
       overview: 'Two concurrent tasks',
       assumptions: [],
       assignments: [
         { kind: 'cursor', instruction: 'Review the current implementation.' },
         { kind: 'cursor', instruction: 'Review the test coverage.' }
       ]
-    }, { panels, usage: [] }, true)).toThrow(/more than one task/i)
+    }, { panels, usage: [] }, true)
+    expect(plan?.assignments.map((assignment) => assignment.panelId)).toEqual(['cursor-ready', null])
+
+    expect(() => validateSecretaryPlan({
+      overview: 'Too many duplicate tasks',
+      assumptions: [],
+      assignments: Array.from({ length: 4 }, (_, index) => ({
+        kind: 'cursor',
+        instruction: `Review area ${index + 1}.`
+      }))
+    }, { panels, usage: [] }, true)).toThrow(/too many tasks/i)
   })
 
   it('normalizes dependency indexes and rejects cycles', () => {
