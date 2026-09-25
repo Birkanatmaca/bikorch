@@ -161,6 +161,7 @@ import {
 } from '@shared/contracts/notifications'
 import {
   RESOURCES_IPC,
+  type ResourceDiskSnapshot,
   type ResourceProcessSnapshot,
   type ResourceProfile
 } from '@shared/contracts/resources'
@@ -414,6 +415,8 @@ export interface ResourcesApi {
   getProfile: () => Promise<ResourceProfile>
   setProfile: (profile: ResourceProfile) => Promise<ResourceProfile>
   snapshot: () => Promise<ResourceProcessSnapshot>
+  diskSnapshot: () => Promise<ResourceDiskSnapshot>
+  clearBrowserCache: () => Promise<number>
 }
 
 export interface AppApi {
@@ -739,7 +742,9 @@ const notificationsApi: NotificationsApi = {
 const resourcesApi: ResourcesApi = {
   getProfile: () => ipcRenderer.invoke(RESOURCES_IPC.GET_PROFILE),
   setProfile: (profile) => ipcRenderer.invoke(RESOURCES_IPC.SET_PROFILE, profile),
-  snapshot: () => ipcRenderer.invoke(RESOURCES_IPC.SNAPSHOT)
+  snapshot: () => ipcRenderer.invoke(RESOURCES_IPC.SNAPSHOT),
+  diskSnapshot: () => ipcRenderer.invoke(RESOURCES_IPC.DISK_SNAPSHOT),
+  clearBrowserCache: () => ipcRenderer.invoke(RESOURCES_IPC.CLEAR_BROWSER_CACHE)
 }
 
 const api: AppApi = {

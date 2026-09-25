@@ -93,8 +93,20 @@ export function resourceLimitsFor(profile: ResourceProfile): ResourceProfileLimi
 export const RESOURCES_IPC = {
   GET_PROFILE: 'resources:get-profile',
   SET_PROFILE: 'resources:set-profile',
-  SNAPSHOT: 'resources:snapshot'
+  SNAPSHOT: 'resources:snapshot',
+  DISK_SNAPSHOT: 'resources:disk-snapshot',
+  CLEAR_BROWSER_CACHE: 'resources:clear-browser-cache'
 } as const
+
+export interface ResourceDiskSnapshot {
+  collectedAt: number
+  appDataBytes: number
+  accountProfilesBytes: number
+  browserSessionBytes: number
+  musicBytes: number
+  otherBytes: number
+  browserCacheBytes: number
+}
 
 export interface ResourceElectronProcess {
   pid: number

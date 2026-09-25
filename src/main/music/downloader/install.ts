@@ -1,6 +1,6 @@
 import { execFile } from 'child_process'
 import { createWriteStream, existsSync } from 'fs'
-import { chmod, copyFile, mkdir, readdir, readFile, unlink } from 'fs/promises'
+import { chmod, copyFile, mkdir, mkdtemp, open, readdir, rm, unlink } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { Readable } from 'stream'
@@ -89,50 +89,61 @@ async function findFile(dir: string, name: string): Promise<string | null> {
 }
 
 async function extractFfmpeg(zipPath: string, destDir: string): Promise<void> {
-  const extractDir = join(tmpdir(), `bikorch-ffmpeg-${Date.now()}`)
-  await mkdir(extractDir, { recursive: true })
+  const extractDir = await mkdtemp(join(tmpdir(), 'bikorch-ffmpeg-'))
   try {
-    await execFileAsync('tar.exe', ['-xf', zipPath, '-C', extractDir], {
-      timeout: 120_000,
-      windowsHide: true
-    })
-  } catch {
-    await execFileAsync(
-      'powershell.exe',
-      [
-        '-NoLogo',
-        '-NoProfile',
-        '-Command',
-        'Expand-Archive -LiteralPath $env:BIKORCH_ZIP -DestinationPath $env:BIKORCH_OUT -Force'
-      ],
-      {
+    try {
+      await execFileAsync('tar.exe', ['-xf', zipPath, '-C', extractDir], {
         timeout: 120_000,
-        windowsHide: true,
-        env: {
-          ...process.env,
-          BIKORCH_ZIP: zipPath,
-          BIKORCH_OUT: extractDir
+        windowsHide: true
+      })
+    } catch {
+      await execFileAsync(
+        'powershell.exe',
+        [
+          '-NoLogo',
+          '-NoProfile',
+          '-Command',
+          'Expand-Archive -LiteralPath $env:BIKORCH_ZIP -DestinationPath $env:BIKORCH_OUT -Force'
+        ],
+        {
+          timeout: 120_000,
+          windowsHide: true,
+          env: {
+            ...process.env,
+            BIKORCH_ZIP: zipPath,
+            BIKORCH_OUT: extractDir
+          }
         }
-      }
-    )
+      )
+    }
+    const ffmpeg = await findFile(extractDir, 'ffmpeg.exe')
+    if (!ffmpeg) throw new Error('The FFmpeg archive did not contain ffmpeg.exe')
+    await copyFile(ffmpeg, join(destDir, 'ffmpeg.exe'))
+    const ffprobe = await findFile(extractDir, 'ffprobe.exe')
+    if (ffprobe) await copyFile(ffprobe, join(destDir, 'ffprobe.exe'))
+  } finally {
+    await rm(extractDir, { recursive: true, force: true })
   }
-  const ffmpeg = await findFile(extractDir, 'ffmpeg.exe')
-  if (!ffmpeg) throw new Error('The FFmpeg archive did not contain ffmpeg.exe')
-  await copyFile(ffmpeg, join(destDir, 'ffmpeg.exe'))
-  const ffprobe = await findFile(extractDir, 'ffprobe.exe')
-  if (ffprobe) await copyFile(ffprobe, join(destDir, 'ffprobe.exe'))
 }
 
 async function installYtdlp(destDir: string): Promise<void> {
   const dest = join(destDir, ytDlpBinaryName())
-  await downloadOfficialFileTo(ytDlpOfficialUrl(), dest, YTDLP_MAX_BYTES)
-  const header = await readFile(dest)
-  const valid = process.platform === 'win32' ? isWindowsPe(header.subarray(0, 2)) : isUnixBinary(header)
-  if (!valid) {
-    await unlink(dest)
-    throw new Error('yt-dlp download was not a valid executable')
+  try {
+    await downloadOfficialFileTo(ytDlpOfficialUrl(), dest, YTDLP_MAX_BYTES)
+    const file = await open(dest, 'r')
+    const header = Buffer.alloc(4)
+    try {
+      await file.read(header, 0, header.length, 0)
+    } finally {
+      await file.close()
+    }
+    const valid = process.platform === 'win32' ? isWindowsPe(header.subarray(0, 2)) : isUnixBinary(header)
+    if (!valid) throw new Error('yt-dlp download was not a valid executable')
+    if (process.platform !== 'win32') await chmod(dest, 0o755)
+  } catch (error) {
+    await unlink(dest).catch(() => undefined)
+    throw error
   }
-  if (process.platform !== 'win32') await chmod(dest, 0o755)
 }
 
 async function installFfmpeg(destDir: string): Promise<void> {

@@ -9,6 +9,7 @@ import { installConsoleCapture, recordRendererConsole } from './logs'
 import { closePersistenceDatabase, initPersistenceDatabase } from './persistence/database'
 import { guardWindowPersistenceClose } from './persistence/close-flush'
 import { loadResourceProfile } from './resources/settings'
+import { pruneOversizedBrowserCaches } from './resources/disk'
 import { APP_DISPLAY_NAME, applyAppBranding, resolveAppIconPath } from './app-branding'
 import { initDeveloperIntelligence } from './developer-intelligence/service'
 import { initSecretaryService } from './secretary/service'
@@ -202,6 +203,9 @@ app.whenReady().then(async () => {
     callback(permission === 'media' || permission === 'fullscreen')
   })
   createWindow()
+  void pruneOversizedBrowserCaches().catch((error) => {
+    console.error('Browser cache maintenance failed:', error)
+  })
   initTray()
   watchPowerEvents()
 

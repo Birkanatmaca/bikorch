@@ -5,6 +5,7 @@ import {
   type ResourceProfile
 } from '@shared/contracts/resources'
 import { collectResourceSnapshot } from '../resources/snapshot'
+import { clearBrowserCaches, collectDiskSnapshot } from '../resources/disk'
 import { getResourceProfile, setResourceProfile } from '../resources/settings'
 
 function assertTrustedSender(event: Electron.IpcMainInvokeEvent): void {
@@ -28,5 +29,15 @@ export function registerResourceHandlers(): void {
   ipcMain.handle(RESOURCES_IPC.SNAPSHOT, (event) => {
     assertTrustedSender(event)
     return collectResourceSnapshot()
+  })
+
+  ipcMain.handle(RESOURCES_IPC.DISK_SNAPSHOT, (event) => {
+    assertTrustedSender(event)
+    return collectDiskSnapshot()
+  })
+
+  ipcMain.handle(RESOURCES_IPC.CLEAR_BROWSER_CACHE, (event) => {
+    assertTrustedSender(event)
+    return clearBrowserCaches()
   })
 }

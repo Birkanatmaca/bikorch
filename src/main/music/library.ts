@@ -4,7 +4,8 @@ import { basename, extname, join, normalize } from 'path'
 import { existsSync } from 'fs'
 import type { ImportTracksResult, MusicStorageMode, MusicTrack } from '@shared/contracts/music'
 import { metadataFromFilename, isAudioExtension } from './metadata'
-import { artworkDir, managedLibraryDir } from './paths'
+import { appDownloadsDir, artworkDir, managedLibraryDir } from './paths'
+import { storeManagedDownload } from './managed-download-link'
 import { permanentlyDeleteManagedMusicFile } from './purge'
 import { getMusicStore } from './store'
 import { parseMusicUrl } from './url-parser'
@@ -40,12 +41,17 @@ async function collectAudioFiles(paths: string[]): Promise<string[]> {
 async function resolveStoredPath(
   sourcePath: string,
   mode: MusicStorageMode,
-  trackId: string
+  trackId: string,
+  managedDownload = false
 ): Promise<string> {
   if (mode !== 'managed') return sourcePath
   const ext = extname(sourcePath) || '.mp3'
   const destination = join(managedLibraryDir(), `${trackId}${ext}`)
-  await copyFile(sourcePath, destination)
+  if (managedDownload) {
+    await storeManagedDownload(sourcePath, destination, appDownloadsDir())
+  } else {
+    await copyFile(sourcePath, destination)
+  }
   return destination
 }
 
@@ -130,7 +136,7 @@ export async function importDownloadedAudio(
   if (existing) return { ok: true, track: existing, duplicate: true }
 
   const id = randomUUID()
-  const storedPath = await resolveStoredPath(filePath, options.mode, id)
+  const storedPath = await resolveStoredPath(filePath, options.mode, id, true)
   const meta = metadataFromFilename(filePath)
   const parsed = options.sourceUrl ? parseMusicUrl(options.sourceUrl) : null
   const track: MusicTrack = {

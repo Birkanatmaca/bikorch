@@ -1,6 +1,9 @@
 import { randomUUID } from 'crypto'
-import { writeFile } from 'fs/promises'
+import { createWriteStream, existsSync } from 'fs'
+import { unlink } from 'fs/promises'
 import { basename, extname, join } from 'path'
+import { Readable, Transform } from 'stream'
+import { pipeline } from 'stream/promises'
 import type { AddLinkResult, MusicTrack } from '@shared/contracts/music'
 import { MUSIC_AUDIO_EXTENSIONS } from '@shared/contracts/music'
 import { metadataFromFilename } from './metadata'
@@ -30,6 +33,10 @@ export async function downloadDirectAudio(url: string): Promise<AddLinkResult> {
 
   const store = getMusicStore()
   if (!store) return { ok: false, error: 'Database is not ready' }
+
+  const previous = store.listTracks().find((track) => track.sourceUrl === directUrl &&
+    track.filePath && existsSync(track.filePath))
+  if (previous) return { ok: true, track: previous, duplicate: true }
 
   const parsed = new URL(directUrl)
   const ext = extname(parsed.pathname).toLowerCase()
@@ -64,22 +71,28 @@ export async function downloadDirectAudio(url: string): Promise<AddLinkResult> {
     return { ok: false, error: 'File is too large (max 100 MB).' }
   }
 
-  const buffer = Buffer.from(await response.arrayBuffer())
-  if (buffer.length === 0) return { ok: false, error: 'Downloaded file is empty' }
-  if (buffer.length > MAX_BYTES) {
-    return { ok: false, error: 'File is too large (max 100 MB).' }
-  }
-
   const id = randomUUID()
   const destination = join(managedLibraryDir(), `${id}${ext}`)
-  await writeFile(destination, buffer)
-
-  const canonical = canonicalPath(destination)
-  const existing = store.findByCanonicalPath(canonical)
-  if (existing) {
-    return { ok: true, track: existing, duplicate: true }
+  if (!response.body) return { ok: false, error: 'Downloaded file is empty' }
+  let received = 0
+  try {
+    await pipeline(
+      Readable.fromWeb(response.body as import('stream/web').ReadableStream),
+      new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          received += chunk.length
+          callback(received > MAX_BYTES ? new Error('File is too large (max 100 MB).') : null, chunk)
+        }
+      }),
+      createWriteStream(destination, { flags: 'wx' })
+    )
+    if (received === 0) throw new Error('Downloaded file is empty')
+  } catch (error) {
+    await unlink(destination).catch(() => undefined)
+    return { ok: false, error: error instanceof Error ? error.message : 'Download failed' }
   }
 
+  const canonical = canonicalPath(destination)
   const filename = basename(parsed.pathname) || `download${ext}`
   const meta = metadataFromFilename(filename)
   const track: MusicTrack = {
