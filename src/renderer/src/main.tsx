@@ -4,6 +4,7 @@ import App from '../App'
 import { ErrorBoundary } from '../components/ui/ErrorBoundary'
 import '../styles/globals.css'
 import '../styles/workstation.css'
+import '../styles/studio.css'
 
 const root = document.getElementById('root')
 

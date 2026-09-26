@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { projectFiles, describeFileError } from '@renderer/lib/project-filesystem'
 import type { GitChange, GitChangeStatus, GitDiffResponse } from '@shared/contracts/git'
 import { detectLanguage } from '@renderer/lib/file-icons'
 import {
@@ -307,7 +308,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }))
 
     try {
-      const result = await window.api.fs.readFile({
+      const result = await projectFiles.readFile({
         projectId,
         filePath: absolutePath
       })
@@ -325,7 +326,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         diffLoadingByProject: { ...state.diffLoadingByProject, [projectId]: false }
       }))
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to open file'
+      const message = describeFileError(error)
       set((state) => ({
         diffLoadingByProject: { ...state.diffLoadingByProject, [projectId]: false },
         diffErrorByProject: { ...state.diffErrorByProject, [projectId]: message }

@@ -33,6 +33,7 @@ export default function App(): React.JSX.Element {
   const { open, openPalette, closePalette } = useCommandPalette()
   const { openFolderPicker } = useOpenProject()
   const projects = useWorkspaceStore((s) => s.projects)
+  const homeVisible = useWorkspaceStore((s) => s.homeVisible)
   const addPanel = useWorkspaceStore((s) => s.addPanel)
   const workspaceScale = useWorkspaceStore((s) => s.workspaceScale)
   const nudgeWorkspaceScale = useWorkspaceStore((s) => s.nudgeWorkspaceScale)
@@ -127,8 +128,8 @@ export default function App(): React.JSX.Element {
           </div>
         )}
         <AppHeader showWorkspaceControls={projects.length > 0} onCommandPalette={openPalette} />
-        {projects.length > 0 ? (
-          <div className="workspace-zoom-host">
+        {projects.length > 0 && (
+          <div className="workspace-zoom-host" style={homeVisible ? { display: 'none' } : undefined}>
             <div
               className="workspace-zoom-canvas"
               style={{ ['--workspace-scale' as string]: String(workspaceScale / 100) }}
@@ -141,9 +142,8 @@ export default function App(): React.JSX.Element {
               </Suspense>
             ) : null}
           </div>
-        ) : (
-          <WelcomeScreen />
         )}
+        {(projects.length === 0 || homeVisible) && <WelcomeScreen />}
         <StatusBar />
         <MusicPlayerHost />
         <TimerHost />

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { projectFiles, describeFileError } from '@renderer/lib/project-filesystem'
 import { detectLanguage } from '@renderer/lib/file-icons'
 import { resolveFileChange, useGitStore } from './git-store'
 import { useEditorStore } from './editor-store'
@@ -119,7 +120,7 @@ export const useIdeStore = create<IdeStore>((set, get) => ({
     }))
 
     try {
-      const result = await window.api.fs.readFile({
+      const result = await projectFiles.readFile({
         projectId,
         filePath: absolutePath
       })
@@ -139,7 +140,7 @@ export const useIdeStore = create<IdeStore>((set, get) => ({
         )
       }))
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to open file'
+      const message = describeFileError(error)
       set((state) => ({
         tabs: state.tabs.map((tab) =>
           tab.absolutePath === absolutePath ? { ...tab, loading: false, error: message } : tab
@@ -169,7 +170,7 @@ export const useIdeStore = create<IdeStore>((set, get) => ({
     if (!root) throw new Error('No project folder')
     set({ saving: true })
     try {
-      await window.api.fs.writeFile({
+      await projectFiles.writeFile({
         projectId: tab.projectId,
         filePath: tab.absolutePath,
         content: tab.value
@@ -184,7 +185,7 @@ export const useIdeStore = create<IdeStore>((set, get) => ({
       }))
       void useGitStore.getState().refresh(tab.projectId, root)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to save'
+      const message = describeFileError(error)
       set((state) => ({
         saving: false,
         tabs: state.tabs.map((item) =>
@@ -216,7 +217,7 @@ export const useIdeStore = create<IdeStore>((set, get) => ({
       )
     }))
     try {
-      const result = await window.api.fs.readFile({
+      const result = await projectFiles.readFile({
         projectId: tab.projectId,
         filePath: tab.absolutePath
       })
@@ -236,7 +237,7 @@ export const useIdeStore = create<IdeStore>((set, get) => ({
         )
       }))
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to reload file'
+      const message = describeFileError(error)
       set((state) => ({
         tabs: state.tabs.map((item) =>
           item.absolutePath === tab.absolutePath ? { ...item, loading: false, error: message } : item

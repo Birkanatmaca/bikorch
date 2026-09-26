@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:smoke:webchat": "electron scripts/webchat-lifecycle-smoke.cjs"
+    "test:smoke:webchat": "electron scripts/webchat-lifecycle-smoke.cjs",
+    "test:smoke:studio": "electron scripts/studio-smoke.cjs"
   },
   "build": {
     "appId": "com.bikorch.app",

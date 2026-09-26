@@ -161,6 +161,8 @@ function persistWorkspaceScale(scale: number): void {
 
 interface WorkspaceStore extends WorkspaceSnapshot {
   isHydrated: boolean
+  homeVisible: boolean
+  showHome: () => void
 
   hydrate: (snapshot: WorkspaceSnapshot) => void
   getSnapshot: () => WorkspaceSnapshot
@@ -284,6 +286,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   activeProjectId: null,
   workspaces: {},
   isHydrated: false,
+  homeVisible: false,
+  showHome: () => set({ homeVisible: true }),
   workspaceScale: readStoredWorkspaceScale(),
 
   hydrate: (snapshot) => {
@@ -329,6 +333,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     set((state) => ({
       projects: [...state.projects, project],
       activeProjectId: project.id,
+      homeVisible: false,
       workspaces: {
         ...state.workspaces,
         [project.id]: createWorkspaceState(project.id)
@@ -353,7 +358,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   setActiveProject: (projectId) => {
-    set({ activeProjectId: projectId })
+    set({ activeProjectId: projectId, homeVisible: false })
     get().ensureProjectWorkspace(projectId)
     get().carryWebChats(projectId)
   },
@@ -388,7 +393,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   touchRecentProject: (projectId) => {
-    set({ activeProjectId: projectId })
+    set({ activeProjectId: projectId, homeVisible: false })
     get().ensureProjectWorkspace(projectId)
     get().carryWebChats(projectId)
   },
@@ -454,6 +459,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
     const workspace = workspaces[activeProjectId]
     if (!workspace) return ''
+    if (get().homeVisible) set({ homeVisible: false })
 
     if (type === 'tasks') {
       get().selectLeftSidebar(activeProjectId, 'tasks')

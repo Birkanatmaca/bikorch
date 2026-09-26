@@ -82,7 +82,9 @@ export function usePersistenceBootstrap(): {
     })
 
     const handleBeforeUnload = (): void => {
-      void flushPersistence().catch((error) => console.error('Could not flush workspace state:', error))
+      if (hydrated) {
+        void flushPersistence().catch((error) => console.error('Could not flush workspace state:', error))
+      }
     }
 
     window.addEventListener('beforeunload', handleBeforeUnload)
@@ -92,7 +94,11 @@ export function usePersistenceBootstrap(): {
       hydrationController?.abort()
       stopCloseFlush()
       window.removeEventListener('beforeunload', handleBeforeUnload)
-      void flushPersistence().catch((error) => console.error('Could not flush workspace state:', error))
+      // StrictMode replays this effect before loading finishes. Saving at that
+      // point would replace existing projects with the initial empty store.
+      if (hydrated) {
+        void flushPersistence().catch((error) => console.error('Could not flush workspace state:', error))
+      }
     }
   }, [])
 

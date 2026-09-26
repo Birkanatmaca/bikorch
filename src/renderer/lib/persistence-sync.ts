@@ -7,6 +7,7 @@ import { useTasksStore } from '@renderer/stores/tasks-store'
 import { useUsageStore } from '@renderer/stores/usage-store'
 import { useSubscriptionStore } from '@renderer/stores/subscription-store'
 import { AI_ACCOUNTS_REFRESH_EVENT } from './app-events'
+import { trackProjectPersistence } from './project-filesystem'
 
 const SAVE_DEBOUNCE_MS = 400
 const MAX_SAVE_WAIT_MS = 2_000
@@ -127,7 +128,7 @@ function scheduleSave(): void {
   saveTimer = setTimeout(() => {
     saveTimer = null
     firstSaveScheduledAt = null
-    void window.api.persistence.save(buildPersistedSnapshot()).catch((error) => {
+    void flushPersistence().catch((error) => {
       console.error('Failed to save workspace snapshot:', error)
     })
   }, Math.max(0, Math.min(SAVE_DEBOUNCE_MS, MAX_SAVE_WAIT_MS - (Date.now() - firstSaveScheduledAt))))
@@ -138,7 +139,16 @@ export function startPersistenceSync(): void {
   syncStarted = true
 
   useWorkspaceStore.subscribe((state, prevState) => {
-    if (state.workspaces === prevState.workspaces && state.projects === prevState.projects) {
+    if (isHydrating) return
+    // Register new/changed roots before any mounted explorer or editor can read
+    // them. Layout-only saves can still be debounced.
+    if (state.projects !== prevState.projects) {
+      void flushPersistence().catch((error) => {
+        console.error('Failed to register project:', error)
+      })
+      return
+    }
+    if (state.workspaces === prevState.workspaces && state.activeProjectId === prevState.activeProjectId) {
       return
     }
     scheduleSave()
@@ -193,5 +203,5 @@ export async function flushPersistence(): Promise<void> {
   }
   firstSaveScheduledAt = null
 
-  await window.api.persistence.save(buildPersistedSnapshot())
+  await trackProjectPersistence(window.api.persistence.save(buildPersistedSnapshot()))
 }

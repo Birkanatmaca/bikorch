@@ -1,0 +1,94 @@
+/* Workspace surfaces; the welcome screen uses its original styles in globals.css. */
+.app-shell {
+  --control-radius: 10px;
+  --panel-radius: 16px;
+  background: #0c0e14;
+}
+.app-home-button { display: flex; align-items: center; min-height: 32px; padding: 4px 7px; border-radius: 9px; cursor: pointer; }
+.app-home-button:hover, .app-home-button[aria-pressed='true'] { background: rgb(172 153 255 / 0.1); }
+.app-header { background: #11131b; border-bottom-color: rgb(193 189 218 / 0.09); }
+.app-status-bar { background: #11131b; }
+
+.home-eyebrow { display: inline-flex; align-items: center; gap: 8px; color: #a6a0ba; font-size: 9px; font-weight: 600; letter-spacing: 0.17em; line-height: 1.6; }
+.home-eyebrow > span { width: 16px; height: 1px; background: #b5a2ef; }
+
+/* Inside a project: generous launcher cards and cohesive, legible panels. */
+.workspace-frame, .platform-macos .workspace-frame { position: relative; padding: 10px 10px 10px 0; gap: 10px; }
+.workspace-main { border: 1px solid #b0a2d018; border-radius: 18px; background: #0f1119; overflow: hidden; }
+.workstation-rail { padding-top: 10px; gap: 9px; }
+.workstation-rail .glass-icon-btn { border-radius: 11px; }
+.workstation-rail .glass-icon-btn-active { background: #ac8ee81a; border-color: #c2a4ef38; color: #c7b1f0; box-shadow: inset 0 1px 0 #ffffff07; }
+.workstation-sidebar { background: #151721; border-color: #aaa0c52a; box-shadow: 8px 0 32px #05071050; }
+.sidebar-header { min-height: 48px; padding-inline: 16px; border-bottom: 1px solid #b5a6d116; }
+.sidebar-header-title { font-size: 12px; font-weight: 600; letter-spacing: 0.015em; }
+.workspace-sidebar-overlay { min-width: min(260px, 100%); max-width: min(440px, 65%); }
+.file-tree-search { min-height: 36px; border-radius: 10px; background: #0c0e16; }
+.file-tree-row { min-height: 30px; border-radius: 7px; }
+.file-tree-row.is-selected { background: #a993d51a; }
+.file-tree-error, .file-tree-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; margin: 14px 10px; padding: 18px 14px; border: 1px solid #ba9ed12a; border-radius: 13px; background: #b498e308; }
+.file-tree-error > svg, .file-tree-empty > svg { width: 25px; height: 25px; color: #baa8dc; }
+.file-tree-error strong, .file-tree-empty strong { font-size: 12px; font-weight: 500; color: #e2d7ef; }
+.file-tree-error p, .file-tree-empty p { font-size: 11px; color: #aaa0ba; line-height: 1.7; margin: 0; overflow-wrap: anywhere; }
+.file-tree-error button, .file-tree-inline-error button { min-height: 36px; padding: 8px 12px; border: 1px solid #c8b2e43b; border-radius: 8px; background: #b394db15; color: #d3bee9; font-size: 11px; cursor: pointer; }
+.file-tree-error button:hover, .file-tree-inline-error button:hover { background: #b394db30; }
+.file-tree-inline-error { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px 16px; color: #e7b6c5; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.studio-launcher { background: radial-gradient(ellipse at 85% 10%, #9671d10a, transparent 55%), #0f1119; padding: 44px clamp(22px, 5vw, 72px); }
+.studio-launcher::before, .studio-launcher::after { display: none; }
+.studio-launcher-content { position: relative; width: min(720px, 100%); margin: auto; }
+.studio-launcher-heading { display: flex; flex-direction: column; align-items: flex-start; }
+.studio-project-tag { display: inline-flex; align-items: center; max-width: 100%; gap: 7px; margin-bottom: 34px; padding: 7px 10px; border: 1px solid #b9a5d42a; border-radius: 8px; color: #bdacd4; font-size: 11px; overflow-wrap: anywhere; }
+.studio-project-tag svg { width: 13px; height: 13px; flex-shrink: 0; }
+.studio-launcher h2 { margin: 10px 0 12px; font-size: clamp(26px, 3.3vw, 39px); font-weight: 500; letter-spacing: -0.045em; line-height: 1.2; }
+.studio-launcher-heading > p { margin: 0; color: #a5a0b5; font-size: 12px; line-height: 1.8; }
+.studio-launch-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 30px 0; }
+.studio-launcher .cli-launch-tile { position: relative; min-width: 0; min-height: 135px; align-items: flex-start; padding: 20px; border-radius: 16px; border: 1px solid #b9a5d426; background: linear-gradient(130deg, #bb9ce308, transparent), #161821; box-shadow: inset 0 1px 0 #ffffff04; }
+.studio-launcher .cli-launch-tile:hover { background: #211e2e; border-color: #bca1e264; transform: translateY(-2px); }
+.studio-launcher .cli-launch-logo-well { width: 35px; height: 35px; border-radius: 10px; background: #0e1018; border: 1px solid #ffffff0d; }
+.studio-launcher .cli-launch-logo { width: 23px; height: 23px; }
+.cli-launch-arrow { position: absolute; top: 20px; right: 18px; width: 14px; height: 14px; color: #998caa; }
+.studio-launch-hints { padding-top: 20px; border-top: 1px solid #bca2d31a; }
+.studio-launch-hints p { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; }
+.studio-launch-hints button { min-height: 30px; }
+.secretary-sidebar { border-color: #b39bd938; background: linear-gradient(150deg, #9c73c90b, transparent 55%), #15141f; }
+
+@media (max-width: 900px) {
+  .app-status-bar > div:first-child > span:last-child:not(:first-of-type) { display: none; }
+  .status-zoom-slider { display: none; }
+  .studio-launcher { padding: 30px 24px; }
+}
+@media (max-width: 700px) {
+  .app-header { gap: 0; flex-wrap: wrap; height: auto; min-height: 42px; }
+  .app-header-leading { padding-left: 4px; flex: 1; }
+  .app-project-divider { display: none; }
+  .app-project-tabs-host { order: 3; flex: 0 0 100%; height: 44px; border-top: 1px solid #bca2d315; padding-inline: 6px; }
+  .header-action-label, .header-action-chevron { display: none; }
+  .app-header-actions > .ui-control { width: 34px; }
+  .project-tab { height: 32px; }
+  .app-header-wordmark { display: none; }
+  .app-header-actions { gap: 2px; padding-left: 2px; }
+  .app-header-actions .ui-control { padding-inline: 6px; }
+  .app-status-bar { overflow-x: auto; gap: 16px; padding-inline: 10px; }
+  .app-status-bar > div:first-child { display: none; }
+  .app-status-bar > div:last-child { width: 100%; justify-content: space-between; gap: 8px; }
+  .app-status-bar .status-command kbd { display: none; }
+  .workspace-frame, .platform-macos .workspace-frame { flex-direction: column; padding: 6px; gap: 6px; }
+  .workspace-main { order: 1; width: 100%; border-radius: 14px; }
+  .workstation-rail { order: 2; width: 100%; flex-direction: row; justify-content: space-evenly; gap: 1px; padding: 4px 0 max(4px, env(safe-area-inset-bottom)); border: 1px solid #bca2d320; border-radius: 14px; background: #15151f; overflow-x: auto; }
+  .workstation-rail .glass-icon-btn { width: 40px; height: 44px; }
+  .workspace-sidebar-overlay { width: min(380px, 100%) !important; min-width: 0; max-width: 100%; }
+  .workspace-sidebar-overlay-handle { display: none; }
+  .developer-secretary.is-open { position: absolute; z-index: 60; top: 6px; right: 6px; bottom: 65px; width: min(400px, calc(100% - 12px)); }
+  .developer-secretary.is-collapsed { position: absolute; z-index: 40; right: 16px; bottom: 78px; width: 44px; height: 44px; }
+  .developer-secretary.is-collapsed .secretary-rail { padding: 9px; border-radius: 14px; box-shadow: 0 5px 18px #0006; }
+  .secretary-rail-label { display: none; }
+  .studio-launcher { padding: 28px 20px 66px; }
+  .studio-launch-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .studio-launcher .cli-launch-tile { min-height: 127px; padding: 17px; }
+  .studio-project-tag { margin-bottom: 26px; }
+}
+@media (pointer: coarse) {
+  .file-tree-row, .file-tree-meta button, .file-tree-search button, .sidebar-header button,
+  .desktop-menu-item, .glass-icon-btn, .ui-control, .file-tree-error button { min-height: 44px; }
+  .file-tree-search input, .secretary-composer textarea { font-size: 16px; }
+  .glass-icon-btn, .file-tree-meta button, .file-tree-search button, .sidebar-header button { min-width: 44px; }
+}

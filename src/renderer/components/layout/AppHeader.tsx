@@ -8,6 +8,7 @@ import { useWindowChrome } from '@renderer/hooks/use-window-chrome'
 import { cn } from '@renderer/lib/utils'
 import { isMacOS, isWindows } from '@renderer/lib/electron-api'
 import { useWindowDrag } from '@renderer/hooks/use-window-drag'
+import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 
 interface AppHeaderProps {
   showWorkspaceControls?: boolean
@@ -22,6 +23,8 @@ export function AppHeader({
   const isMac = isMacOS()
   const windowDrag = useWindowDrag()
   const { fullScreen } = useWindowChrome()
+  const showHome = useWorkspaceStore((state) => state.showHome)
+  const homeVisible = useWorkspaceStore((state) => state.homeVisible)
 
   return (
     <header
@@ -49,15 +52,17 @@ export function AppHeader({
           isMac && !fullScreen ? 'pl-[76px]' : 'pl-2.5'
         )}
       >
-        <AppLogo size="xs" showName className="app-header-brand opacity-90" />
+        <button type="button" className="app-home-button" onClick={showHome} title="Project home" aria-label="Project home" aria-pressed={homeVisible || !showWorkspaceControls}>
+          <AppLogo size="xs" showName className="app-header-brand opacity-90" />
+        </button>
         <div className="mx-1.5 h-4 w-px bg-border" />
         <MenuBar onCommandPalette={onCommandPalette} />
       </div>
 
       {showWorkspaceControls && (
         <>
-          <div className="mx-2 h-4 w-px shrink-0 bg-border" />
-          <div className="min-w-0 flex-1 overflow-hidden app-no-drag">
+          <div className="app-project-divider mx-2 h-4 w-px shrink-0 bg-border" />
+          <div className="app-project-tabs-host min-w-0 flex-1 overflow-hidden app-no-drag">
             <ProjectTabs />
           </div>
         </>

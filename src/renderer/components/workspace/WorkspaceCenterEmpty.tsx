@@ -1,5 +1,4 @@
-import { Command, Plus, Terminal } from 'lucide-react'
-import { AppLogo } from '@renderer/components/brand/AppLogo'
+import { ArrowUpRight, Command, FolderOpen, Plus, Terminal } from 'lucide-react'
 import { useActiveProject } from '@renderer/hooks/use-active-project'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { getCliLogo } from '@renderer/lib/cli-logos'
@@ -50,6 +49,7 @@ function LaunchTile({
       </span>
       <span className="mt-3 text-[13px] font-medium tracking-tight text-text-primary">{label}</span>
       <span className="mt-0.5 text-[10px] text-text-muted">{hint}</span>
+      <ArrowUpRight className="cli-launch-arrow" aria-hidden />
     </button>
   )
 }
@@ -69,19 +69,18 @@ export function WorkspaceCenterEmpty(): React.JSX.Element {
   return (
     <div
       ref={canvasRef}
-      className="workspace-launcher relative flex h-full flex-col items-center justify-center overflow-auto px-6 py-10"
+      className="workspace-launcher studio-launcher relative flex h-full flex-col overflow-auto"
       onContextMenu={(e) => openAt(e)}
     >
-      <div className="relative w-full max-w-[560px] animate-fade-in">
-        <div className="flex flex-col items-center text-center">
-          <AppLogo size="lg" />
-          <h2 className="mt-4 text-lg font-medium tracking-tight text-text-primary">
-            {projectName ?? 'Workspace'}
-          </h2>
-          <p className="mt-1.5 text-[13px] text-text-muted">Choose a CLI to start this session</p>
+      <div className="studio-launcher-content animate-fade-in">
+        <div className="studio-launcher-heading">
+          <span className="studio-project-tag"><FolderOpen aria-hidden />{projectName ?? 'Workspace'}</span>
+          <span className="home-eyebrow">YOUR TOOLS. YOUR FLOW.</span>
+          <h2>What are we building?</h2>
+          <p>Start a session with your favorite CLI. Make space for the next great idea.</p>
         </div>
 
-        <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <div className="studio-launch-grid">
           {LAUNCHERS.map((item) => (
             <LaunchTile
               key={item.type}
@@ -93,9 +92,9 @@ export function WorkspaceCenterEmpty(): React.JSX.Element {
           ))}
         </div>
 
-        <div className="cli-launch-hints mt-8">
+        <div className="cli-launch-hints studio-launch-hints">
           <p>
-            Right-click the canvas to place a CLI
+            Your workspace, arranged your way
             <span className="cli-launch-dot" />
             <kbd>{isMacOS() ? '⌘' : 'Ctrl'}</kbd>
             <kbd>`</kbd>

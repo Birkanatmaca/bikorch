@@ -161,12 +161,13 @@ export function AddPanelMenu(): React.JSX.Element {
           open && 'is-pressed'
         )}
         title="Add panel"
+        aria-label="Add panel"
         aria-expanded={open}
         aria-haspopup="menu"
       >
         <Plus className="h-3.5 w-3.5" />
-        Add Panel
-        <ChevronDown className="h-3 w-3 opacity-70" />
+        <span className="header-action-label">Add Panel</span>
+        <ChevronDown className="header-action-chevron h-3 w-3 opacity-70" />
       </Button>
       {menu ? createPortal(menu, document.body) : null}
     </>
