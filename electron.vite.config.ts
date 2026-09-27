@@ -35,6 +35,11 @@ export default defineConfig({
         '@shared': resolve('src/shared')
       }
     },
+    // Monaco is only imported from the lazy IDE overlay. Discovering it on the
+    // first file open re-optimizes deps and the overlay fetch fails with 504.
+    optimizeDeps: {
+      include: ['@monaco-editor/react', 'monaco-editor']
+    },
     plugins: [react(), tailwindcss()],
     worker: {
       format: 'es'

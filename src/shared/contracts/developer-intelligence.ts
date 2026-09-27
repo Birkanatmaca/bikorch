@@ -281,6 +281,27 @@ export interface DeveloperMemory {
   userEdited?: boolean
 }
 
+export type SkillSource = 'user' | 'manager' | 'file'
+
+export interface DeveloperSkill {
+  id: string
+  name: string
+  description: string
+  instructions: string
+  source: SkillSource
+  enabled: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface SkillDraft {
+  name: string
+  description: string
+  instructions: string
+}
+
+export type SkillUpdate = Partial<Pick<DeveloperSkill, 'name' | 'description' | 'instructions' | 'enabled'>>
+
 export interface MemoryDraft {
   scope: MemoryScope
   projectId?: string
@@ -306,6 +327,8 @@ export interface MemoryContextRequest {
   projectId?: string
   query?: string
   limit?: number
+  /** Keep who the developer is, even when the current task does not mention those facts. */
+  retainProfile?: boolean
 }
 
 export interface MemoryContextItem {
@@ -522,6 +545,11 @@ export const DEVELOPER_INTELLIGENCE_IPC = {
   LIST_PROMPTS: 'developer-intelligence:list-prompts',
   DELETE_PROMPTS: 'developer-intelligence:delete-prompts',
   GET_METRICS: 'developer-intelligence:get-metrics',
+  LIST_SKILLS: 'developer-intelligence:list-skills',
+  CREATE_SKILL: 'developer-intelligence:create-skill',
+  UPDATE_SKILL: 'developer-intelligence:update-skill',
+  DELETE_SKILL: 'developer-intelligence:delete-skill',
+  IMPORT_SKILL: 'developer-intelligence:import-skill',
   LIST_MEMORIES: 'developer-intelligence:list-memories',
   CREATE_MEMORY: 'developer-intelligence:create-memory',
   UPDATE_MEMORY: 'developer-intelligence:update-memory',

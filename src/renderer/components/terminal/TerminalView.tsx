@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import type { AgentWorktreeKind } from '@shared/contracts/git'
 import { AGENT_WORKTREE_KINDS } from '@shared/contracts/git'
 import type { PtyCreateResponse, PtyEvent, PtyKind, PtyLaunchMode } from '@shared/contracts/pty'
+import { cleanCliLabel, stripAnsi } from '@shared/terminal-text'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useIsolationStore } from '@renderer/stores/isolation-store'
@@ -268,11 +269,10 @@ export function TerminalView({
       ) {
         return
       }
-      const emailMatches = outputTail.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)
-      const email = emailMatches?.at(-1)
+      const emailMatches = stripAnsi(outputTail).match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)
+      const email = emailMatches?.at(-1) ? cleanCliLabel(emailMatches.at(-1) ?? '') : undefined
       const signedIn = looksCliSignedIn(kind, outputTail)
-      if (kind === 'antigravity' && !email) return
-      // Cursor capture reads only this profile's credential file and verifies it with the server.
+      // Cursor and Antigravity capture read the account credential directly.
       // Do not depend on CLI output wording to detect a completed login.
 
       authCaptureInFlight = true
@@ -330,10 +330,66 @@ export function TerminalView({
       }, kind === 'antigravity' || kind === 'cursor' ? 1600 : 900)
     }
 
-    if (kind === 'cursor' && captureAfterLogin && shouldCaptureAccount) {
+    if ((kind === 'cursor' || kind === 'antigravity') && captureAfterLogin && shouldCaptureAccount) {
       authPollTimer = window.setInterval(() => {
         void inspectAuthenticatedProfile()
       }, 2000)
+    }
+
+    let antigravityLogoutSent = false
+    let antigravityLoginSent = false
+    let antigravityLogoutTimer: number | null = null
+    let antigravityLoginTimer: number | null = null
+    const antigravityPlain = (): string =>
+      outputTail.replace(/\u001b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '').replace(/\r/g, '')
+    const antigravityPromptReady = (plain: string): boolean =>
+      /(?:^|\n)\s*>\s*(?:\n|$)/m.test(plain.slice(-2000))
+    const antigravitySignedOut = (plain: string): boolean =>
+      /logged out|signed out|not signed in|please (?:sign|log) in|authentication required/i.test(plain)
+    const clearAntigravityLoginTimers = (): void => {
+      if (antigravityLogoutTimer !== null) {
+        window.clearTimeout(antigravityLogoutTimer)
+        antigravityLogoutTimer = null
+      }
+      if (antigravityLoginTimer !== null) {
+        window.clearTimeout(antigravityLoginTimer)
+        antigravityLoginTimer = null
+      }
+    }
+    const sendAntigravityLogout = (): void => {
+      if (kind !== 'antigravity' || !captureAfterLogin || antigravityLogoutSent || antigravityLoginSent || authCaptured) return
+      if (!ptyReadyRef.current) return
+      antigravityLogoutSent = true
+      if (antigravityLogoutTimer !== null) {
+        window.clearTimeout(antigravityLogoutTimer)
+        antigravityLogoutTimer = null
+      }
+      void window.api.pty.write({ sessionId, data: '/logout\r' })
+    }
+    const sendAntigravityLogin = (): void => {
+      if (kind !== 'antigravity' || !captureAfterLogin || antigravityLoginSent || authCaptured) return
+      if (!ptyReadyRef.current) return
+      if (!antigravityLogoutSent) {
+        sendAntigravityLogout()
+        return
+      }
+      antigravityLoginSent = true
+      clearAntigravityLoginTimers()
+      void window.api.pty.write({ sessionId, data: '/login\r' })
+    }
+    const maybeStartAntigravityLogin = (): void => {
+      if (kind !== 'antigravity' || !captureAfterLogin || antigravityLoginSent || authCaptured) return
+      const plain = antigravityPlain()
+      if (/accounts\.google\.com/i.test(plain)) {
+        antigravityLoginSent = true
+        clearAntigravityLoginTimers()
+        return
+      }
+      if (!antigravityLogoutSent) {
+        if (antigravitySignedOut(plain) || antigravityPromptReady(plain)) sendAntigravityLogout()
+        return
+      }
+      if (antigravitySignedOut(plain)) sendAntigravityLogin()
     }
 
     const applyCliStatus = (next: 'waiting' | 'busy'): void => {
@@ -347,6 +403,7 @@ export function TerminalView({
       if (!cli) return
       outputTail = (outputTail + chunk).slice(-8000)
       useTerminalStore.getState().setOutputTail(sessionId, outputTail)
+      maybeStartAntigravityLogin()
       const inferred = inferCliActivity(outputTail)
       if (inferred === 'busy') {
         applyCliStatus('busy')
@@ -357,6 +414,7 @@ export function TerminalView({
       }
     }
 
+    let printedPtyError = ''
     let inputQueue: TerminalInputQueue | null = null
     const unsubscribe = window.api.pty.onEvent((event: PtyEvent) => {
       if (event.sessionId !== sessionId) return
@@ -374,7 +432,8 @@ export function TerminalView({
             if (current === 'busy' || current === 'waiting') break
           }
           setStatus(sessionId, mapProcessStatus(kind, event.status), event.error)
-          if (event.status === 'error' && event.error) {
+          if (event.status === 'error' && event.error && event.error !== printedPtyError) {
+            printedPtyError = event.error
             terminal.writeln(`\r\n\x1b[31m[Error] ${event.error}\x1b[0m`)
           }
           break
@@ -488,9 +547,9 @@ export function TerminalView({
 
     const startSession = async (term: Terminal, nextLaunchMode: PtyLaunchMode = launchMode): Promise<void> => {
       if (!active) return
-      if (nextLaunchMode === 'login' && kind === 'cursor') {
+      if (nextLaunchMode === 'login' && (kind === 'cursor' || kind === 'antigravity')) {
         term.writeln(
-          '\x1b[90mSigning out the current Cursor CLI session so you can add a different account...\x1b[0m'
+          `\x1b[90mSigning out the current ${kind === 'cursor' ? 'Cursor' : 'Antigravity'} CLI session so you can add a different account...\x1b[0m`
         )
       }
 
@@ -501,7 +560,7 @@ export function TerminalView({
         .find((panel) => panel.id === sessionId)
       const secretaryPanel = panelAtLaunch?.panelRole === 'secretary'
       const stopUnisolatedSecretary = (reason: string): void => {
-        const message = `Secretary needs a separate Git worktree: ${reason}`
+        const message = `Manager needs a separate Git worktree: ${reason}`
         term.writeln(`\x1b[31m[Bikorch] ${message}\x1b[0m`)
         setStatus(sessionId, 'error', message)
       }
@@ -611,6 +670,17 @@ export function TerminalView({
       if (result.status !== 'error' && result.status !== 'stopped') {
         ptyReadyRef.current = true
         inputQueue?.ready()
+        maybeStartAntigravityLogin()
+        if (kind === 'antigravity' && nextLaunchMode === 'login' && !antigravityLoginSent) {
+          antigravityLogoutTimer = window.setTimeout(() => {
+            antigravityLogoutTimer = null
+            sendAntigravityLogout()
+            antigravityLoginTimer = window.setTimeout(() => {
+              antigravityLoginTimer = null
+              sendAntigravityLogin()
+            }, 1800)
+          }, 1600)
+        }
         sendPtyResize(term.cols, term.rows, true)
       }
       if (nextLaunchMode === 'login') {
@@ -647,14 +717,15 @@ export function TerminalView({
         }
       }
       setStatus(sessionId, mapProcessStatus(kind, result.status), result.error)
-      if (result.status === 'error' && result.error) {
+      if (result.status === 'error' && result.error && result.error !== printedPtyError) {
+        printedPtyError = result.error
         term.writeln(`\x1b[31m[Error] ${result.error}\x1b[0m`)
         if (result.code === 'CLI_MISSING' && kind === 'cursor') {
           setInstallPrompt('cursor')
         }
-      } else if (nextLaunchMode === 'login' && kind === 'cursor') {
+      } else if (nextLaunchMode === 'login' && (kind === 'cursor' || kind === 'antigravity')) {
         term.writeln(
-          '\x1b[33m[Account] Complete sign-in in the browser with the Cursor account you want to add.\x1b[0m'
+          `\x1b[33m[Account] Complete sign-in in the browser with the ${kind === 'cursor' ? 'Cursor' : 'Antigravity'} account you want to add.\x1b[0m`
         )
       }
     }
@@ -747,6 +818,7 @@ export function TerminalView({
       settleTimersRef.current = []
       if (authInspectTimer !== null) window.clearTimeout(authInspectTimer)
       if (authPollTimer !== null) window.clearInterval(authPollTimer)
+      clearAntigravityLoginTimers()
       resizeObserver.disconnect()
       window.removeEventListener('resize', onHostResize)
       document.removeEventListener('visibilitychange', onVisibilityChange)
@@ -794,11 +866,11 @@ export function TerminalView({
   const handleInstall = async (): Promise<void> => {
     if (!window.api.cli) return
     setInstalling(true)
-    setInstallMessage('Cursor CLI yükleniyor...')
+    setInstallMessage('Installing Cursor CLI…')
     const result = await window.api.cli.install('cursor')
     setInstalling(false)
     if (!result.ok) {
-      setInstallMessage(result.error ?? 'Yükleme başarısız')
+      setInstallMessage(result.error ?? 'Install failed')
       return
     }
     setInstallPrompt(null)
@@ -820,15 +892,14 @@ export function TerminalView({
     >
       <div ref={containerRef} className="terminal-host" />
       {compactHost && (
-        <div className="terminal-compact-hint" aria-live="polite">Dar alan · büyüt veya kaydır</div>
+        <div className="terminal-compact-hint" aria-live="polite">Tight space · zoom or scroll</div>
       )}
       {installPrompt === 'cursor' && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-app-bg/80 p-4">
           <div className="w-full max-w-sm rounded-lg border border-border bg-elevated p-4 shadow-xl">
-            <p className="text-sm font-medium text-text-primary">Cursor CLI bulunamadı</p>
+            <p className="text-sm font-medium text-text-primary">Cursor CLI not found</p>
             <p className="mt-2 text-xs leading-relaxed text-text-secondary">
-              Bu bilgisayarda Cursor CLI yüklü değil veya bulunamadı. Şimdi resmi kurulumu
-              çalıştırmamı ister misin?
+              Cursor CLI is not installed on this computer, or it could not be found. Run the official install now?
             </p>
             {installMessage && (
               <p className="mt-2 text-[11px] text-warning">{installMessage}</p>
@@ -839,7 +910,7 @@ export function TerminalView({
                 disabled={installing}
                 onClick={() => setInstallPrompt(null)}
               >
-                Hayır
+                No
               </Button>
               <Button
                 type="button"
@@ -847,7 +918,7 @@ export function TerminalView({
                 disabled={installing}
                 onClick={() => void handleInstall()}
               >
-                {installing ? 'Yükleniyor...' : 'Evet, yükle'}
+                {installing ? 'Installing…' : 'Yes, install'}
               </Button>
             </div>
           </div>

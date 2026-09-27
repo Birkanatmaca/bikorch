@@ -249,6 +249,19 @@ function initSchema(database: Database): void {
     );
   `)
   database.run('CREATE INDEX IF NOT EXISTS di_memories_key ON di_memories (memory_key);')
+  database.run(`
+    CREATE TABLE IF NOT EXISTS di_skills (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      instructions TEXT NOT NULL,
+      source TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `)
+  database.run('CREATE INDEX IF NOT EXISTS di_skills_name ON di_skills (name);')
 
   database.run('INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)', [
     'schema_version',

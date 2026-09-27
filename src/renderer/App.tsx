@@ -17,7 +17,6 @@ import { startResourcePolicies } from '@renderer/lib/resource-policies'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import { useMusicStore } from '@renderer/stores/music-store'
-import { useAutomationStore } from '@renderer/stores/automation-store'
 import { useIdeStore } from '@renderer/stores/ide-store'
 import { MusicPlayerHost } from '@renderer/components/music/MusicPlayerHost'
 import { TimerHost } from '@renderer/components/timer/TimerHost'
@@ -102,8 +101,6 @@ export default function App(): React.JSX.Element {
     if (!isReady) return
     void useDeveloperIntelligenceStore.getState().loadSettings()
     void useMusicStore.getState().bootstrap()
-    void useAutomationStore.getState().load()
-    useAutomationStore.getState().subscribe()
     const stopUsage = startUsageSync()
     const stopPtyWatch = startPtyActivityWatch()
     const stopResources = startResourcePolicies()

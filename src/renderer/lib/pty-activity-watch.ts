@@ -58,7 +58,7 @@ function handleSecretaryEvent(event: SecretaryEvent): void {
     projectId: event.projectId,
     panelId: `secretary:${event.runId}`,
     projectName: project.name,
-    title: 'Developer Secretary',
+    title: 'Manager',
     outcome: event.type === 'run-report' ? 'done' : 'error'
   })
 }

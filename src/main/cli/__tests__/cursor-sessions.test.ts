@@ -20,7 +20,10 @@ vi.mock('../path-validator', () => ({
 vi.mock('../../accounts/profile-manager', () => ({ prepareAuthProfileLaunch: async () => ({ ok: true, ready: true }),
   getAuthProfileEnv: (_kind: string, id: string) => ({ APPDATA: `profile-${id}`, CURSOR_API_KEY: '' }) }))
 vi.mock('../../accounts/antigravity-logout', () => ({ logoutAntigravityCli: vi.fn() }))
-vi.mock('../../accounts/antigravity-credential', () => ({ markAntigravitySessionAccount: vi.fn() }))
+vi.mock('../../accounts/antigravity-credential', () => ({
+  markAntigravitySessionAccount: vi.fn(),
+  finishAntigravityFreshLogin: vi.fn()
+}))
 vi.mock('../../accounts/cursor-profile', () => ({ withCursorAccountLock: (_id: string, task: () => Promise<unknown>) => task() }))
 vi.mock('../pty-host/client', () => ({
   ptyHostClient: {

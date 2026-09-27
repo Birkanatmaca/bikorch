@@ -85,6 +85,9 @@ import {
   type DeveloperIntelligenceSettings,
   type DeveloperIntelligenceStats,
   type DeveloperMemory,
+  type DeveloperSkill,
+  type SkillDraft,
+  type SkillUpdate,
   type DeveloperMetrics,
   type MemoryContextPackage,
   type MemoryContextRequest,
@@ -348,6 +351,11 @@ export interface DeveloperIntelligenceApi {
   listPrompts: (filter?: PromptHistoryFilter) => Promise<PromptHistoryPage>
   deletePrompts: (ids: string[] | 'all') => Promise<{ removed: number }>
   getMetrics: (request: MetricsRequest) => Promise<DeveloperMetrics>
+  listSkills: () => Promise<DeveloperSkill[]>
+  createSkill: (draft: SkillDraft) => Promise<DeveloperSkill | null>
+  updateSkill: (id: string, updates: SkillUpdate) => Promise<DeveloperSkill | null>
+  deleteSkill: (id: string) => Promise<{ ok: boolean }>
+  importSkill: () => Promise<{ ok: true; skills: DeveloperSkill[] } | { ok: false; canceled: true }>
   listMemories: () => Promise<DeveloperMemory[]>
   createMemory: (draft: MemoryDraft) => Promise<DeveloperMemory | null>
   updateMemory: (id: string, updates: MemoryUpdate) => Promise<DeveloperMemory | null>
@@ -571,6 +579,11 @@ const developerIntelligenceApi: DeveloperIntelligenceApi = {
   listPrompts: (filter) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.LIST_PROMPTS, filter ?? {}),
   deletePrompts: (ids) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.DELETE_PROMPTS, ids),
   getMetrics: (request) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.GET_METRICS, request),
+  listSkills: () => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.LIST_SKILLS),
+  createSkill: (draft) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.CREATE_SKILL, draft),
+  updateSkill: (id, updates) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.UPDATE_SKILL, { id, updates }),
+  deleteSkill: (id) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.DELETE_SKILL, id),
+  importSkill: () => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.IMPORT_SKILL),
   listMemories: () => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.LIST_MEMORIES),
   createMemory: (draft) => ipcRenderer.invoke(DEVELOPER_INTELLIGENCE_IPC.CREATE_MEMORY, draft),
   updateMemory: (id, updates) =>

@@ -64,7 +64,7 @@ export function SecretarySettings(): React.JSX.Element {
   }
 
   const disconnect = async (): Promise<void> => {
-    if (!window.confirm('Disconnect Developer Secretary and remove the saved API key?')) return
+    if (!window.confirm('Disconnect Manager and remove the saved API key?')) return
     if (await clearKey()) setApiKey('')
   }
 
@@ -75,9 +75,9 @@ export function SecretarySettings(): React.JSX.Element {
     <div className="secretary-profile">
       <section className="secretary-profile-hero">
         <div className="secretary-profile-copy">
-          <span className="secretary-profile-eyebrow">Workspace assistant</span>
-          <h3>Developer Secretary</h3>
-          <p>Plans work and delegates it to your open CLI agents.</p>
+          <span className="secretary-profile-eyebrow">Workspace manager</span>
+          <h3>Manager</h3>
+          <p>Knows you from memory and runs the CLI work from brief to result.</p>
         </div>
         <SecretaryAvatar mood="working" variant="profile" />
         <span className={settings.configured ? 'secretary-profile-status is-ready' : 'secretary-profile-status'}>
@@ -92,7 +92,7 @@ export function SecretarySettings(): React.JSX.Element {
         <article><span className="secretary-usage-glyph">OUT</span><span>Output</span><strong>{formatCount(usage.outputTokens)}</strong></article>
       </div>
 
-      <SectionCard title="Usage & cost" description="Measured from Developer Secretary API responses." className="mt-2.5">
+      <SectionCard title="Usage & cost" description="Measured from Manager API responses." className="mt-2.5">
         <div className="secretary-cost-summary">
           <div>
             <CircleDollarSign className="h-4 w-4" />
@@ -118,7 +118,7 @@ export function SecretarySettings(): React.JSX.Element {
         </button>
       </SectionCard>
 
-      <SectionCard title="OpenAI connection" description="Used only for planning. CLI credentials stay separate." className="mt-2.5">
+      <SectionCard title="OpenAI connection" description="Used by Manager to plan and run work. CLI credentials stay separate." className="mt-2.5">
         <form onSubmit={(event) => void submit(event)} className="secretary-profile-form">
           <label>
             <span><KeyRound className="h-3 w-3" /> API key</span>
@@ -141,7 +141,7 @@ export function SecretarySettings(): React.JSX.Element {
             />
           </label>
           <p className="secretary-cost-note">
-            This is only the Secretary planner model. Type the identifier you want, such as gpt-5 or gpt-5.6-luna. Cursor CLI uses its own account and model.
+            This is only the Manager model. Type the identifier you want, such as gpt-5 or gpt-5.6-luna. Each CLI still uses its own account and model.
           </p>
           <div className="secretary-security-note">
             <ShieldCheck className="h-3.5 w-3.5" />

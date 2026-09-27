@@ -10,7 +10,7 @@ export function parseAiMemorySuggestions(raw: unknown, promptCount: number): Mem
   if (!Array.isArray(items)) return []
   const seen = new Set<string>()
   const accepted: MemoryCandidate[] = []
-  for (const item of items.slice(0, 12)) {
+  for (const item of items) {
     if (!item || typeof item !== 'object') continue
     const value = item as Record<string, unknown>
     if (typeof value['category'] !== 'string' || value['category'] === 'About me' || !MEMORY_CATEGORIES.includes(value['category'] as typeof MEMORY_CATEGORIES[number])) continue
@@ -33,7 +33,6 @@ export function parseAiMemorySuggestions(raw: unknown, promptCount: number): Mem
       confidence: Math.min(0.85, 0.55 + indices.length * 0.05),
       evidenceCount: indices.length
     })
-    if (accepted.length >= 6) break
   }
   return accepted
 }

@@ -2,6 +2,7 @@ import { buttonStyles } from '@renderer/components/ui/Button'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertCircle,
+  LogOut,
   Pencil,
   Plus,
   RefreshCw,
@@ -14,6 +15,7 @@ import {
   type AiAccount
 } from '@shared/contracts/accounts'
 import type { CliUsageInfo, CliUsageKind, CliUsageWindow } from '@shared/contracts/usage'
+import { cleanCliLabel } from '@shared/terminal-text'
 import type { SubscriptionRecord } from '@shared/contracts/persistence'
 import { getCliLogo } from '@renderer/lib/cli-logos'
 import {
@@ -84,7 +86,7 @@ function usageColor(remaining: number): string {
   return '#3ccb7f'
 }
 
-function UsageMeter({
+function UsageRing({
   remaining,
   label,
   name,
@@ -98,22 +100,32 @@ function UsageMeter({
   const left = remaining === null ? null : Math.max(0, Math.min(100, remaining))
   const shown = left === null ? null : display === 'used' ? 100 - left : left
   const color = left === null ? '#3a414c' : usageColor(left)
+  const size = 42
+  const stroke = 3
+  const radius = (size - stroke) / 2
+  const circumference = 2 * Math.PI * radius
+  const progress = shown === null ? 0 : (shown / 100) * circumference
 
   return (
-    <div className="account-meter" title={label}>
-      {name ? <span className="account-meter-name">{name}</span> : null}
-      <div className="account-meter-track">
-        <div
-          className="account-meter-fill"
-          style={{
-            width: `${shown ?? 0}%`,
-            background: color
-          }}
-        />
-      </div>
-      <span className="account-meter-value" style={{ color: shown === null ? undefined : color }}>
-        {shown === null ? '—' : Math.round(shown)}
+    <div className="account-ring" title={label}>
+      <span className="account-ring-dial">
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
+          <circle className="account-ring-track" cx={size / 2} cy={size / 2} r={radius} strokeWidth={stroke} />
+          <circle
+            className="account-ring-value"
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke={color}
+            strokeWidth={stroke}
+            strokeDasharray={`${progress} ${circumference - progress}`}
+          />
+        </svg>
+        <span className="account-ring-figure" style={{ color: shown === null ? undefined : color }}>
+          {shown === null ? '—' : Math.round(shown)}
+        </span>
       </span>
+      {name ? <span className="account-ring-name">{name}</span> : null}
     </div>
   )
 }
@@ -174,8 +186,8 @@ function AccountForm({
   const updateAccount = useAiAccountsStore((state) => state.updateAccount)
   const [draft, setDraft] = useState<AiAccountDraft>(() => ({
     kind: account.kind,
-    name: account.name,
-    email: account.email,
+    name: cleanCliLabel(account.name),
+    email: cleanCliLabel(account.email),
     plan: account.plan,
     note: account.note
   }))
@@ -305,10 +317,12 @@ function AccountCard({
   onEdit: () => void
   onRemove: () => void
 }): React.JSX.Element {
+  const accountName = cleanCliLabel(account.name)
+  const accountEmail = cleanCliLabel(account.email)
   const usageBelongsToAccount =
-    !account.email ||
+    !accountEmail ||
     !provider?.accountEmail ||
-    account.email.trim().toLowerCase() === provider.accountEmail.trim().toLowerCase()
+    accountEmail.toLowerCase() === cleanCliLabel(provider.accountEmail).toLowerCase()
   const liveUsage = account.profileReady && provider?.status === 'available' && usageBelongsToAccount &&
     (account.kind !== 'cursor' || provider.identityVerified === true)
   const meters: { remaining: number; label: string; name?: string; display?: 'remaining' | 'used' }[] = []
@@ -327,12 +341,20 @@ function AccountCard({
   if (liveUsage && provider?.secondary) {
     meters.push(meterFromWindow(provider.secondary, showUsed))
   }
-  const displayLine = [account.email || undefined, account.plan || provider?.planType || undefined]
-    .filter(Boolean)
-    .join(' · ')
+  const plan = account.plan || provider?.planType || ''
   const subscription = subscriptions[0]
   const renewalDate = formatPlanRenewal(provider?.subscriptionRenewsAt ?? subscription?.renewalDate)
+  const planDetail = [
+    subscription ? formatSubscriptionMoney(subscription) : undefined,
+    renewalDate ? `Renews ${renewalDate}` : undefined
+  ].filter(Boolean).join(' · ')
   const actionLabel = !account.profileReady ? 'Login' : isActive ? 'Open' : 'Use'
+  const rings = meters.slice(0, 2)
+  const usageHint = isChecking
+    ? 'Checking this account…'
+    : !account.profileReady
+      ? 'Login to connect this account.'
+      : provider?.detail || 'Usage has not been checked yet.'
 
   return (
     <article
@@ -342,29 +364,18 @@ function AccountCard({
         isRemoving && 'is-removing'
       )}
     >
-      <div className="account-card-top">
-        <div className="min-w-0 flex-1">
-          <div className="account-card-title">
-            <span className={cn('account-status-dot', account.profileReady ? 'is-ready' : 'is-wait', isActive && 'is-live')} />
-            <p>{account.name}</p>
-          </div>
-          {displayLine ? <p className="account-card-meta">{displayLine}</p> : null}
+      <div className="account-card-copy">
+        <div className="account-card-title">
+          <span className={cn('account-status-dot', account.profileReady ? 'is-ready' : 'is-wait', isActive && 'is-live')} />
+          <p>{accountName}</p>
         </div>
-        <button
-          type="button"
-          onClick={onOpen}
-          disabled={isRemoving}
-          className="account-card-go"
-          title={actionLabel}
-        >
-          {actionLabel}
-        </button>
+        <p className="account-card-email">{accountEmail || 'No email'}</p>
+        <p className="account-card-plan" title={planDetail || undefined}>{plan || 'No plan'}</p>
       </div>
-
-      <div className="account-card-usage">
-        {meters.length > 0 ? (
-          meters.map((meter, index) => (
-            <UsageMeter
+      <div className="account-rings" role="status">
+        {rings.length > 0 ? (
+          rings.map((meter, index) => (
+            <UsageRing
               key={`${meter.name ?? meter.label}-${index}`}
               remaining={meter.remaining}
               label={meter.label}
@@ -373,43 +384,34 @@ function AccountCard({
             />
           ))
         ) : (
-          <UsageMeter remaining={null} label={isChecking ? 'Checking…' : account.profileReady ? provider?.detail || 'No usage yet' : 'Login required'} />
+          <UsageRing remaining={null} label={usageHint} name="Usage" />
         )}
       </div>
-      {account.kind === 'cursor' && meters.length === 0 && (
-        <p className="mt-1 text-[10px] text-text-muted" role="status">
-          {isChecking ? 'Checking this account…' : !account.profileReady ? 'Login to connect this account.' : provider?.detail || 'Usage has not been checked yet.'}
-        </p>
-      )}
-
-      <div className="account-card-foot">
-        {subscription || renewalDate ? (
-          <span className="account-card-price">
-            {[subscription ? formatSubscriptionMoney(subscription) : undefined, renewalDate ? `Renews ${renewalDate}` : undefined]
-              .filter(Boolean)
-              .join(' · ')}
-          </span>
-        ) : (
-          <span />
-        )}
-        <div className="account-card-tools">
-          <button type="button" className="account-card-action" onClick={onCheck} disabled={isRemoving || isChecking || !account.profileReady} title="Check this account usage" aria-label={`Check ${account.name} usage`}>
+      <div className="account-card-tools">
+          <button
+            type="button"
+            onClick={onOpen}
+            disabled={isRemoving}
+            className="account-card-go"
+            title={actionLabel}
+          >
+            {actionLabel}
+          </button>
+          <button type="button" onClick={onCheck} disabled={isRemoving || isChecking || !account.profileReady} title="Check this account usage" aria-label={`Check ${accountName} usage`}>
             <RefreshCw className={cn('h-3 w-3', isChecking && 'animate-spin')} />
-            Check
           </button>
           {account.kind === 'cursor' && account.profileReady && (
-            <button type="button" className="account-card-action" onClick={onLogout} disabled={isRemoving} aria-label={`Logout ${account.name}`}>
-              Logout
+            <button type="button" onClick={onLogout} disabled={isRemoving} title="Log out" aria-label={`Logout ${accountName}`}>
+              <LogOut className="h-3 w-3" />
             </button>
           )}
-          <button type="button" onClick={onEdit} disabled={isRemoving} aria-label={`Edit ${account.name}`}>
+          <button type="button" onClick={onEdit} disabled={isRemoving} title="Edit" aria-label={`Edit ${accountName}`}>
             <Pencil className="h-3 w-3" />
           </button>
-          <button type="button" onClick={onRemove} disabled={isRemoving} aria-label={`Remove ${account.name}`}>
+          <button type="button" onClick={onRemove} disabled={isRemoving} title="Remove" aria-label={`Remove ${accountName}`}>
             <Trash2 className={cn('h-3 w-3', isRemoving && 'animate-pulse')} />
           </button>
         </div>
-      </div>
     </article>
   )
 }
@@ -702,7 +704,7 @@ export function AiAccountsPanel(): React.JSX.Element {
   }
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-app-bg">
+    <div className="account-panel relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-app-bg">
       <div className="account-panel-header shrink-0 border-b border-border px-3 py-2">
         <div className="flex items-center gap-2">
           <h2 className="min-w-0 flex-1 truncate text-xs font-medium text-text-primary">Accounts</h2>
@@ -732,7 +734,7 @@ export function AiAccountsPanel(): React.JSX.Element {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto p-2.5">
+      <div className="min-h-0 w-full min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-2.5">
         {error && (
           <div className="mb-2 flex items-start gap-2 rounded-md border border-error/30 bg-error/10 p-2 text-[10px] text-error">
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />

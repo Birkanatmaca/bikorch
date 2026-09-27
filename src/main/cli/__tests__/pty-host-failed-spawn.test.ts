@@ -28,7 +28,10 @@ vi.mock('../../accounts/profile-manager', () => ({
   getAuthProfileEnv: () => ({})
 }))
 vi.mock('../../accounts/antigravity-logout', () => ({ logoutAntigravityCli: vi.fn() }))
-vi.mock('../../accounts/antigravity-credential', () => ({ markAntigravitySessionAccount: vi.fn() }))
+vi.mock('../../accounts/antigravity-credential', () => ({
+  markAntigravitySessionAccount: vi.fn(),
+  finishAntigravityFreshLogin: vi.fn()
+}))
 vi.mock('../../accounts/cursor-profile', () => ({
   withCursorAccountLock: (_id: string, task: () => Promise<unknown>) => task()
 }))

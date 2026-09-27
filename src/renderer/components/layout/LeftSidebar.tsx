@@ -3,14 +3,13 @@ import { AiAccountsPanel } from '@renderer/components/accounts/AiAccountsPanel'
 import { FileExplorerPanel } from '@renderer/components/file-explorer/FileExplorerPanel'
 import { GitChangesPanel } from '@renderer/components/git/GitChangesPanel'
 import { TasksPanel } from '@renderer/components/tasks/TasksPanel'
+import { MemoryManager } from '@renderer/components/profile/MemoryManager'
 import { ProfilePanel } from '@renderer/components/profile/ProfilePanel'
-import { AutomationPanel } from '@renderer/components/automation/AutomationPanel'
 import { MusicPanel } from '@renderer/components/music/MusicPanel'
 import { TimerPanel } from '@renderer/components/timer/TimerPanel'
 import { SidebarTimerDock } from '@renderer/components/timer/SidebarTimerDock'
 import { cn } from '@renderer/lib/utils'
 import { Button } from '@renderer/components/ui/Button'
-import { ErrorBoundary } from '@renderer/components/ui/ErrorBoundary'
 import type { LeftSidebarView } from '@shared/types'
 
 interface LeftSidebarProps {
@@ -22,9 +21,9 @@ const TITLES: Record<LeftSidebarView, string> = {
   files: 'Files',
   changes: 'Changes',
   accounts: 'CLI accounts',
+  memory: 'Memory',
   tasks: 'Tasks',
   profile: 'Profile',
-  automation: 'Automations',
   music: 'Music',
   timer: 'Timer'
 }
@@ -56,16 +55,14 @@ export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Eleme
         <div className={cn('h-full', view !== 'accounts' && 'hidden')}>
           <AiAccountsPanel />
         </div>
+        <div className={cn('h-full overflow-x-hidden overflow-y-auto p-2.5', view !== 'memory' && 'hidden')}>
+          <MemoryManager />
+        </div>
         <div className={cn('h-full', view !== 'tasks' && 'hidden')}>
           <TasksPanel />
         </div>
         <div className={cn('h-full', view !== 'profile' && 'hidden')}>
           <ProfilePanel visible={view === 'profile'} />
-        </div>
-        <div className={cn('h-full', view !== 'automation' && 'hidden')}>
-          <ErrorBoundary variant="section">
-            <AutomationPanel />
-          </ErrorBoundary>
         </div>
         <div className={cn('h-full', view !== 'music' && 'hidden')}>
           <MusicPanel />

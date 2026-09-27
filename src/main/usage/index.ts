@@ -22,7 +22,8 @@ import {
 import {
   applyAntigravityCredentialsForAccount,
   getAntigravitySessionAccount,
-  hasStoredAntigravityCredentials
+  hasStoredAntigravityCredentials,
+  isAntigravityFreshLoginActive
 } from '../accounts/antigravity-credential'
 import { readCursorAccountUsage } from './cursor'
 import {
@@ -975,21 +976,23 @@ async function readAntigravityAccountUsage(
         }
       }
     } finally {
-      try {
-        const sessionAccountId = getAntigravitySessionAccount()
-        if (sessionAccountId && hasStoredAntigravityCredentials(sessionAccountId)) {
-          await applyAntigravityCredentialsForAccount(sessionAccountId)
-        } else if (previousCredential) {
-          const currentCredential = await readAntigravityCredential()
-          if (currentCredential !== previousCredential) {
-            await writeAntigravityCredential(previousCredential)
+      if (!isAntigravityFreshLoginActive()) {
+        try {
+          const sessionAccountId = getAntigravitySessionAccount()
+          if (sessionAccountId && hasStoredAntigravityCredentials(sessionAccountId)) {
+            await applyAntigravityCredentialsForAccount(sessionAccountId)
+          } else if (previousCredential) {
+            const currentCredential = await readAntigravityCredential()
+            if (currentCredential !== previousCredential) {
+              await writeAntigravityCredential(previousCredential)
+            }
+          } else {
+            const currentCredential = await readAntigravityCredential()
+            if (currentCredential) await deleteAntigravityCredential()
           }
-        } else {
-          const currentCredential = await readAntigravityCredential()
-          if (currentCredential) await deleteAntigravityCredential()
+        } catch (error) {
+          console.error('Could not restore Antigravity credential after usage check:', error)
         }
-      } catch (error) {
-        console.error('Could not restore Antigravity credential after usage check:', error)
       }
     }
 

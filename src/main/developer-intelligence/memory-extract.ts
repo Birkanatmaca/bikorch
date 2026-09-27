@@ -353,12 +353,13 @@ export function rankMemoriesForContext(
 ): MemoryContextPackage {
   const queryTokens = new Set(tokenize(request.query ?? ''))
   const limit = Math.min(20, Math.max(1, Math.floor(request.limit ?? 8)))
-  const scored: Array<MemoryContextItem & { score: number; lastSeenAt: number }> = []
+  const scored: Array<MemoryContextItem & { score: number; lastSeenAt: number; profile: boolean }> = []
 
   for (const memory of memories) {
     if (!memory.enabled) continue
     if (memory.scope === 'project' && (!request.projectId || memory.projectId !== request.projectId)) continue
 
+    const profile = memory.category === 'About me' || (memory.source === 'user' && memory.scope === 'global')
     let score = memory.scope === 'project' && memory.projectId === request.projectId ? 40 : 15
     score += memory.confidence * 10
     if (memory.source === 'user') score += 12
@@ -370,7 +371,7 @@ export function rankMemoriesForContext(
       const haystack = new Set(tokenize(`${memory.category} ${memory.content}`))
       let overlap = 0
       for (const token of queryTokens) if (haystack.has(token)) overlap += 1
-      score += overlap > 0 ? overlap * 12 : -6
+      score += overlap > 0 ? overlap * 12 : request.retainProfile && profile ? 0 : -6
     }
 
     scored.push({
@@ -380,16 +381,20 @@ export function rankMemoriesForContext(
       content: memory.content,
       relevance: Math.round(score),
       score,
-      lastSeenAt: memory.lastSeenAt
+      lastSeenAt: memory.lastSeenAt,
+      profile
     })
   }
 
   scored.sort((a, b) => b.score - a.score || b.lastSeenAt - a.lastSeenAt)
+  const ranked = request.retainProfile
+    ? [...scored.filter((item) => item.profile).slice(0, 4), ...scored.filter((item) => !item.profile)]
+    : scored
 
   const selected: MemoryContextItem[] = []
   let characterCount = 0
-  let truncated = scored.length > limit
-  for (const item of scored) {
+  let truncated = ranked.length > limit
+  for (const item of ranked) {
     if (selected.length >= limit) {
       truncated = true
       break

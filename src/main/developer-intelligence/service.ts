@@ -11,6 +11,10 @@ import {
   type DeveloperIntelligenceSettings,
   type DeveloperIntelligenceStats,
   type DeveloperMemory,
+  type DeveloperSkill,
+  type SkillDraft,
+  type SkillSource,
+  type SkillUpdate,
   type DeveloperMetrics,
   type AgentSessionDetail,
   type AgentSessionListPage,
@@ -41,6 +45,7 @@ import { scanProjectLanguages } from './project-scan'
 import { redactSecrets } from './redaction'
 import { DeveloperIntelligenceStore } from './store'
 import { extractMemoryCandidates, rankMemoriesForContext } from './memory-extract'
+import { normalizeSkillDraft, parseSkillDocument, skillsForContext } from './skills'
 import { pairAgentSessions, parseSessionRecordId, toSessionSummary, uniqueContext } from './session-timeline'
 import { snapshotAgentGit } from '../git/session-snapshot'
 
@@ -692,4 +697,63 @@ function scheduleLocalAnalysis(): void {
     analysisTimer = null
     void analyzeMemories({ range: '30d', projects: listKnownProjects() }).catch(() => undefined)
   }, 2500)
+}
+
+export function listSkills(): DeveloperSkill[] {
+  return getStore()?.listSkills() ?? []
+}
+
+export function createSkill(draft: SkillDraft, source: SkillSource): DeveloperSkill | null {
+  const current = getStore()
+  if (!current) return null
+  const parsed = normalizeSkillDraft(draft)
+  if (!parsed) return null
+  const existing = current.getSkillByName(parsed.name)
+  const now = Date.now()
+  const skill: DeveloperSkill = {
+    id: existing?.id ?? randomUUID(),
+    ...parsed,
+    source: existing?.source ?? source,
+    enabled: true,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now
+  }
+  current.upsertSkill(skill)
+  return skill
+}
+
+export function updateSkill(id: string, updates: SkillUpdate): DeveloperSkill | null {
+  const current = getStore()
+  if (!current || !id) return null
+  const existing = current.listSkills().find((skill) => skill.id === id)
+  if (!existing) return null
+  const parsed = normalizeSkillDraft({
+    name: updates.name ?? existing.name,
+    description: updates.description ?? existing.description,
+    instructions: updates.instructions ?? existing.instructions
+  })
+  if (!parsed) return null
+  const skill: DeveloperSkill = {
+    ...existing,
+    ...parsed,
+    enabled: typeof updates.enabled === 'boolean' ? updates.enabled : existing.enabled,
+    updatedAt: Date.now()
+  }
+  current.upsertSkill(skill)
+  return skill
+}
+
+export function deleteSkill(id: string): boolean {
+  return getStore()?.deleteSkill(id) ?? false
+}
+
+export function importSkillsFromText(text: string): DeveloperSkill[] {
+  return parseSkillDocument(text).flatMap((draft) => {
+    const skill = createSkill(draft, 'file')
+    return skill ? [skill] : []
+  })
+}
+
+export function listSkillsForManager(query: string): DeveloperSkill[] {
+  return skillsForContext(listSkills(), query)
 }

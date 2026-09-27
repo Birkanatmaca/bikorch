@@ -1,11 +1,16 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron'
-import { writeFile } from 'fs/promises'
-import { DEVELOPER_INTELLIGENCE_IPC } from '@shared/contracts/developer-intelligence'
+import { readFile, writeFile } from 'fs/promises'
+import { DEVELOPER_INTELLIGENCE_IPC, type SkillUpdate } from '@shared/contracts/developer-intelligence'
 import {
   analyzeMemories,
   buildExport,
   clearData,
   createMemory,
+  createSkill,
+  deleteSkill,
+  importSkillsFromText,
+  listSkills,
+  updateSkill,
   deleteMemory,
   deletePrompts,
   getDeveloperIntelligenceSettings,
@@ -35,6 +40,7 @@ import {
   parseSessionListRequest
 } from '../developer-intelligence/validation'
 import { learnDeveloperMemoriesWithAi } from '../secretary/service'
+import { normalizeSkillDraft } from '../developer-intelligence/skills'
 
 export function registerDeveloperIntelligenceHandlers(): void {
   ipcMain.handle(DEVELOPER_INTELLIGENCE_IPC.RECORD_EVENT, (_event, payload: unknown) => {
@@ -63,6 +69,45 @@ export function registerDeveloperIntelligenceHandlers(): void {
     const request = parseMetricsRequest(payload)
     if (!request) throw new Error('Invalid metrics request')
     return getMetrics(request)
+  })
+
+  ipcMain.handle(DEVELOPER_INTELLIGENCE_IPC.LIST_SKILLS, () => listSkills())
+
+  ipcMain.handle(DEVELOPER_INTELLIGENCE_IPC.CREATE_SKILL, (_event, payload: unknown) => {
+    const draft = normalizeSkillDraft(payload)
+    if (!draft) throw new Error('Invalid skill')
+    return createSkill(draft, 'user')
+  })
+
+  ipcMain.handle(DEVELOPER_INTELLIGENCE_IPC.UPDATE_SKILL, (_event, payload: unknown) => {
+    if (!payload || typeof payload !== 'object') throw new Error('Invalid skill update')
+    const body = payload as { id?: unknown; updates?: unknown }
+    if (typeof body.id !== 'string' || !body.id) throw new Error('Invalid skill update')
+    const updates = body.updates
+    if (!updates || typeof updates !== 'object') throw new Error('Invalid skill update')
+    return updateSkill(body.id, updates as SkillUpdate)
+  })
+
+  ipcMain.handle(DEVELOPER_INTELLIGENCE_IPC.DELETE_SKILL, (_event, payload: unknown) => {
+    if (typeof payload !== 'string' || payload.length === 0 || payload.length > 200) {
+      throw new Error('Invalid skill id')
+    }
+    return { ok: deleteSkill(payload) }
+  })
+
+  ipcMain.handle(DEVELOPER_INTELLIGENCE_IPC.IMPORT_SKILL, async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options = {
+      title: 'Import skill',
+      filters: [{ name: 'Skill', extensions: ['md', 'json', 'txt'] }],
+      properties: ['openFile'] as const
+    }
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    if (result.canceled || !result.filePaths[0]) return { ok: false as const, canceled: true as const }
+    const text = await readFile(result.filePaths[0], 'utf8')
+    const skills = importSkillsFromText(text)
+    if (skills.length === 0) throw new Error('No skill found in that file')
+    return { ok: true as const, skills }
   })
 
   ipcMain.handle(DEVELOPER_INTELLIGENCE_IPC.LIST_MEMORIES, () => listMemories())

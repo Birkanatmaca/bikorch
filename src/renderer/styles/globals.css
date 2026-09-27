@@ -242,18 +242,6 @@ body {
   overflow: hidden;
 }
 
-.welcome-ambient::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(to right, rgb(255 255 255 / 0.035) 1px, transparent 1px),
-    linear-gradient(to bottom, rgb(255 255 255 / 0.035) 1px, transparent 1px);
-  background-size: 64px 64px;
-  -webkit-mask-image: radial-gradient(ellipse 62% 58% at 50% 42%, #000 0%, transparent 72%);
-  mask-image: radial-gradient(ellipse 62% 58% at 50% 42%, #000 0%, transparent 72%);
-}
-
 .welcome-ambient::after {
   content: '';
   position: absolute;

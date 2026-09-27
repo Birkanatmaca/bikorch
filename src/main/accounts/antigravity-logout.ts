@@ -1,4 +1,7 @@
 import * as pty from '@homebridge/node-pty-prebuilt-multiarch'
+import { existsSync, rmSync } from 'fs'
+import { homedir } from 'os'
+import { join } from 'path'
 import { resolveSpawnConfigCandidates, spawnEnv } from '../cli/adapters'
 import {
   deleteAntigravityCredential,
@@ -131,14 +134,26 @@ function runAntigravityLogoutCommand(): Promise<void> {
   })
 }
 
-export async function logoutAntigravityCli(): Promise<void> {
-  if (await credentialCleared()) return
-
-  try {
-    await runAntigravityLogoutCommand()
-  } catch {
-    // Keychain cleanup below is the fallback if the CLI command does not finish.
+function clearLocalAntigravitySessionFiles(): void {
+  const gemini = join(homedir(), '.gemini')
+  for (const path of [
+    join(gemini, 'oauth_creds.json'),
+    join(gemini, 'google_accounts.json'),
+    join(gemini, 'antigravity-cli', 'antigravity-oauth-token')
+  ]) {
+    if (!existsSync(path)) continue
+    rmSync(path, { force: true })
   }
+}
 
-  await deleteAntigravityCredential()
+export async function logoutAntigravityCli(): Promise<void> {
+  if (!(await credentialCleared())) {
+    try {
+      await runAntigravityLogoutCommand()
+    } catch {
+      // Keychain cleanup below is the fallback if the CLI command does not finish.
+    }
+    await deleteAntigravityCredential()
+  }
+  clearLocalAntigravitySessionFiles()
 }

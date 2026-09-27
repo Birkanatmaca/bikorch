@@ -17,7 +17,10 @@ import {
 import { withAntigravityCredentialLock } from '../accounts/credential-lock'
 import { withCursorAccountLock } from '../accounts/cursor-profile'
 import { logoutAntigravityCli } from '../accounts/antigravity-logout'
-import { markAntigravitySessionAccount } from '../accounts/antigravity-credential'
+import {
+  finishAntigravityFreshLogin,
+  markAntigravitySessionAccount
+} from '../accounts/antigravity-credential'
 import { recordLog } from '../logs'
 import { ptyHostClient } from './pty-host/client'
 import { appendOutputBuffer } from './pty-host/session-store'
@@ -65,6 +68,7 @@ class PtyManager {
   private observers = new Set<(event: PtyEvent) => void>()
   private hostEventsBound = false
   private hostReleaseTimer: ReturnType<typeof setTimeout> | null = null
+  private createInFlight = 0
 
   runtimeStats(): { bound: number; durable: number; inProcess: number } {
     let durable = 0
@@ -116,10 +120,17 @@ class PtyManager {
 
   async create(request: PtyCreateRequest, webContents: WebContents): Promise<PtyCreateResponse> {
     this.bindHostEvents()
-    if (request.kind === 'cursor' && request.accountId) {
-      return withCursorAccountLock(request.accountId, () => this.createSession(request, webContents))
+    this.createInFlight += 1
+    this.clearHostRelease()
+    try {
+      if (request.kind === 'cursor' && request.accountId) {
+        return await withCursorAccountLock(request.accountId, () => this.createSession(request, webContents))
+      }
+      return await this.createSession(request, webContents)
+    } finally {
+      this.createInFlight -= 1
+      this.scheduleHostRelease()
     }
-    return this.createSession(request, webContents)
   }
 
   private bindHostEvents(): void {
@@ -138,6 +149,7 @@ class PtyManager {
       }
       if (event.type === 'exit') {
         this.sessions.delete(event.sessionId)
+        if (session.kind === 'antigravity') finishAntigravityFreshLogin(session.accountId)
         this.emit(session.webContents, {
           type: 'exit',
           sessionId: event.sessionId,
@@ -330,6 +342,9 @@ class PtyManager {
         return { sessionId, status: 'error', error: message, kind }
       }
       profileEnv = getAuthProfileEnv(kind, request.accountId)
+      if (kind === 'antigravity' && request.launchMode === 'login') {
+        profileEnv = {}
+      }
     }
     const launchArgs = cliLaunchArgs(kind, request.launchMode ?? 'normal', request.cliModel)
     const spawnCwd = resolveWindowsSpawnPath(cwd)
@@ -384,7 +399,7 @@ class PtyManager {
           if (hosted.outputBuffer) {
             this.emit(webContents, { type: 'data', sessionId, data: hosted.outputBuffer })
           }
-          if (kind === 'antigravity') {
+          if (kind === 'antigravity' && request.launchMode !== 'login') {
             markAntigravitySessionAccount(request.accountId ?? null)
           }
           recordLog(
@@ -442,7 +457,7 @@ class PtyManager {
 
         this.sessions.set(sessionId, session)
         this.emit(webContents, { type: 'status', sessionId, status: 'running' })
-        if (kind === 'antigravity') {
+        if (kind === 'antigravity' && request.launchMode !== 'login') {
           markAntigravitySessionAccount(request.accountId ?? null)
         }
         recordLog('info', `${getKindLabel(kind)} session started (${sessionId})`, 'pty')
@@ -456,6 +471,7 @@ class PtyManager {
           const current = this.sessions.get(sessionId)
           if (!current || current.process !== shellProcess) return
           this.sessions.delete(sessionId)
+          if (current.kind === 'antigravity') finishAntigravityFreshLogin(current.accountId)
           this.emit(current.webContents, { type: 'exit', sessionId, exitCode })
           this.emit(current.webContents, { type: 'status', sessionId, status: 'stopped' })
           recordLog(
@@ -576,14 +592,14 @@ class PtyManager {
   }
 
   private scheduleHostRelease(): void {
-    if (this.hasDurableSessions()) {
+    if (this.hasDurableSessions() || this.createInFlight > 0) {
       this.clearHostRelease()
       return
     }
     this.clearHostRelease()
     this.hostReleaseTimer = setTimeout(() => {
       this.hostReleaseTimer = null
-      if (this.hasDurableSessions()) return
+      if (this.hasDurableSessions() || this.createInFlight > 0) return
       ptyHostClient.disconnect()
     }, HOST_RELEASE_MS)
   }

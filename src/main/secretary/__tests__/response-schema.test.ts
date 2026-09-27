@@ -27,7 +27,7 @@ describe('Secretary response schemas', () => {
       required?: string[]
       properties?: { plan?: { anyOf?: unknown[] } }
     }
-    expect(schema.required).toEqual(['reply', 'openKinds', 'plan', 'contextSummary'])
+    expect(schema.required).toEqual(['reply', 'openKinds', 'plan', 'contextSummary', 'skills'])
     expect(schema.properties?.plan?.anyOf).toContainEqual({ type: 'null' })
   })
 

@@ -13,9 +13,9 @@ const AVATAR_SOURCE: Record<SecretaryAvatarMood, string> = {
 }
 
 const AVATAR_LABEL: Record<SecretaryAvatarMood, string> = {
-  idle: 'Secretary ready',
-  thinking: 'Secretary thinking',
-  working: 'Secretary tracking the plan'
+  idle: 'Manager ready',
+  thinking: 'Manager thinking',
+  working: 'Manager running the plan'
 }
 
 export function SecretaryAvatar({

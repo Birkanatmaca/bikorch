@@ -207,6 +207,16 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): React.JS
         }
       },
       {
+        id: 'show-memory',
+        label: 'Show Memory',
+        group: 'Workspace',
+        keywords: 'memory brain manager profile sidebar',
+        action: () => {
+          if (projectId) selectLeftSidebar(projectId, 'memory')
+          onClose()
+        }
+      },
+      {
         id: 'show-profile',
         label: 'Show Profile',
         group: 'Workspace',

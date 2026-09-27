@@ -367,7 +367,8 @@ export function parseContextRequest(payload: unknown): MemoryContextRequest | nu
   return {
     ...(optionalId(payload['projectId']) ? { projectId: optionalId(payload['projectId']) } : {}),
     ...(query ? { query } : {}),
-    ...(limit !== null ? { limit: Math.min(20, Math.max(1, Math.floor(limit))) } : {})
+    ...(limit !== null ? { limit: Math.min(20, Math.max(1, Math.floor(limit))) } : {}),
+    ...(payload['retainProfile'] === true ? { retainProfile: true } : {})
   }
 }
 

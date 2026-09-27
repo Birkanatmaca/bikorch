@@ -9,7 +9,7 @@ export interface SecretaryMemoryFact {
 
 /** The context preview API returns candidates even when injection is off; gate here. */
 export function secretaryMemoryContext(projectId: string, query: string): SecretaryMemoryFact[] {
-  const context = getMemoryContext({ projectId, query, limit: 8 })
+  const context = getMemoryContext({ projectId, query, limit: 14, retainProfile: true })
   if (!context.injectionEnabled) return []
   return context.memories.map((item) => ({
     category: sanitizeSecretaryModelText(item.category, 80),

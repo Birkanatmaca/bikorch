@@ -13,7 +13,12 @@ describe('Secretary developer memory context', () => {
       { scope: 'global', category: 'Workflow', content: 'Private preference' }
     ] })
     expect(secretaryMemoryContext('project-1', 'review')).toEqual([])
-    expect(getMemoryContext).toHaveBeenCalledWith({ projectId: 'project-1', query: 'review', limit: 8 })
+    expect(getMemoryContext).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      query: 'review',
+      limit: 14,
+      retainProfile: true
+    })
   })
 
   it('redacts and bounds enabled facts before adding them to the model request', () => {

@@ -22,6 +22,7 @@ import {
   DEFAULT_CHAT_RIGHT_SIZE,
   clampWorkspaceScale,
   type LeftSidebarView,
+  WIDE_LEFT_SIDEBAR_VIEWS,
   WORKSPACE_SCALE_DEFAULT,
   WORKSPACE_SCALE_STEP,
   type OrchestratorRect,
@@ -1104,10 +1105,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
     const panels = sanitizeWorkspacePanels(workspace.panels)
     const wideSidebarSize = 24
-    const nextLeftSize =
-      view === 'accounts' || view === 'profile' || view === 'automation'
-        ? Math.max(workspace.layout.leftSize ?? 14, wideSidebarSize)
-        : workspace.layout.leftSize
+    const wide = (WIDE_LEFT_SIDEBAR_VIEWS as readonly string[]).includes(view)
+    const nextLeftSize = wide
+      ? Math.max(workspace.layout.leftSize ?? 14, wideSidebarSize)
+      : workspace.layout.leftSize
     set({
       workspaces: {
         ...get().workspaces,
@@ -1118,8 +1119,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
             ...workspace.layout,
             leftCollapsed: false,
             leftSidebarView: view,
-            ...((view === 'accounts' || view === 'profile' || view === 'automation') &&
-            nextLeftSize !== workspace.layout.leftSize
+            ...(wide && nextLeftSize !== workspace.layout.leftSize
               ? { leftSize: nextLeftSize }
               : {})
           }

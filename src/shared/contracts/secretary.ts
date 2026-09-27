@@ -142,6 +142,8 @@ export interface SecretaryChatResponse {
   runStatus?: SecretaryRunStatus
   /** Version of the persisted plan when a run was created. */
   planRevision?: number
+  /** Set when this turn saved or updated developer skills. */
+  savedSkills?: { id: string; name: string }[]
 }
 
 export interface SecretaryThread {

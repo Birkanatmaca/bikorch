@@ -47,17 +47,29 @@ export function parseJsonObject(text: string): unknown {
   return null
 }
 
-export function readSecretaryReply(text: string): { reply: string; planRaw: unknown; openKindsRaw: unknown; contextSummary: string | null } {
+export function readSecretaryReply(text: string): {
+  reply: string
+  planRaw: unknown
+  openKindsRaw: unknown
+  contextSummary: string | null
+  skillsRaw: unknown[]
+} {
   const parsed = parseJsonObject(text)
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     const body = parsed as Record<string, unknown>
     const reply = typeof body.reply === 'string' ? body.reply.trim() : ''
+    const skillsRaw = Array.isArray(body.skills)
+      ? body.skills
+      : body.skill && typeof body.skill === 'object'
+        ? [body.skill]
+        : []
     return {
       reply: reply || (typeof body.overview === 'string' ? body.overview.trim() : '') || text.trim(),
       planRaw: body.plan ?? (Array.isArray(body.assignments) ? parsed : null),
       openKindsRaw: body.openKinds ?? body.openPanels ?? null,
-      contextSummary: typeof body.contextSummary === 'string' ? body.contextSummary.trim() : null
+      contextSummary: typeof body.contextSummary === 'string' ? body.contextSummary.trim() : null,
+      skillsRaw
     }
   }
-  return { reply: text.trim(), planRaw: null, openKindsRaw: null, contextSummary: null }
+  return { reply: text.trim(), planRaw: null, openKindsRaw: null, contextSummary: null, skillsRaw: [] }
 }

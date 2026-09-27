@@ -1,6 +1,6 @@
 import { app, Menu, nativeImage, Tray } from 'electron'
 import { APP_DISPLAY_NAME, resolveAppIconPath } from '../app-branding'
-import { getAutomationSettings, getAutomationStatus, updateAutomationSettings } from '../automation/service'
+import { getAutomationSettings, updateAutomationSettings } from '../automation/service'
 import { markQuitting, showMainWindow } from './background'
 
 let tray: Tray | null = null
@@ -19,15 +19,6 @@ function applyLoginItemSettings(enabled: boolean): void {
   }
 }
 
-function statusLabel(): string {
-  try {
-    const status = getAutomationStatus()
-    return `Automations: ${status.running} running · ${status.enabled} enabled`
-  } catch {
-    return 'Automations: unavailable'
-  }
-}
-
 function buildMenu(): Menu {
   let settings
   try {
@@ -38,7 +29,6 @@ function buildMenu(): Menu {
 
   return Menu.buildFromTemplate([
     { label: `Open ${APP_DISPLAY_NAME}`, click: () => showMainWindow() },
-    { label: statusLabel(), enabled: false },
     { type: 'separator' },
     {
       label: 'Run Bikorch in background',

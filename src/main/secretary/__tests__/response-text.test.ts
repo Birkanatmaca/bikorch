@@ -51,7 +51,8 @@ describe('readSecretaryReply', () => {
       reply: 'Just chatting.',
       planRaw: null,
       openKindsRaw: null,
-      contextSummary: null
+      contextSummary: null,
+      skillsRaw: []
     })
   })
 

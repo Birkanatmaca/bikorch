@@ -55,10 +55,23 @@ export const SECRETARY_CHAT_RESPONSE_FORMAT: SecretaryResponseFormat = {
   schema: {
     type: 'object',
     additionalProperties: false,
-    required: ['reply', 'openKinds', 'plan', 'contextSummary'],
+    required: ['reply', 'openKinds', 'plan', 'contextSummary', 'skills'],
     properties: {
       reply: { type: 'string' },
       contextSummary: { type: 'string' },
+      skills: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['name', 'description', 'instructions'],
+          properties: {
+            name: { type: 'string' },
+            description: { type: 'string' },
+            instructions: { type: 'string' }
+          }
+        }
+      },
       openKinds: {
         type: 'array',
         items: { type: 'string', enum: AI_ACCOUNT_KINDS }

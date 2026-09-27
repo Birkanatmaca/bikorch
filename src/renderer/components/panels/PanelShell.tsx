@@ -465,7 +465,7 @@ export function PanelShell({
               </span>
             )}
             {panelRole === 'secretary' && (
-              <span className="iso-mode-chip is-isolated" title="Secretary tasks always use a separate workspace">
+              <span className="iso-mode-chip is-isolated" title="Manager tasks always use a separate workspace">
                 Separate
               </span>
             )}

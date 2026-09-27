@@ -1,5 +1,4 @@
-import { ArrowUpRight, Command, FolderOpen, Plus, Terminal } from 'lucide-react'
-import { useActiveProject } from '@renderer/hooks/use-active-project'
+import { ChevronRight, Command, Terminal } from 'lucide-react'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { getCliLogo } from '@renderer/lib/cli-logos'
 import type { PanelType, PanelZone } from '@shared/types'
@@ -8,7 +7,6 @@ import { ContextMenu } from '@renderer/components/ui/ContextMenu'
 import { useOrchestratorContextMenu } from '@renderer/components/workspace/use-orchestrator-context-menu'
 import { useRef } from 'react'
 import { isMacOS } from '@renderer/lib/electron-api'
-import { Button } from '@renderer/components/ui/Button'
 
 const MAIN_ZONE: PanelZone = 'center'
 
@@ -25,7 +23,7 @@ const LAUNCHERS: Array<{
   { type: 'codex', label: 'Codex', hint: 'CLI' }
 ]
 
-function LaunchTile({
+function LaunchRow({
   type,
   label,
   hint,
@@ -39,24 +37,25 @@ function LaunchTile({
   const logo = type === 'terminal' ? null : getCliLogo(type)
 
   return (
-    <button type="button" onClick={onClick} className="cli-launch-tile group">
-      <span className="cli-launch-logo-well">
+    <button type="button" onClick={onClick} className="studio-launch-row">
+      <span className="studio-launch-mark">
         {logo ? (
-          <img src={logo} alt="" className="cli-launch-logo" />
+          <img src={logo} alt="" className="studio-launch-logo" />
         ) : (
-          <Terminal className="h-6 w-6 text-primary" />
+          <Terminal className="h-4 w-4 text-primary" />
         )}
       </span>
-      <span className="mt-3 text-[13px] font-medium tracking-tight text-text-primary">{label}</span>
-      <span className="mt-0.5 text-[10px] text-text-muted">{hint}</span>
-      <ArrowUpRight className="cli-launch-arrow" aria-hidden />
+      <span className="studio-launch-copy">
+        <span className="studio-launch-name">{label}</span>
+        <span className="studio-launch-role">{hint}</span>
+      </span>
+      <ChevronRight className="studio-launch-chevron" aria-hidden />
     </button>
   )
 }
 
 export function WorkspaceCenterEmpty(): React.JSX.Element {
   const addPanel = useWorkspaceStore((s) => s.addPanel)
-  const { projectName } = useActiveProject()
   const canvasRef = useRef<HTMLDivElement>(null)
   const { menu, groups, openAt, close } = useOrchestratorContextMenu(
     () => canvasRef.current?.getBoundingClientRect() ?? null
@@ -73,16 +72,9 @@ export function WorkspaceCenterEmpty(): React.JSX.Element {
       onContextMenu={(e) => openAt(e)}
     >
       <div className="studio-launcher-content animate-fade-in">
-        <div className="studio-launcher-heading">
-          <span className="studio-project-tag"><FolderOpen aria-hidden />{projectName ?? 'Workspace'}</span>
-          <span className="home-eyebrow">YOUR TOOLS. YOUR FLOW.</span>
-          <h2>What are we building?</h2>
-          <p>Start a session with your favorite CLI. Make space for the next great idea.</p>
-        </div>
-
-        <div className="studio-launch-grid">
+        <div className="studio-launch-panel">
           {LAUNCHERS.map((item) => (
-            <LaunchTile
+            <LaunchRow
               key={item.type}
               type={item.type}
               label={item.label}
@@ -92,33 +84,24 @@ export function WorkspaceCenterEmpty(): React.JSX.Element {
           ))}
         </div>
 
-        <div className="cli-launch-hints studio-launch-hints">
-          <p>
-            Your workspace, arranged your way
-            <span className="cli-launch-dot" />
+        <div className="studio-launch-footer">
+          <span className="studio-launch-keys">
             <kbd>{isMacOS() ? '⌘' : 'Ctrl'}</kbd>
             <kbd>`</kbd>
-            terminal
-            <span className="cli-launch-dot" />
+            <span>Terminal</span>
+          </span>
+          <span className="studio-launch-footer-actions">
             <button
               type="button"
               onClick={() => window.dispatchEvent(new CustomEvent(ADD_PANEL_MENU_EVENT))}
             >
               Panel menu
             </button>
-          </p>
-        </div>
-
-        <div className="mt-5 flex justify-center">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={openCommandPalette}
-          >
-            <Command className="h-3 w-3" />
-            Command palette
-            <Plus className="h-3 w-3 opacity-50" />
-          </Button>
+            <button type="button" onClick={openCommandPalette}>
+              <Command aria-hidden />
+              Command palette
+            </button>
+          </span>
         </div>
       </div>
       <ContextMenu

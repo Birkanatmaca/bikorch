@@ -9,7 +9,9 @@ import {
   type DeveloperEventType,
   type DeveloperIntelligenceSettings,
   type DeveloperMemory,
+  type DeveloperSkill,
   type MemoryScope,
+  type SkillSource,
   type PromptHistoryFilter,
   type PromptHistoryPage,
   type PromptRecord,
@@ -58,6 +60,24 @@ function ensureMemorySchema(db: Database): boolean {
   }
   db.run('CREATE INDEX IF NOT EXISTS di_memories_key ON di_memories (memory_key)')
   return changed
+}
+
+function ensureSkillsSchema(db: Database): boolean {
+  if (tableColumnNames(db, 'di_skills').length > 0) return false
+  db.run(`
+    CREATE TABLE IF NOT EXISTS di_skills (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      instructions TEXT NOT NULL,
+      source TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `)
+  db.run('CREATE INDEX IF NOT EXISTS di_skills_name ON di_skills (name)')
+  return true
 }
 
 export interface StoreOptions {
@@ -212,7 +232,7 @@ export class DeveloperIntelligenceStore {
   constructor(options: StoreOptions) {
     this.db = options.db
     this.onWrite = options.onWrite
-    if (ensureMemorySchema(this.db)) this.onWrite()
+    if (ensureMemorySchema(this.db) || ensureSkillsSchema(this.db)) this.onWrite()
   }
 
   // --- Settings ------------------------------------------------------------
@@ -530,5 +550,67 @@ export class DeveloperIntelligenceStore {
 
   countMemories(): number {
     return scalar<number>(this.db, 'SELECT COUNT(*) AS count FROM di_memories') ?? 0
+  }
+
+  // --- Skills --------------------------------------------------------------
+
+  listSkills(): DeveloperSkill[] {
+    return rows(this.db, 'SELECT * FROM di_skills ORDER BY updated_at DESC').flatMap((row) => {
+      const skill = rowToSkill(row)
+      return skill ? [skill] : []
+    })
+  }
+
+  getSkillByName(name: string): DeveloperSkill | null {
+    const row = rows(this.db, 'SELECT * FROM di_skills WHERE lower(name) = lower(?) LIMIT 1', [name])[0]
+    return row ? rowToSkill(row) : null
+  }
+
+  upsertSkill(skill: DeveloperSkill): void {
+    this.db.run(
+      `INSERT OR REPLACE INTO di_skills
+        (id, name, description, instructions, source, enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        skill.id,
+        skill.name,
+        skill.description,
+        skill.instructions,
+        skill.source,
+        skill.enabled ? 1 : 0,
+        skill.createdAt,
+        skill.updatedAt
+      ]
+    )
+    this.onWrite()
+  }
+
+  deleteSkill(id: string): boolean {
+    this.db.run('DELETE FROM di_skills WHERE id = ?', [id])
+    const removed = this.db.getRowsModified() > 0
+    if (removed) this.onWrite()
+    return removed
+  }
+}
+
+function rowToSkill(row: Row): DeveloperSkill | null {
+  const id = text(row['id'])
+  const name = text(row['name'])
+  const description = text(row['description'])
+  const instructions = text(row['instructions'])
+  const source = text(row['source'])
+  const createdAt = integer(row['created_at'])
+  const updatedAt = integer(row['updated_at'])
+  if (!id || !name || !description || !instructions || !source || createdAt === undefined || updatedAt === undefined) return null
+  if (source !== 'user' && source !== 'manager' && source !== 'file') return null
+  return {
+    id,
+    name,
+    description,
+    instructions,
+    source: source as SkillSource,
+    enabled: integer(row['enabled']) !== 0,
+    createdAt,
+    updatedAt
   }
 }

@@ -95,7 +95,7 @@ function Fixture() {
     <AppHeader showWorkspaceControls={projects.length > 0} />
     {!projects.length || home ? <WelcomeScreen /> : (
       <div className="workspace-frame flex min-h-0 flex-1">
-        <SidebarActivityBar isOpen={sidebar} view="files" changesCount={0} onSelectFiles={() => setSidebar(!sidebar)} onSelectChanges={() => {}} onSelectAccounts={() => {}} onSelectTasks={() => {}} onSelectProfile={() => {}} onSelectAutomation={() => {}} onSelectMusic={() => {}} onSelectTimer={() => {}} />
+        <SidebarActivityBar isOpen={sidebar} view="files" changesCount={0} onSelectFiles={() => setSidebar(!sidebar)} onSelectChanges={() => {}} onSelectAccounts={() => {}} onSelectMemory={() => {}} onSelectTasks={() => {}} onSelectProfile={() => {}} onSelectMusic={() => {}} onSelectTimer={() => {}} />
         <div className="workspace-main relative flex min-h-0 min-w-0 flex-1 flex-col">
           <WorkspaceCenterEmpty />
           {sidebar && <div className="workspace-sidebar-overlay" style={{ width: 280 }}><div className="workstation-sidebar panel-shell flex h-full flex-col"><header className="sidebar-header"><span className="sidebar-header-title">Files</span><button type="button" aria-label="Hide sidebar" onClick={() => setSidebar(false)}>Close</button></header><FileExplorerPanel /></div></div>}

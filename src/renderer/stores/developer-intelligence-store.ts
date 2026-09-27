@@ -7,6 +7,9 @@ import {
   type DeveloperIntelligenceSettings,
   type DeveloperIntelligenceStats,
   type DeveloperMemory,
+  type DeveloperSkill,
+  type SkillDraft,
+  type SkillUpdate,
   type DeveloperMetrics,
   type MemoryContextPackage,
   type MemoryContextRequest,
@@ -25,7 +28,6 @@ export type ProfileSection =
   | 'insights'
   | 'prompts'
   | 'sessions'
-  | 'memory'
   | 'secretary'
   | 'privacy'
   | 'runtime'
@@ -72,6 +74,13 @@ interface DeveloperIntelligenceStore {
   setSessionFilter: (filter: AgentSessionListRequest) => void
   loadSessions: () => Promise<void>
   getSession: (id: string) => Promise<AgentSessionDetail | null>
+  skills: DeveloperSkill[]
+  skillsLoaded: boolean
+  loadSkills: () => Promise<void>
+  createSkill: (draft: SkillDraft) => Promise<void>
+  updateSkill: (id: string, updates: SkillUpdate) => Promise<void>
+  deleteSkill: (id: string) => Promise<void>
+  importSkill: () => Promise<number>
   loadMemories: () => Promise<void>
   createMemory: (draft: MemoryDraft) => Promise<void>
   updateMemory: (id: string, updates: MemoryUpdate) => Promise<void>
@@ -108,6 +117,8 @@ export const useDeveloperIntelligenceStore = create<DeveloperIntelligenceStore>(
   sessionFilter: { limit: 40, offset: 0 },
   memories: [],
   memoriesLoaded: false,
+  skills: [],
+  skillsLoaded: false,
   stats: null,
   analysis: null,
   analysisLoading: false,
@@ -206,6 +217,57 @@ export const useDeveloperIntelligenceStore = create<DeveloperIntelligenceStore>(
     } catch {
       return null
     }
+  },
+
+  loadSkills: async () => {
+    const bridge = api()
+    if (!bridge?.listSkills) return
+    try {
+      const skills = await bridge.listSkills()
+      set({ skills, skillsLoaded: true })
+    } catch {
+      set({ skillsLoaded: true })
+    }
+  },
+
+  createSkill: async (draft) => {
+    const bridge = api()
+    if (!bridge?.createSkill) return
+    const skill = await bridge.createSkill(draft)
+    if (skill) set((state) => ({
+      skills: [skill, ...state.skills.filter((item) => item.id !== skill.id)]
+    }))
+  },
+
+  updateSkill: async (id, updates) => {
+    const bridge = api()
+    if (!bridge?.updateSkill) return
+    const skill = await bridge.updateSkill(id, updates)
+    if (skill) {
+      set((state) => ({
+        skills: state.skills.map((item) => (item.id === id ? skill : item))
+      }))
+    }
+  },
+
+  deleteSkill: async (id) => {
+    const bridge = api()
+    if (!bridge?.deleteSkill) return
+    await bridge.deleteSkill(id)
+    set((state) => ({ skills: state.skills.filter((item) => item.id !== id) }))
+  },
+
+  importSkill: async () => {
+    const bridge = api()
+    if (!bridge?.importSkill) return 0
+    const result = await bridge.importSkill()
+    if (!result.ok) return 0
+    set((state) => {
+      const incoming = new Map(result.skills.map((skill) => [skill.id, skill]))
+      const kept = state.skills.filter((skill) => !incoming.has(skill.id))
+      return { skills: [...incoming.values(), ...kept], skillsLoaded: true }
+    })
+    return result.skills.length
   },
 
   loadMemories: async () => {

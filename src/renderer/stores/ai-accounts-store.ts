@@ -9,6 +9,7 @@ import {
 } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import type { AuthProfileSummary } from '@shared/contracts/auth-profiles'
+import { cleanCliLabel } from '@shared/terminal-text'
 
 export type AiAccountDraft = Pick<AiAccount, 'kind' | 'name' | 'email' | 'plan' | 'note'>
 
@@ -49,6 +50,13 @@ function suppressSystemImportFromSnapshot(kinds: unknown): Record<CliUsageKind, 
   return suppressed
 }
 
+function cleanStoredAccount(account: AiAccount): AiAccount {
+  const name = cleanCliLabel(account.name)
+  const email = cleanCliLabel(account.email)
+  if (name === account.name && email === account.email) return account
+  return { ...account, name, email }
+}
+
 function initialState(): AiAccountsSnapshot & {
   suppressSystemImportByKind: Record<CliUsageKind, boolean>
 } {
@@ -63,7 +71,7 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
   ...initialState(),
 
   hydrate: (snapshot) => {
-    const accounts = Array.isArray(snapshot.accounts) ? snapshot.accounts : []
+    const accounts = (Array.isArray(snapshot.accounts) ? snapshot.accounts : []).map(cleanStoredAccount)
     const activeAccountByKind = {
       ...createDefaultActiveAccountByKind(),
       ...(snapshot.activeAccountByKind ?? {})
@@ -78,7 +86,7 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
   getSnapshot: () => {
     const { accounts, activeAccountByKind, suppressSystemImportByKind } = get()
     return {
-      accounts,
+      accounts: accounts.map(cleanStoredAccount),
       activeAccountByKind,
       suppressedSystemAuthKinds: AI_ACCOUNT_KINDS.filter((kind) => suppressSystemImportByKind[kind])
     }
@@ -110,8 +118,8 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
           ? {
               ...account,
               ...updates,
-              name: updates.name === undefined ? account.name : updates.name.trim(),
-              email: updates.email === undefined ? account.email : updates.email.trim(),
+              name: cleanCliLabel(updates.name === undefined ? account.name : updates.name.trim()),
+              email: cleanCliLabel(updates.email === undefined ? account.email : updates.email.trim()),
               plan: updates.plan === undefined ? account.plan : updates.plan.trim(),
               note: updates.note === undefined ? account.note : updates.note.trim()
             }
@@ -163,11 +171,12 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
         account.id === accountId
           ? {
               ...account,
-              email: identity?.email?.trim() || account.email,
-              name:
+              email: cleanCliLabel(identity?.email?.trim() || account.email),
+              name: cleanCliLabel(
                 account.source === 'discovered' || /^New .+ account$/i.test(account.name)
                   ? identity?.name?.trim() || identity?.email?.trim() || account.name
-                  : account.name,
+                  : account.name
+              ),
               profileReady: true,
               lastSeenAt: now,
               lastAuthenticatedAt: now
@@ -212,8 +221,8 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
       profilesById.delete(account.id)
       return {
         ...account,
-        name: account.source === 'manual' ? account.name : profile.name || account.name,
-        email: profile.email || account.email,
+        name: cleanCliLabel(account.source === 'manual' ? account.name : profile.name || account.name),
+        email: cleanCliLabel(profile.email || account.email),
         profileReady: profile.ready,
         lastSeenAt: now,
         lastAuthenticatedAt: account.lastAuthenticatedAt ?? (profile.ready ? now : null)
@@ -225,8 +234,8 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
       const account: AiAccount = {
         id: profile.accountId,
         kind: profile.kind,
-        name: profile.name || `${profile.kind} account`,
-        email: profile.email,
+        name: cleanCliLabel(profile.name || `${profile.kind} account`),
+        email: cleanCliLabel(profile.email),
         plan: '',
         note: '',
         createdAt: now,

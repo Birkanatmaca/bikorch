@@ -1,5 +1,5 @@
 import {
-  CalendarClock,
+  Brain,
   CheckSquare2,
   CircleUser,
   FolderTree,
@@ -14,7 +14,6 @@ import { cn } from '@renderer/lib/utils'
 import { useMusicStore } from '@renderer/stores/music-store'
 import { useTasksStore } from '@renderer/stores/tasks-store'
 import { useTimerStore } from '@renderer/stores/timer-store'
-import { useAutomationStore } from '@renderer/stores/automation-store'
 import { displayMs, formatTimerClock } from '@shared/contracts/timer'
 import type { LeftSidebarView } from '@shared/types'
 
@@ -33,9 +32,9 @@ interface SidebarActivityBarProps {
   onSelectFiles: () => void
   onSelectChanges: () => void
   onSelectAccounts: () => void
+  onSelectMemory: () => void
   onSelectTasks: () => void
   onSelectProfile: () => void
-  onSelectAutomation: () => void
   onSelectMusic: () => void
   onSelectTimer: () => void
 }
@@ -49,30 +48,21 @@ export function SidebarActivityBar({
   onSelectFiles,
   onSelectChanges,
   onSelectAccounts,
+  onSelectMemory,
   onSelectTasks,
   onSelectProfile,
-  onSelectAutomation,
   onSelectMusic,
   onSelectTimer
 }: SidebarActivityBarProps): React.JSX.Element {
   const filesActive = isOpen && view === 'files'
   const changesActive = isOpen && view === 'changes'
   const accountsActive = isOpen && view === 'accounts'
+  const memoryActive = isOpen && view === 'memory'
   const tasksActive = isOpen && view === 'tasks'
   const profileActive = isOpen && view === 'profile'
-  const automationActive = isOpen && view === 'automation'
   const musicActive = isOpen && view === 'music'
   const timerActive = isOpen && view === 'timer'
   const musicPlaying = useMusicStore((state) => state.status === 'playing')
-  const automationStatus = useAutomationStore((state) => state.status) ?? {
-    running: 0,
-    enabled: 0,
-    waitingNetwork: 0,
-    needsAttention: 0,
-    nextRunAt: null
-  }
-  const automationRunning = automationStatus.running > 0
-  const automationNeedsAttention = automationStatus.needsAttention > 0
   const timerSession = useTimerStore((state) => state.session)
   const timerNow = useTimerStore((state) => state.nowMs)
   const timerRunning = timerSession.status === 'running'
@@ -148,40 +138,13 @@ export function SidebarActivityBar({
       </button>
       <button
         type="button"
-        onClick={onSelectAutomation}
-        aria-pressed={automationActive}
-        title={
-          automationNeedsAttention
-            ? `${automationActive ? 'Hide' : 'Show'} automations, needs attention`
-            : automationRunning
-              ? `${automationActive ? 'Hide' : 'Show'} automations, ${automationStatus.running} running`
-              : automationStatus.enabled > 0
-                ? `${automationActive ? 'Hide' : 'Show'} automations, ${automationStatus.enabled} enabled`
-                : automationActive
-                  ? 'Hide automations'
-                  : 'Show automations'
-        }
-        aria-label={
-          automationNeedsAttention
-            ? 'Show automations, needs attention'
-            : automationRunning
-              ? `Show automations, ${automationStatus.running} running`
-              : automationActive
-                ? 'Hide automations'
-                : 'Show automations'
-        }
-        className={cn(
-          'glass-icon-btn relative h-9 w-9',
-          automationActive && 'glass-icon-btn-active',
-          automationRunning && 'is-timing'
-        )}
+        onClick={onSelectMemory}
+        aria-pressed={memoryActive}
+        title={memoryActive ? 'Hide memory' : 'Show memory'}
+        aria-label={memoryActive ? 'Hide memory' : 'Show memory'}
+        className={cn('glass-icon-btn h-9 w-9', memoryActive && 'glass-icon-btn-active')}
       >
-        <CalendarClock className="h-4 w-4" />
-        {automationNeedsAttention ? (
-          <span className="activity-badge is-conflict">!</span>
-        ) : automationStatus.enabled > 0 ? (
-          <span className={cn('rail-automation-dot', automationRunning && 'is-live')} aria-hidden />
-        ) : null}
+        <Brain className="h-4 w-4" />
       </button>
       <button
         type="button"

@@ -4,6 +4,7 @@ import type { PanelDefinition, Project } from '@shared/types'
 import type { SecretaryMessageCursor, SecretaryPlan, SecretaryRun, SecretaryRunEvidence, SecretaryRunStatus, SecretaryThreadDetail } from '@shared/contracts/secretary'
 import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
 import type { PtySessionStatus } from '@shared/contracts/pty'
+import type { MemoryContextItem } from '@shared/contracts/developer-intelligence'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import { pickCliAccountId } from '@shared/cli-account'
 import { AppLogo } from '@renderer/components/brand/AppLogo'
@@ -170,6 +171,8 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   const sessions = useTerminalStore((state) => state.sessions)
   const selectLeftSidebar = useWorkspaceStore((state) => state.selectLeftSidebar)
   const addPanel = useWorkspaceStore((state) => state.addPanel)
+  const includeMemory = useDeveloperIntelligenceStore((state) => state.settings.includeMemoryInPrompts)
+  const memoryCount = useDeveloperIntelligenceStore((state) => state.memories.length)
   const settings = useSecretaryStore((state) => state.settings)
   const settingsLoaded = useSecretaryStore((state) => state.loaded)
   const accounts = useAiAccountsStore((state) => state.accounts)
@@ -188,6 +191,10 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   const [recoveryRuns, setRecoveryRuns] = useState<SecretaryRun[]>([])
   const [editingPlanMessageId, setEditingPlanMessageId] = useState<string | null>(null)
   const [planDraft, setPlanDraft] = useState<SecretaryPlan | null>(null)
+  const [managerMemory, setManagerMemory] = useState<{ enabled: boolean; facts: MemoryContextItem[] }>({
+    enabled: true,
+    facts: []
+  })
   const [revisingPlan, setRevisingPlan] = useState(false)
   const [cancellingRunId, setCancellingRunId] = useState<string | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
@@ -206,6 +213,22 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   useEffect(() => {
     if (!settingsLoaded) void loadSettings()
   }, [loadSettings, settingsLoaded])
+
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    void window.api.developerIntelligence.getContext({
+      projectId: project.id,
+      limit: 4,
+      retainProfile: true
+    }).then((pack) => {
+      if (!active) return
+      setManagerMemory({ enabled: pack.injectionEnabled, facts: pack.memories.slice(0, 3) })
+    }).catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [open, project.id, includeMemory, memoryCount])
 
   const setSidebarOpen = (next: boolean): void => {
     setOpen(next)
@@ -317,7 +340,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           awaitingAssignmentId: event.assignmentId
         }
       ])
-      setFeedback('The CLI needs input. Reply here and Secretary will forward it to the waiting session.')
+      setFeedback('The CLI needs input. Reply here and Manager will forward it to the waiting session.')
       return
     }
     setMessages((current) => [
@@ -367,7 +390,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     openedPanelIds: string[]
   } => {
     if (useWorkspaceStore.getState().activeProjectId !== project.id) {
-      throw new Error('The active project changed. Reopen this Secretary conversation before approving the plan.')
+      throw new Error('The active project changed. Reopen this Manager conversation before approving the plan.')
     }
     const accounts = useAiAccountsStore.getState().accounts
     const activeByKind = useAiAccountsStore.getState().activeAccountByKind
@@ -415,7 +438,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
         undefined,
         undefined,
         accountId,
-        `Secretary · ${taskTitle?.trim() || AI_ACCOUNT_LABELS[kind]}`,
+        `Manager · ${taskTitle?.trim() || AI_ACCOUNT_LABELS[kind]}`,
         {
           panelRole: 'secretary',
           workspaceIsolation: 'isolated'
@@ -464,6 +487,9 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   const openSettings = (): void => {
     useDeveloperIntelligenceStore.getState().setSection('secretary')
     selectLeftSidebar(project.id, 'profile')
+  }
+  const openMemory = (): void => {
+    selectLeftSidebar(project.id, 'memory')
   }
 
   const dispatch = async (plan: SecretaryPlan, run: number, persistedRunId?: string): Promise<number> => {
@@ -627,7 +653,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       setMessages((current) => current.map((item) => (
         item.id === messageId ? { ...item, planStatus: 'cancelled' as const } : item
       )))
-      setFeedback('Secretary run cancelled. The CLI was interrupted if it was still active.')
+      setFeedback('Manager run cancelled. The CLI was interrupted if it was still active.')
       window.setTimeout(() => setFeedback(null), 4200)
     } catch (cause) {
       setMessages((current) => [
@@ -635,7 +661,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
         {
           id: newId(),
           role: 'assistant',
-          content: cause instanceof Error ? cause.message : 'Could not cancel the Secretary run',
+          content: cause instanceof Error ? cause.message : 'Could not cancel the Manager run',
           error: true
         }
       ])
@@ -674,7 +700,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           ? { ...item, planStatus: sent > 0 ? 'sent' as const : 'failed' as const }
           : item
       )))
-      if (sent > 0) setFeedback('CLI work is running. Secretary will post the final report when it finishes.')
+      if (sent > 0) setFeedback('CLI work is running. Manager will post the final report when it finishes.')
     } catch (cause) {
       if (run !== runRef.current) return
       if (persistedRunId) {
@@ -730,7 +756,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
         setMessages((current) => current.map((item) => (
           item.id === waitingItem.id ? { ...item, awaitingAnswer: false } : item
         )))
-        setFeedback('Answer sent. Secretary is watching the CLI for the next result.')
+        setFeedback('Answer sent. Manager is watching the CLI for the next result.')
       } catch (cause) {
         if (run !== runRef.current) return
         setMessages((current) => [
@@ -770,13 +796,16 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       })
       if (run !== runRef.current) return
       if (response.threadId) setThreadId(response.threadId)
+      if (response.savedSkills?.length) void useDeveloperIntelligenceStore.getState().loadSkills()
       const plan = response.plan
       setMessages((current) => [
         ...current,
         {
           id: newId(),
           role: 'assistant',
-          content: response.reply,
+          content: response.savedSkills?.length
+            ? `${response.reply}\n\nSaved: ${response.savedSkills.map((skill) => skill.name).join(', ')}.`
+            : response.reply,
           ...(plan
             ? {
                 plan,
@@ -795,7 +824,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
         {
           id: newId(),
           role: 'assistant',
-          content: cause instanceof Error ? cause.message : 'Could not reach the secretary',
+          content: cause instanceof Error ? cause.message : 'Could not reach Manager',
           error: true
         }
       ])
@@ -817,10 +846,10 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       ? 'working'
       : 'idle'
   const placeholder = !settings.configured
-    ? 'Connect Developer Secretary in Profile to start…'
+    ? 'Connect Manager in Profile to start…'
     : waitingForUser
       ? 'Answer the waiting CLI here…'
-      : `Ask Secretary about ${project.name}…`
+      : `Tell Manager what to run in ${project.name}…`
 
   const revealCli = (panelId: string): void => {
     focusWorkspacePanel(panelId)
@@ -830,7 +859,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   const composer = !settings.configured ? (
     <button type="button" className="secretary-composer secretary-connect" onClick={openSettings}>
       <span className="secretary-mark"><AppLogo size="xs" /></span>
-      <span>Connect Secretary in Profile to start…</span>
+      <span>Connect Manager in Profile to start…</span>
       <span className="secretary-settings-shortcut"><SlidersHorizontal className="h-3.5 w-3.5" /> Profile</span>
     </button>
   ) : (
@@ -862,42 +891,61 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
 
   if (!open) {
     return (
-      <section className="developer-secretary is-collapsed" aria-label="Developer Secretary">
+      <section className="developer-secretary is-collapsed" aria-label="Manager">
         <button
           type="button"
           className={cn('secretary-rail', railAttention && 'is-attention')}
           onClick={() => setSidebarOpen(true)}
           aria-expanded={false}
-          aria-label="Open Secretary sidebar"
+          aria-label="Open Manager sidebar"
         >
           <span className="secretary-rail-mark"><AppLogo size="xs" /></span>
           {railAttention ? <i className="secretary-rail-pulse" aria-hidden /> : null}
-          <span className="secretary-rail-label">Secretary</span>
+          <span className="secretary-rail-label">Manager</span>
         </button>
       </section>
     )
   }
 
   return (
-    <section className="developer-secretary is-open" aria-label="Developer Secretary">
+    <section className="developer-secretary is-open" aria-label="Manager">
       <aside className="secretary-sidebar">
         <header className="secretary-chat-header">
           <span className="secretary-chat-title">
             <SecretaryAvatar mood={secretaryMood} variant="mini" />
             <span>
-              <strong>Secretary</strong>
+              <strong>Manager</strong>
               <small>{project.name}</small>
             </span>
           </span>
           <span className="secretary-chat-meta" title={settings.model}>{settings.model}</span>
-          <button type="button" className="secretary-dismiss" onClick={openSettings} aria-label="Open Secretary settings" title="Secretary settings">
+          <button type="button" className="secretary-dismiss" onClick={openSettings} aria-label="Open Manager settings" title="Manager settings">
             <SlidersHorizontal className="h-3.5 w-3.5" />
           </button>
-          <button type="button" className="secretary-dismiss" onClick={() => setSidebarOpen(false)} aria-label="Collapse Secretary sidebar" title="Collapse">
+          <button type="button" className="secretary-dismiss" onClick={() => setSidebarOpen(false)} aria-label="Collapse Manager sidebar" title="Collapse">
             <PanelRightClose className="h-3.5 w-3.5" />
           </button>
         </header>
         <div className="secretary-ops">
+          <div className="secretary-memory">
+            <div className="secretary-ops-heading">
+              <span>Memory</span>
+              <button type="button" className="secretary-memory-open" onClick={openMemory}>Edit</button>
+            </div>
+            {managerMemory.enabled && managerMemory.facts.length > 0 ? (
+              <ul className="secretary-memory-list">
+                {managerMemory.facts.map((fact) => (
+                  <li key={fact.id} title={fact.content}><span>{fact.category}</span>{fact.content}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="secretary-ops-empty">
+                {managerMemory.enabled
+                  ? 'No memories yet. Add what Manager should know about you.'
+                  : 'Memory is off, so Manager is not using what it knows about you.'}
+              </p>
+            )}
+          </div>
           <div className="secretary-ops-heading">
             <span>Operations</span>
             <strong>{cliPanels.length}</strong>
@@ -925,7 +973,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
             <p className="secretary-ops-note">{pendingApprovals} plan{pendingApprovals === 1 ? '' : 's'} waiting for approval</p>
           ) : null}
           {recoveryRuns.length > 0 ? (
-            <div className="secretary-recovery" aria-label="Interrupted Secretary work">
+            <div className="secretary-recovery" aria-label="Interrupted Manager work">
               <strong>Recovery · {recoveryRuns.length} interrupted</strong>
               <small>Terminal sessions may still be running. Inspect them before starting a new task; prompts are never replayed automatically.</small>
               {recoveryRuns.map((run) => (
@@ -965,18 +1013,18 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
               <div className="secretary-empty-stage">
                 <SecretaryAvatar mood="idle" variant="hero" />
                 <div className="secretary-empty-intro">
-                  <span>Workspace copilot</span>
-                  <strong>Ready to coordinate.</strong>
-                  <p>One brief in. A clear, reviewable CLI plan out.</p>
+                  <span>Workspace manager</span>
+                  <strong>Ready to run the work.</strong>
+                  <p>Manager already knows you from memory, then runs the CLI plan.</p>
                 </div>
                 <span className="secretary-empty-status"><i /> Online</span>
               </div>
               <div className="secretary-empty-copy">
                 <div>
                   <strong>Start with the outcome</strong>
-                  <p>Secretary plans the work, waits for your approval, then follows the live terminals through completion.</p>
+                  <p>Manager plans from your memory, waits for approval, then follows every CLI through the result.</p>
                 </div>
-                <div className="secretary-empty-flow" aria-label="Secretary workflow">
+                <div className="secretary-empty-flow" aria-label="Manager workflow">
                   <span><b>01</b> Brief</span>
                   <span><b>02</b> Approve</span>
                   <span><b>03</b> Review</span>
@@ -1182,7 +1230,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
                         <span>Plan rejected; no CLI was started.</span>
                       ) : null}
                       {item.planStatus === 'cancelled' ? (
-                        <span>Run cancelled; no further Secretary prompts will be sent.</span>
+                        <span>Run cancelled; no further Manager prompts will be sent.</span>
                       ) : null}
                       {item.planStatus === 'failed' ? (
                         <span>Run failed. Inspect its terminal and error before starting new work.</span>
@@ -1201,7 +1249,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
                 <SecretaryAvatar mood={answering ? 'working' : 'thinking'} variant="mini" decorative />
                 <span>
                   <strong>{answering ? 'Forwarding answer' : 'Thinking'}</strong>
-                  <small>{answering ? 'Sending your response to the correct CLI task…' : 'Reading project context and preparing the next step…'}</small>
+                  <small>{answering ? 'Sending your response to the correct CLI task…' : 'Reading your memory and preparing the next step…'}</small>
                 </span>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               </div>

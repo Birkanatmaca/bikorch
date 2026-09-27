@@ -225,6 +225,19 @@ describe('rankMemoriesForContext', () => {
     expect(pack.memories.map((item) => item.id)).toEqual(['global'])
   })
 
+  it('keeps who the developer is when the task query points elsewhere', () => {
+    const pack = rankMemoriesForContext(
+      [
+        memory({ id: 'about', content: 'Ships small reviewable changes', category: 'About me', source: 'user' }),
+        memory({ id: 'css', content: 'Uses CSS modules for layout', category: 'Tooling' }),
+        memory({ id: 'css-2', content: 'Prefers container queries in CSS', category: 'Tooling' })
+      ],
+      { query: 'css layout', limit: 2, retainProfile: true },
+      true
+    )
+    expect(pack.memories.map((item) => item.id)).toContain('about')
+  })
+
   it('ranks user-authored memories above similar AI memories', () => {
     const pack = rankMemoriesForContext(
       [

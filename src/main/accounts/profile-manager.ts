@@ -19,6 +19,7 @@ import type {
   SystemAuthDiscovery
 } from '@shared/contracts/auth-profiles'
 import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
+import { cleanCliLabel } from '@shared/terminal-text'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import {
   readAntigravityCredential
@@ -31,10 +32,10 @@ import {
 import { logoutAntigravityCli } from './antigravity-logout'
 import {
   applyAntigravityCredentialsForAccount,
-  captureAntigravityCredentialsForAccount,
-  getAntigravitySessionAccount,
+  captureAntigravityLogin,
   hasStoredAntigravityCredentials,
   markAntigravitySessionAccount,
+  prepareAntigravityFreshLogin,
   readStoredAntigravitySecret
 } from './antigravity-credential'
 
@@ -126,7 +127,7 @@ function writeMetadata(request: AuthProfileRequest): void {
         ...current,
         kind: request.kind,
         accountId: request.accountId,
-        ...(request.email ? { email: request.email } : {}),
+        ...(request.email ? { email: cleanCliLabel(request.email) } : {}),
         updatedAt: Date.now()
       },
       null,
@@ -141,7 +142,9 @@ function readMetadataIdentity(kind: CliUsageKind, accountId: string): AuthProfil
   const email = asString(metadata?.email)
   const name = asString(metadata?.name)
   if (!email && !name) return undefined
-  return { email: email ?? '', name: name ?? email ?? '' }
+  const cleanEmail = email ? cleanCliLabel(email) : ''
+  const cleanName = name ? cleanCliLabel(name) : cleanEmail
+  return { email: cleanEmail, name: cleanName }
 }
 
 function ensureCodexConfig(root: string): void {
@@ -172,14 +175,19 @@ async function captureAntigravity(request: AuthProfileRequest): Promise<AuthProf
       error: 'Secure local credential encryption is not available on this computer'
     }
   }
-  const captured = await captureAntigravityCredentialsForAccount(request.accountId)
-  if (!captured) return { ok: true, ready: false }
-  ensureProfileRoot(request.kind, request.accountId)
-  writeMetadata(request)
+  const captured = await captureAntigravityLogin(request.accountId)
+  if (captured.error) return { ok: false, ready: false, error: captured.error }
+  if (!captured.ready) return { ok: true, ready: false }
+  const email = captured.identity?.email || request.email
+  writeMetadata(email ? { ...request, email } : request)
   return {
     ok: true,
     ready: true,
-    ...(request.email ? { identity: { email: request.email, name: request.email } } : {})
+    ...(captured.identity
+      ? { identity: captured.identity }
+      : email
+        ? { identity: { email, name: email } }
+        : {})
   }
 }
 
@@ -255,12 +263,7 @@ export async function prepareAuthProfileLaunch(
   try {
     if (launchMode === 'login') {
       if (request.kind === 'antigravity') {
-        const liveId = getAntigravitySessionAccount()
-        if (liveId && liveId !== request.accountId) {
-          await captureAntigravityCredentialsForAccount(liveId).catch(() => false)
-        }
-        markAntigravitySessionAccount(null)
-        await logoutAntigravityCli()
+        await prepareAntigravityFreshLogin(request.accountId)
       }
       if (request.kind === 'cursor') {
         logoutCursorProfile(request.accountId)
@@ -410,12 +413,13 @@ export async function listAuthProfiles(): Promise<AuthProfileSummary[]> {
       if (!inspected.ready && kind !== 'cursor') continue
 
       const storedEmail = asString(metadata?.email)
-      const email = inspected.identity?.email || storedEmail || ''
-      const name =
+      const email = cleanCliLabel(inspected.identity?.email || storedEmail || '')
+      const name = cleanCliLabel(
         inspected.identity?.name ||
-        asString(metadata?.name) ||
-        email ||
-        `${AI_ACCOUNT_LABELS[kind]} account`
+          asString(metadata?.name) ||
+          email ||
+          `${AI_ACCOUNT_LABELS[kind]} account`
+      )
 
       profiles.push({
         kind,

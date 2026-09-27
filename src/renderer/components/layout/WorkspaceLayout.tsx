@@ -493,9 +493,9 @@ export function WorkspaceLayout(): React.JSX.Element {
         onSelectFiles={() => selectLeftSidebar(activeProjectId, 'files')}
         onSelectChanges={() => selectLeftSidebar(activeProjectId, 'changes')}
         onSelectAccounts={() => selectLeftSidebar(activeProjectId, 'accounts')}
+        onSelectMemory={() => selectLeftSidebar(activeProjectId, 'memory')}
         onSelectTasks={() => selectLeftSidebar(activeProjectId, 'tasks')}
         onSelectProfile={() => selectLeftSidebar(activeProjectId, 'profile')}
-        onSelectAutomation={() => selectLeftSidebar(activeProjectId, 'automation')}
         onSelectMusic={() => selectLeftSidebar(activeProjectId, 'music')}
         onSelectTimer={() => selectLeftSidebar(activeProjectId, 'timer')}
       />
