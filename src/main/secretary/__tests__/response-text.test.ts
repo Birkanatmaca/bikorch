@@ -52,7 +52,8 @@ describe('readSecretaryReply', () => {
       planRaw: null,
       openKindsRaw: null,
       contextSummary: null,
-      skillsRaw: []
+      skillsRaw: [],
+      actionsRaw: null
     })
   })
 

@@ -5,6 +5,7 @@ import {
   type ResourceProfile
 } from '@shared/contracts/resources'
 import { collectResourceSnapshot } from '../resources/snapshot'
+import { getCacheAnalysis, respondToCachePressure, setCacheWarnMb } from '../resources/cache-care'
 import { clearBrowserCaches, collectDiskSnapshot } from '../resources/disk'
 import { getResourceProfile, setResourceProfile } from '../resources/settings'
 
@@ -39,5 +40,20 @@ export function registerResourceHandlers(): void {
   ipcMain.handle(RESOURCES_IPC.CLEAR_BROWSER_CACHE, (event) => {
     assertTrustedSender(event)
     return clearBrowserCaches()
+  })
+
+  ipcMain.handle(RESOURCES_IPC.CACHE_ANALYSIS, (event) => {
+    assertTrustedSender(event)
+    return getCacheAnalysis()
+  })
+
+  ipcMain.handle(RESOURCES_IPC.SET_CACHE_WARN, (event, value: unknown) => {
+    assertTrustedSender(event)
+    return setCacheWarnMb(value)
+  })
+
+  ipcMain.handle(RESOURCES_IPC.RESPOND_CACHE, (event, accept: unknown) => {
+    assertTrustedSender(event)
+    return respondToCachePressure(accept === true)
   })
 }

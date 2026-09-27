@@ -140,6 +140,7 @@ import {
 } from '@shared/contracts/automation'
 import {
   SECRETARY_IPC,
+  type DailyLearnView,
   type SecretaryChatRequest,
   type SecretaryChatResponse,
   type SecretaryPlan,
@@ -156,6 +157,9 @@ import {
   type SecretaryRunDispatchRequest,
   type SecretaryRunDispatchResult,
   type SecretaryRunPreparationResult,
+  type SecretarySessionSummary,
+  type SecretaryThreadDeleteRequest,
+  type SecretaryThreadRenameRequest,
   type SecretaryEvent
 } from '@shared/contracts/secretary'
 import {
@@ -164,6 +168,7 @@ import {
 } from '@shared/contracts/notifications'
 import {
   RESOURCES_IPC,
+  type CacheAnalysis,
   type ResourceDiskSnapshot,
   type ResourceProcessSnapshot,
   type ResourceProfile
@@ -398,8 +403,12 @@ export interface SecretaryApi {
   updateSettings: (settings: { model: string }) => Promise<SecretarySettings>
   createPlan: (request: SecretaryPlanRequest) => Promise<SecretaryPlan>
   chat: (request: SecretaryChatRequest) => Promise<SecretaryChatResponse>
+  getDailyLearn: () => Promise<DailyLearnView>
   listThreads: (projectId: string) => Promise<SecretaryThread[]>
+  listSessions: (projectId: string) => Promise<SecretarySessionSummary[]>
   createThread: (request: SecretaryThreadCreateRequest) => Promise<SecretaryThread>
+  renameThread: (request: SecretaryThreadRenameRequest) => Promise<SecretaryThread>
+  deleteThread: (request: SecretaryThreadDeleteRequest) => Promise<{ id: string }>
   getThread: (threadId: string, before?: SecretaryMessageCursor) => Promise<SecretaryThreadDetail | null>
   listRuns: (projectId: string) => Promise<SecretaryRun[]>
   getRun: (runId: string) => Promise<SecretaryRun | null>
@@ -425,6 +434,9 @@ export interface ResourcesApi {
   snapshot: () => Promise<ResourceProcessSnapshot>
   diskSnapshot: () => Promise<ResourceDiskSnapshot>
   clearBrowserCache: () => Promise<number>
+  cacheAnalysis: () => Promise<CacheAnalysis>
+  setCacheWarn: (megabytes: number) => Promise<CacheAnalysis>
+  respondCache: (accept: boolean) => Promise<CacheAnalysis>
 }
 
 export interface AppApi {
@@ -719,8 +731,12 @@ const secretaryApi: SecretaryApi = {
   updateSettings: (settings) => ipcRenderer.invoke(SECRETARY_IPC.UPDATE_SETTINGS, settings),
   createPlan: (request) => ipcRenderer.invoke(SECRETARY_IPC.CREATE_PLAN, request),
   chat: (request) => ipcRenderer.invoke(SECRETARY_IPC.CHAT, request),
+  getDailyLearn: () => ipcRenderer.invoke(SECRETARY_IPC.GET_DAILY_LEARN),
   listThreads: (projectId) => ipcRenderer.invoke(SECRETARY_IPC.LIST_THREADS, projectId),
+  listSessions: (projectId) => ipcRenderer.invoke(SECRETARY_IPC.LIST_SESSIONS, projectId),
   createThread: (request) => ipcRenderer.invoke(SECRETARY_IPC.CREATE_THREAD, request),
+  renameThread: (request) => ipcRenderer.invoke(SECRETARY_IPC.RENAME_THREAD, request),
+  deleteThread: (request) => ipcRenderer.invoke(SECRETARY_IPC.DELETE_THREAD, request),
   getThread: (threadId, before) => ipcRenderer.invoke(SECRETARY_IPC.GET_THREAD, threadId, before),
   listRuns: (projectId) => ipcRenderer.invoke(SECRETARY_IPC.LIST_RUNS, projectId),
   getRun: (runId) => ipcRenderer.invoke(SECRETARY_IPC.GET_RUN, runId),
@@ -757,7 +773,10 @@ const resourcesApi: ResourcesApi = {
   setProfile: (profile) => ipcRenderer.invoke(RESOURCES_IPC.SET_PROFILE, profile),
   snapshot: () => ipcRenderer.invoke(RESOURCES_IPC.SNAPSHOT),
   diskSnapshot: () => ipcRenderer.invoke(RESOURCES_IPC.DISK_SNAPSHOT),
-  clearBrowserCache: () => ipcRenderer.invoke(RESOURCES_IPC.CLEAR_BROWSER_CACHE)
+  clearBrowserCache: () => ipcRenderer.invoke(RESOURCES_IPC.CLEAR_BROWSER_CACHE),
+  cacheAnalysis: () => ipcRenderer.invoke(RESOURCES_IPC.CACHE_ANALYSIS),
+  setCacheWarn: (megabytes) => ipcRenderer.invoke(RESOURCES_IPC.SET_CACHE_WARN, megabytes),
+  respondCache: (accept) => ipcRenderer.invoke(RESOURCES_IPC.RESPOND_CACHE, accept)
 }
 
 const api: AppApi = {

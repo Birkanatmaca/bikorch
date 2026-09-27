@@ -330,6 +330,41 @@ input:not(.xterm-helper-textarea), select, textarea:not(.xterm-helper-textarea) 
     linear-gradient(180deg, rgb(18 16 28 / 0.98), rgb(10 12 16 / 0.98));
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.045), 0 18px 48px rgb(0 0 0 / 0.28);
 }
+.secretary-compose {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  border-top: 1px solid rgb(255 255 255 / 0.06);
+  background: rgb(8 10 14 / 0.55);
+}
+.secretary-daily {
+  display: grid;
+  gap: 2px;
+  margin: 10px 10px 0;
+  border: 1px solid rgb(178 162 255 / 0.22);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: linear-gradient(145deg, rgb(104 79 206 / 0.14), transparent 55%), rgb(18 21 27 / 0.45);
+}
+.secretary-daily > span {
+  color: var(--color-purple-light);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.secretary-daily strong {
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: 640;
+  line-height: 16px;
+}
+.secretary-daily p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 15px;
+}
 .secretary-composer {
   display: flex;
   width: 100%;
@@ -338,10 +373,9 @@ input:not(.xterm-helper-textarea), select, textarea:not(.xterm-helper-textarea) 
   align-items: flex-end;
   gap: 8px;
   border: 0;
-  border-top: 1px solid rgb(255 255 255 / 0.06);
   border-radius: 0;
   padding: 10px;
-  background: rgb(8 10 14 / 0.55);
+  background: transparent;
 }
 .secretary-composer:focus-within {
   box-shadow: inset 0 1px 0 rgb(139 124 248 / 0.16);
@@ -539,6 +573,88 @@ input:not(.xterm-helper-textarea), select, textarea:not(.xterm-helper-textarea) 
   font-weight: 650;
   letter-spacing: .04em;
   text-transform: uppercase;
+}
+.secretary-cache { display: grid; gap: 4px; }
+.secretary-cache p { margin: 0; color: var(--color-text-secondary); font-size: 11px; line-height: 1.45; }
+.secretary-cache small { color: var(--color-text-muted); font-size: 10px; line-height: 1.4; }
+.secretary-cache > span { color: var(--color-purple-light); font-size: 9px; }
+.secretary-cache-slider { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; }
+.secretary-cache-slider span { color: var(--color-text-secondary); font-size: 11px; }
+.secretary-cache-slider strong { color: var(--color-text-primary); font-size: 11px; }
+.secretary-cache-slider input { grid-column: 1 / -1; width: 100%; accent-color: #8b7cf8; }
+.secretary-sessions { display: grid; gap: 6px; }
+.secretary-session-list {
+  display: grid;
+  gap: 6px;
+  max-height: 168px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.secretary-session-list li {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgb(255 255 255 / 0.06);
+  border-radius: 10px;
+  padding: 7px 8px;
+  background: rgb(0 0 0 / 0.16);
+}
+.secretary-session-open {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.secretary-session-open strong {
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: 11px;
+  font-weight: 640;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.secretary-session-open small,
+.secretary-session-open span {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 9px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.secretary-session-open span { color: var(--color-text-secondary); }
+.secretary-session-actions { display: flex; gap: 8px; }
+.secretary-session-actions button,
+.secretary-session-rename button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.secretary-session-actions button:hover,
+.secretary-session-rename button:hover { color: var(--color-text-primary); }
+.secretary-session-rename { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.secretary-session-rename input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid rgb(196 181 255 / 0.24);
+  border-radius: 7px;
+  padding: 4px 6px;
+  outline: 0;
+  background: rgb(0 0 0 / 0.24);
+  color: var(--color-text-primary);
+  font-size: 11px;
 }
 .secretary-ops-empty, .secretary-ops-note, .secretary-empty p {
   margin: 0;

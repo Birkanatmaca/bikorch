@@ -8,7 +8,7 @@ import {
   type PtySessionStatus,
   PTY_IPC
 } from '@shared/contracts/pty'
-import { resolveSpawnConfigCandidates, getKindLabel, spawnEnv, cliLaunchArgs, windowsPtySpawnOptions } from './adapters'
+import { resolveSpawnConfigCandidates, getKindLabel, spawnEnv, terminalUserEnv, cliLaunchArgs, windowsPtySpawnOptions } from './adapters'
 import { isValidSessionId, resolveSafeCwd, resolveWindowsSpawnPath } from './path-validator'
 import {
   getAuthProfileEnv,
@@ -357,7 +357,9 @@ class PtyManager {
         ...spawnConfig.args.map((arg) => (arg.includes('\\') || arg.includes('/') ? resolveWindowsSpawnPath(arg) : arg)),
         ...launchArgs
       ]
-      const env = { ...spawnEnv(), ...profileEnv, ...(spawnConfig.env ?? {}) }
+      const env = kind === 'terminal'
+        ? { ...terminalUserEnv(), ...(spawnConfig.env ?? {}) }
+        : { ...spawnEnv(), ...profileEnv, ...(spawnConfig.env ?? {}) }
 
       if (useHost) {
         try {

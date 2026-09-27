@@ -95,8 +95,35 @@ export const RESOURCES_IPC = {
   SET_PROFILE: 'resources:set-profile',
   SNAPSHOT: 'resources:snapshot',
   DISK_SNAPSHOT: 'resources:disk-snapshot',
-  CLEAR_BROWSER_CACHE: 'resources:clear-browser-cache'
+  CLEAR_BROWSER_CACHE: 'resources:clear-browser-cache',
+  CACHE_ANALYSIS: 'resources:cache-analysis',
+  SET_CACHE_WARN: 'resources:set-cache-warn',
+  RESPOND_CACHE: 'resources:respond-cache'
 } as const
+
+/** Steps for the Manager cache warning slider, in megabytes. */
+export const CACHE_WARN_STEPS_MB = [64, 128, 256, 512, 1024] as const
+
+export const DEFAULT_CACHE_WARN_MB = 256
+
+export interface CachePart {
+  id: string
+  label: string
+  bytes: number
+}
+
+export interface CacheAnalysis {
+  collectedAt: number
+  warnAtMb: number
+  clearableBytes: number
+  pressured: boolean
+  dismissed: boolean
+  parts: CachePart[]
+  recommendation: string
+  signature: string
+  /** Set after the user accepts a cleanup. */
+  releasedBytes: number | null
+}
 
 export interface ResourceDiskSnapshot {
   collectedAt: number

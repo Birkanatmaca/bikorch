@@ -5,15 +5,19 @@ import {
   cancelSecretaryRun,
   clearSecretaryApiKey,
   chatWithSecretary,
+  getDailyLearn,
   createSecretaryPlan,
   createSecretaryThread,
+  deleteSecretaryThread,
   failApprovedSecretaryRun,
   getSecretaryRun,
   getSecretarySettings,
   getSecretaryThread,
   listSecretaryRuns,
+  listSecretarySessions,
   listSecretaryThreads,
   rejectSecretaryPlan,
+  renameSecretaryThread,
   reviseSecretaryPlan,
   resetSecretaryUsage,
   saveSecretaryApiKey,
@@ -35,8 +39,12 @@ export function registerSecretaryHandlers(): void {
   ipcMain.handle(SECRETARY_IPC.UPDATE_SETTINGS, (event, settings: unknown) => { assertTrustedSender(event); return updateSecretarySettings(settings) })
   ipcMain.handle(SECRETARY_IPC.CREATE_PLAN, (event, request: unknown) => { assertTrustedSender(event); return createSecretaryPlan(request) })
   ipcMain.handle(SECRETARY_IPC.CHAT, (event, request: unknown) => { assertTrustedSender(event); return chatWithSecretary(request) })
+  ipcMain.handle(SECRETARY_IPC.GET_DAILY_LEARN, (event) => { assertTrustedSender(event); return getDailyLearn() })
   ipcMain.handle(SECRETARY_IPC.LIST_THREADS, (event, projectId: unknown) => { assertTrustedSender(event); return listSecretaryThreads(projectId) })
+  ipcMain.handle(SECRETARY_IPC.LIST_SESSIONS, (event, projectId: unknown) => { assertTrustedSender(event); return listSecretarySessions(projectId) })
   ipcMain.handle(SECRETARY_IPC.CREATE_THREAD, (event, request: unknown) => { assertTrustedSender(event); return createSecretaryThread(request) })
+  ipcMain.handle(SECRETARY_IPC.RENAME_THREAD, (event, request: unknown) => { assertTrustedSender(event); return renameSecretaryThread(request) })
+  ipcMain.handle(SECRETARY_IPC.DELETE_THREAD, (event, request: unknown) => { assertTrustedSender(event); return deleteSecretaryThread(request) })
   ipcMain.handle(SECRETARY_IPC.GET_THREAD, (event, threadId: unknown, before: unknown) => { assertTrustedSender(event); return getSecretaryThread(threadId, before) })
   ipcMain.handle(SECRETARY_IPC.LIST_RUNS, (event, projectId: unknown) => { assertTrustedSender(event); return listSecretaryRuns(projectId) })
   ipcMain.handle(SECRETARY_IPC.GET_RUN, (event, runId: unknown) => { assertTrustedSender(event); return getSecretaryRun(runId) })

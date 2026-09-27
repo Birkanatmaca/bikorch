@@ -3,6 +3,7 @@ import type { GitSessionSnapshot } from '@shared/contracts/git'
 import type { SecretaryAssignment, SecretaryCompletionEvidence, SecretaryRun, SecretaryRunAnswerRequest } from '@shared/contracts/secretary'
 import { formatCliPaste } from '@shared/cli-prompt'
 import { readSecretaryCliResult, wrapSecretaryCliInstruction, type SecretaryCliOutcome } from '@shared/secretary-result-protocol'
+import { cliPermissionResponse } from '@shared/cli-permission'
 import { ptyManager } from '../cli/pty-manager'
 import { checkAgentGitPatch, snapshotAgentGit } from '../git/session-snapshot'
 import { emitSecretaryEvent } from './events'
@@ -27,6 +28,10 @@ interface Target {
   cwd: string
   gitStart: GitSessionSnapshot
   reportedChangedFiles: string[]
+  permissionKey: string | null
+  permissionKeyReplies: number
+  permissionReplies: number
+  lastPermissionAt: number
 }
 
 interface TrackedRun {
@@ -118,7 +123,11 @@ function toTarget(binding: { assignment: SecretaryAssignment; sessionId: string;
     structuredResultCount: 0,
     cwd: binding.cwd,
     gitStart: binding.gitStart,
-    reportedChangedFiles: []
+    reportedChangedFiles: [],
+    permissionKey: null,
+    permissionKeyReplies: 0,
+    permissionReplies: 0,
+    lastPermissionAt: 0
   }
 }
 
@@ -410,6 +419,23 @@ export async function answerTrackedSecretaryRun(payload: unknown): Promise<Secre
   return updated
 }
 
+const PERMISSION_REPLY_LIMIT = 12
+
+async function answerCliPermission(target: Target, response: '\r' | 'y\r', key: string): Promise<void> {
+  const now = Date.now()
+  if (target.permissionReplies >= PERMISSION_REPLY_LIMIT) return
+  if (now - target.lastPermissionAt < 1200) return
+  if (target.permissionKey === key && target.permissionKeyReplies >= 3) return
+  if (target.permissionKey !== key) {
+    target.permissionKey = key
+    target.permissionKeyReplies = 0
+  }
+  target.permissionKeyReplies += 1
+  target.permissionReplies += 1
+  target.lastPermissionAt = now
+  await ptyManager.writeForSecretary(target.sessionId, response).catch(() => undefined)
+}
+
 function handlePtyEvent(event: PtyEvent): void {
   const runId = trackedSessions.get(event.sessionId)
   if (!runId) return
@@ -422,6 +448,11 @@ function handlePtyEvent(event: PtyEvent): void {
     const clean = stripAnsi(target.output)
     if (looksWorkspaceTrustPrompt(clean)) {
       failTrackedRun(runId, 'The CLI is waiting for workspace trust. Review it in the terminal, then create a fresh plan.')
+      return
+    }
+    const permission = cliPermissionResponse(clean)
+    if (permission) {
+      void answerCliPermission(target, permission, clean.slice(-240))
       return
     }
     const structured = readSecretaryCliResult(clean)

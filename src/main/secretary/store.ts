@@ -19,6 +19,7 @@ import {
 } from '@shared/contracts/secretary'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import { redactSecrets } from '../developer-intelligence/redaction'
+import { isLiveSecretaryRun } from './sessions'
 import { getPersistenceDatabase, schedulePersistToDisk } from '../persistence/database'
 
 type Row = Record<string, unknown>
@@ -354,6 +355,9 @@ export interface SecretaryRunPatch {
 export interface SecretaryStore {
   createThread(input: { projectId: string; title: string }): SecretaryThread
   listThreads(projectId: string): SecretaryThread[]
+  messageCounts(projectId: string): Record<string, number>
+  renameThread(id: string, title: string): SecretaryThread | null
+  deleteThread(id: string): 'deleted' | 'missing' | 'busy'
   getThread(id: string): SecretaryThread | null
   getThreadContextSummary(id: string): string
   setThreadContextSummary(id: string, summary: string): void
@@ -403,6 +407,52 @@ export class SqlSecretaryStore implements SecretaryStore {
     return toRows(this.db, 'SELECT * FROM secretary_threads WHERE project_id = ? ORDER BY updated_at DESC', [projectId])
       .map(rowToThread)
       .filter((thread): thread is SecretaryThread => Boolean(thread))
+  }
+
+  messageCounts(projectId: string): Record<string, number> {
+    const counts: Record<string, number> = {}
+    for (const row of toRows(
+      this.db,
+      `SELECT m.thread_id AS thread_id, COUNT(*) AS total
+       FROM secretary_messages m
+       JOIN secretary_threads t ON t.id = m.thread_id
+       WHERE t.project_id = ?
+       GROUP BY m.thread_id`,
+      [projectId]
+    )) {
+      const threadId = text(row['thread_id'])
+      const total = integer(row['total'])
+      if (threadId && total !== null) counts[threadId] = total
+    }
+    return counts
+  }
+
+  renameThread(id: string, title: string): SecretaryThread | null {
+    const existing = this.getThread(id)
+    const nextTitle = sanitizedText(title, 160)
+    if (!existing || nextTitle.length < 2) return null
+    const updatedAt = Date.now()
+    this.db.run('UPDATE secretary_threads SET title = ?, updated_at = ? WHERE id = ?', [nextTitle, updatedAt, id])
+    schedulePersistToDisk()
+    return { ...existing, title: nextTitle, updatedAt }
+  }
+
+  deleteThread(id: string): 'deleted' | 'missing' | 'busy' {
+    const existing = this.getThread(id)
+    if (!existing) return 'missing'
+    const runs = this.listRuns(existing.projectId, id)
+    if (runs.some((run) => isLiveSecretaryRun(run.status))) return 'busy'
+    const runIds = runs.map((run) => run.id)
+    if (runIds.length > 0) {
+      const marks = runIds.map(() => '?').join(', ')
+      this.db.run(`DELETE FROM secretary_approvals WHERE run_id IN (${marks})`, runIds)
+      this.db.run(`DELETE FROM secretary_assignments WHERE run_id IN (${marks})`, runIds)
+    }
+    this.db.run('DELETE FROM secretary_runs WHERE thread_id = ?', [id])
+    this.db.run('DELETE FROM secretary_messages WHERE thread_id = ?', [id])
+    this.db.run('DELETE FROM secretary_threads WHERE id = ?', [id])
+    schedulePersistToDisk()
+    return 'deleted'
   }
 
   getThread(id: string): SecretaryThread | null {

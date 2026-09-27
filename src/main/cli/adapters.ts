@@ -93,6 +93,24 @@ export function spawnEnv(): Record<string, string> {
   }
 }
 
+const TERMINAL_APP_ENV = /^(ELECTRON_|VITE_|npm_|VSCODE_|CURSOR_)/
+
+/** Env for the plain terminal: the signed-in user's shell, without the app's own process flags. */
+export function terminalUserEnv(): Record<string, string> {
+  const env = spawnEnv()
+  for (const key of Object.keys(env)) {
+    if (key === 'NODE_OPTIONS' || key === 'NODE_CHANNEL_FD' || TERMINAL_APP_ENV.test(key)) delete env[key]
+  }
+  return env
+}
+
+function loginShellArgs(shell: string): string[] {
+  const name = shell.split(/[\\/]/).pop()?.toLowerCase() ?? ''
+  if (name === 'fish' || name === 'fish.exe') return ['--login', '--interactive']
+  if (name === 'csh' || name === 'tcsh') return ['-l']
+  return ['-il']
+}
+
 function findOnDisk(names: string[]): string | null {
   const delimiter = process.platform === 'win32' ? ';' : ':'
   const dirs = enrichedPath().split(delimiter)
@@ -125,11 +143,12 @@ export function getDefaultShell(): SpawnConfig {
     }
   }
 
-  // Login shell so .zprofile / .bash_profile (Homebrew, nvm, PATH) load the
-  // same way as Terminal.app — non-login shells inherit Electron's GUI PATH.
+  // Interactive login shell, same as Terminal.app: .zprofile and .zshrc both run,
+  // so the user's PATH, tools, and aliases are available.
+  const command = process.env.SHELL ?? (process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash')
   return {
-    command: process.env.SHELL ?? (process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash'),
-    args: ['-l']
+    command,
+    args: loginShellArgs(command)
   }
 }
 

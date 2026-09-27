@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, Check, Loader2, PanelRightClose, Pencil, Save, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import type { PanelDefinition, Project } from '@shared/types'
-import type { SecretaryMessageCursor, SecretaryPlan, SecretaryRun, SecretaryRunEvidence, SecretaryRunStatus, SecretaryThreadDetail } from '@shared/contracts/secretary'
+import type { DailyLearnView, ManagerAppAction, SecretaryMessageCursor, SecretaryPlan, SecretaryRun, SecretaryRunEvidence, SecretaryRunStatus, SecretarySessionSummary, SecretarySessionWork, SecretaryThreadDetail } from '@shared/contracts/secretary'
+import type { CacheAnalysis } from '@shared/contracts/resources'
+import type { WorkspaceCanvasMode } from '@shared/types'
 import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
 import type { PtySessionStatus } from '@shared/contracts/pty'
 import type { MemoryContextItem } from '@shared/contracts/developer-intelligence'
@@ -36,6 +38,17 @@ interface ChatItem {
   awaitingAssignmentId?: string
   report?: SecretaryRunEvidence
   error?: boolean
+}
+
+function workspaceForRequest(actions: ManagerAppAction[], plan: SecretaryPlan | null): ManagerAppAction[] {
+  const prepared = [...actions]
+  const add = (action: ManagerAppAction): void => {
+    if (!prepared.includes(action) && prepared.length < 4) prepared.push(action)
+  }
+  const modes = new Set(plan?.assignments.map((assignment) => assignment.mode) ?? [])
+  if (modes.has('review') || modes.has('validate')) add('show-changes')
+  else if (modes.has('implement') || modes.has('analyze')) add('show-files')
+  return prepared
 }
 
 function planStatusForRun(status: SecretaryRunStatus): ChatItem['planStatus'] {
@@ -132,6 +145,38 @@ function operationTone(status: PtySessionStatus | undefined): string {
   return 'is-idle'
 }
 
+function sameLocalDay(timestamp: number, now: number): boolean {
+  const left = new Date(timestamp)
+  const right = new Date(now)
+  return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth() && left.getDate() === right.getDate()
+}
+
+function sessionDayLabel(timestamp: number, now = Date.now()): string {
+  const dayStart = (value: number): number => {
+    const date = new Date(value)
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+  }
+  const days = Math.round((dayStart(now) - dayStart(timestamp)) / 86_400_000)
+  if (days <= 0) return 'Today'
+  if (days === 1) return 'Yesterday'
+  return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' }).format(new Date(timestamp))
+}
+
+function sessionWorkLabel(work: SecretarySessionWork): string {
+  const status = work.status === 'completed'
+    ? 'Done'
+    : work.status === 'failed'
+      ? 'Failed'
+      : work.status === 'cancelled'
+        ? 'Cancelled'
+        : work.status === 'rejected'
+          ? 'Rejected'
+          : work.status === 'interrupted'
+            ? 'Interrupted'
+            : 'Active'
+  return `${status}: ${work.label}`
+}
+
 function operationLabel(status: PtySessionStatus | undefined): string {
   if (status === 'waiting') return 'Ready'
   if (status === 'busy' || status === 'running') return 'Working'
@@ -188,6 +233,14 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   const [sending, setSending] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [threadId, setThreadId] = useState<string | null>(null)
+  const [sessions, setSessions] = useState<SecretarySessionSummary[]>([])
+  const [sessionsTick, setSessionsTick] = useState(0)
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null)
+  const [sessionTitle, setSessionTitle] = useState('')
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const [sessionError, setSessionError] = useState<string | null>(null)
+  const [cacheAnalysis, setCacheAnalysis] = useState<CacheAnalysis | null>(null)
+  const [cacheBusy, setCacheBusy] = useState(false)
   const [recoveryRuns, setRecoveryRuns] = useState<SecretaryRun[]>([])
   const [editingPlanMessageId, setEditingPlanMessageId] = useState<string | null>(null)
   const [planDraft, setPlanDraft] = useState<SecretaryPlan | null>(null)
@@ -195,6 +248,8 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     enabled: true,
     facts: []
   })
+  const [dailyLearn, setDailyLearn] = useState<DailyLearnView | null>(null)
+  const [dailyLearnLoading, setDailyLearnLoading] = useState(false)
   const [revisingPlan, setRevisingPlan] = useState(false)
   const [cancellingRunId, setCancellingRunId] = useState<string | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
@@ -230,6 +285,22 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     }
   }, [open, project.id, includeMemory, memoryCount])
 
+  useEffect(() => {
+    if (!open || !settings.configured) return
+    let active = true
+    setDailyLearnLoading(true)
+    void window.api.secretary.getDailyLearn().then((view) => {
+      if (active) setDailyLearn(view)
+    }).catch(() => {
+      if (active) setDailyLearn({ status: 'unavailable', lesson: null })
+    }).finally(() => {
+      if (active) setDailyLearnLoading(false)
+    })
+    return () => {
+      active = false
+    }
+  }, [open, settings.configured, includeMemory, memoryCount])
+
   const setSidebarOpen = (next: boolean): void => {
     setOpen(next)
     writeSecretaryOpen(next)
@@ -248,6 +319,11 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     setAnswering(false)
     setFeedback(null)
     setThreadId(null)
+    setSessions([])
+    setRenamingSessionId(null)
+    setSessionTitle('')
+    setPendingDeleteId(null)
+    setSessionError(null)
     setRecoveryRuns([])
     setEditingPlanMessageId(null)
     setPlanDraft(null)
@@ -263,17 +339,49 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   }, [])
 
   useEffect(() => {
+    let active = true
+    const loadCache = (): void => {
+      void window.api.resources.cacheAnalysis().then((analysis) => {
+        if (!active) return
+        setCacheAnalysis(analysis)
+        if (analysis.pressured && !analysis.dismissed) {
+          setOpen(true)
+          writeSecretaryOpen(true)
+        }
+      }).catch(() => undefined)
+    }
+    loadCache()
+    window.addEventListener('bikorch:cache-care', loadCache)
+    return () => {
+      active = false
+      window.removeEventListener('bikorch:cache-care', loadCache)
+    }
+  }, [])
+
+  const answerCache = async (accept: boolean): Promise<void> => {
+    setCacheBusy(true)
+    try {
+      setCacheAnalysis(await window.api.resources.respondCache(accept))
+    } catch {
+      setCacheAnalysis((current) => current)
+    } finally {
+      setCacheBusy(false)
+    }
+  }
+
+  useEffect(() => {
     const run = runRef.current
     const restoreMostRecentThread = async (): Promise<void> => {
       try {
-        const [threads, runs] = await Promise.all([
-          window.api.secretary.listThreads(project.id),
+        const [nextSessions, runs] = await Promise.all([
+          window.api.secretary.listSessions(project.id),
           window.api.secretary.listRuns(project.id)
         ])
         if (run !== runRef.current) return
+        setSessions(nextSessions)
         setRecoveryRuns(runs.filter((item) => item.status === 'interrupted' && item.sessionBindings.length > 0).slice(0, 3))
-        const thread = threads[0]
-        if (!thread) return
+        const thread = nextSessions[0]
+        if (!thread || !sameLocalDay(thread.updatedAt, Date.now())) return
         const detail = await window.api.secretary.getThread(thread.id)
         if (!detail || run !== runRef.current) return
         setThreadId(detail.thread.id)
@@ -288,6 +396,16 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     }
     void restoreMostRecentThread()
   }, [project.id])
+
+  useEffect(() => {
+    let active = true
+    void window.api.secretary.listSessions(project.id).then((next) => {
+      if (active) setSessions(next)
+    }).catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [project.id, sessionsTick])
 
   useEffect(() => window.api.secretary.onEvent((event) => {
     if (event.projectId !== project.id) return
@@ -490,6 +608,85 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   }
   const openMemory = (): void => {
     selectLeftSidebar(project.id, 'memory')
+  }
+
+  const startNewSession = (): void => {
+    setThreadId(null)
+    setMessages([])
+    setOldestMessageCursor(null)
+    setHasOlderMessages(false)
+    setBrief('')
+    setEditingPlanMessageId(null)
+    setPlanDraft(null)
+    setRenamingSessionId(null)
+    setPendingDeleteId(null)
+    setSessionError(null)
+  }
+
+  const openSession = async (id: string): Promise<void> => {
+    const run = runRef.current
+    try {
+      const detail = await window.api.secretary.getThread(id)
+      if (!detail || detail.thread.projectId !== project.id || run !== runRef.current) return
+      setThreadId(detail.thread.id)
+      setMessages(chatItemsFromThread(detail))
+      setOldestMessageCursor(detail.messages[0]
+        ? { createdAt: detail.messages[0].createdAt, id: detail.messages[0].id }
+        : null)
+      setHasOlderMessages(detail.hasOlderMessages)
+      setBrief('')
+      setEditingPlanMessageId(null)
+      setPlanDraft(null)
+      setRenamingSessionId(null)
+      setPendingDeleteId(null)
+      setSessionError(null)
+    } catch (cause) {
+      if (run === runRef.current) setSessionError(cause instanceof Error ? cause.message : 'Could not open that session')
+    }
+  }
+
+  const saveSessionTitle = async (id: string): Promise<void> => {
+    try {
+      await window.api.secretary.renameThread({ threadId: id, projectId: project.id, title: sessionTitle })
+      setRenamingSessionId(null)
+      setSessionError(null)
+      setSessionsTick((value) => value + 1)
+    } catch (cause) {
+      setSessionError(cause instanceof Error ? cause.message : 'Could not rename that session')
+    }
+  }
+
+  const removeSession = async (id: string): Promise<void> => {
+    try {
+      await window.api.secretary.deleteThread({ threadId: id, projectId: project.id })
+      if (threadId === id) startNewSession()
+      setPendingDeleteId(null)
+      setSessionError(null)
+      setSessionsTick((value) => value + 1)
+    } catch (cause) {
+      setSessionError(cause instanceof Error ? cause.message : 'Could not delete that session')
+    }
+  }
+
+  const applyManagerActions = (actions: ManagerAppAction[]): void => {
+    for (const action of actions) {
+      if (action.startsWith('show-')) {
+        const view = action.slice('show-'.length)
+        if (view === 'files' || view === 'changes' || view === 'accounts' || view === 'memory' || view === 'tasks' || view === 'profile' || view === 'music' || view === 'timer') {
+          selectLeftSidebar(project.id, view)
+        }
+        continue
+      }
+      if (action === 'open-terminal') addPanel('terminal')
+      else if (action === 'open-browser') addPanel('browser')
+      else if (action === 'open-player') addPanel('player')
+      else if (action === 'open-timer') addPanel('timer')
+      else if (action === 'open-ios-preview') addPanel('ios-preview')
+      else if (action === 'open-android-preview') addPanel('android-preview')
+      else if (action.startsWith('layout-')) {
+        useWorkspaceStore.getState().setCanvasMode(action.slice('layout-'.length) as WorkspaceCanvasMode)
+      }
+    }
   }
 
   const dispatch = async (plan: SecretaryPlan, run: number, persistedRunId?: string): Promise<number> => {
@@ -796,8 +993,10 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       })
       if (run !== runRef.current) return
       if (response.threadId) setThreadId(response.threadId)
+      setSessionsTick((value) => value + 1)
       if (response.savedSkills?.length) void useDeveloperIntelligenceStore.getState().loadSkills()
       const plan = response.plan
+      applyManagerActions(workspaceForRequest(response.actions ?? [], plan))
       setMessages((current) => [
         ...current,
         {
@@ -927,6 +1126,26 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           </button>
         </header>
         <div className="secretary-ops">
+          {cacheAnalysis && ((cacheAnalysis.pressured && !cacheAnalysis.dismissed) || cacheAnalysis.releasedBytes) ? (
+            <div className="secretary-cache" aria-label="Cache care">
+              <div className="secretary-ops-heading"><span>Cache</span></div>
+              {cacheAnalysis.pressured && !cacheAnalysis.dismissed ? (
+                <>
+                  <p>Caches have grown and storage is tight. Development may slow down. I can optimize and tidy your storage if you want.</p>
+                  <small>{cacheAnalysis.recommendation}</small>
+                  {cacheAnalysis.parts.slice(0, 3).map((part) => (
+                    <span key={part.id}>{part.label} · {Math.max(1, Math.round(part.bytes / (1024 * 1024)))} MB</span>
+                  ))}
+                  <div className="secretary-session-actions">
+                    <button type="button" onClick={() => void answerCache(true)} disabled={cacheBusy}>Optimize</button>
+                    <button type="button" onClick={() => void answerCache(false)} disabled={cacheBusy}>Not now</button>
+                  </div>
+                </>
+              ) : cacheAnalysis.releasedBytes ? (
+                <p>Released {Math.max(1, Math.round(cacheAnalysis.releasedBytes / (1024 * 1024)))} MB. Sign-ins and saved data were kept.</p>
+              ) : null}
+            </div>
+          ) : null}
           <div className="secretary-memory">
             <div className="secretary-ops-heading">
               <span>Memory</span>
@@ -945,6 +1164,73 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
                   : 'Memory is off, so Manager is not using what it knows about you.'}
               </p>
             )}
+          </div>
+          <div className="secretary-sessions">
+            <div className="secretary-ops-heading">
+              <span>Old sessions</span>
+              <button type="button" className="secretary-memory-open" onClick={startNewSession}>New</button>
+            </div>
+            {sessions.filter((session) => session.id !== threadId).length === 0 ? (
+              <p className="secretary-ops-empty">Yesterday's conversations show up here.</p>
+            ) : (
+              <ul className="secretary-session-list">
+                {sessions.filter((session) => session.id !== threadId).map((session) => (
+                  <li key={session.id}>
+                    {renamingSessionId === session.id ? (
+                      <form
+                        className="secretary-session-rename"
+                        onSubmit={(event) => {
+                          event.preventDefault()
+                          void saveSessionTitle(session.id)
+                        }}
+                      >
+                        <input
+                          value={sessionTitle}
+                          onChange={(event) => setSessionTitle(event.target.value)}
+                          aria-label="Session name"
+                          maxLength={160}
+                        />
+                        <button type="submit">Save</button>
+                        <button type="button" onClick={() => setRenamingSessionId(null)}>Cancel</button>
+                      </form>
+                    ) : (
+                      <>
+                        <button type="button" className="secretary-session-open" onClick={() => void openSession(session.id)}>
+                          <strong>{session.title}</strong>
+                          <small>{sessionDayLabel(session.createdAt)} · {session.messageCount} message{session.messageCount === 1 ? '' : 's'}</small>
+                          <span>
+                            {session.work.length > 0
+                              ? session.work.map((item) => sessionWorkLabel(item)).join(' · ')
+                              : 'No finished work'}
+                          </span>
+                        </button>
+                        <div className="secretary-session-actions">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRenamingSessionId(session.id)
+                              setSessionTitle(session.title)
+                              setPendingDeleteId(null)
+                            }}
+                          >
+                            Rename
+                          </button>
+                          {pendingDeleteId === session.id ? (
+                            <>
+                              <button type="button" onClick={() => void removeSession(session.id)}>Delete</button>
+                              <button type="button" onClick={() => setPendingDeleteId(null)}>Cancel</button>
+                            </>
+                          ) : (
+                            <button type="button" onClick={() => setPendingDeleteId(session.id)}>Delete</button>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {sessionError ? <p className="secretary-ops-note">{sessionError}</p> : null}
           </div>
           <div className="secretary-ops-heading">
             <span>Operations</span>
@@ -1018,17 +1304,6 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
                   <p>Manager already knows you from memory, then runs the CLI plan.</p>
                 </div>
                 <span className="secretary-empty-status"><i /> Online</span>
-              </div>
-              <div className="secretary-empty-copy">
-                <div>
-                  <strong>Start with the outcome</strong>
-                  <p>Manager plans from your memory, waits for approval, then follows every CLI through the result.</p>
-                </div>
-                <div className="secretary-empty-flow" aria-label="Manager workflow">
-                  <span><b>01</b> Brief</span>
-                  <span><b>02</b> Approve</span>
-                  <span><b>03</b> Review</span>
-                </div>
               </div>
             </div>
           ) : null}
@@ -1260,7 +1535,32 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
               </div>
             ) : null}
         </div>
-        {composer}
+        <div className="secretary-compose">
+          {settings.configured ? (
+            <div className="secretary-daily" aria-label="Daily learn">
+              <span>Daily learn{dailyLearn?.lesson ? ` · ${dailyLearn.lesson.basis}` : ''}</span>
+              {dailyLearn?.status === 'ready' && dailyLearn.lesson ? (
+                <>
+                  <strong>{dailyLearn.lesson.topic}</strong>
+                  <p>{dailyLearn.lesson.body}</p>
+                </>
+              ) : (
+                <p>
+                  {dailyLearnLoading || !dailyLearn
+                    ? "Preparing today's lesson…"
+                    : dailyLearn.status === 'memory-off'
+                      ? 'Turn on Use in Manager to get a lesson from your work.'
+                      : dailyLearn.status === 'empty'
+                        ? 'Daily Learn starts once memory knows how you work.'
+                        : dailyLearn.status === 'unconfigured'
+                          ? "Connect Manager to receive today's lesson."
+                          : "Today's lesson is not ready. It will try again tomorrow."}
+                </p>
+              )}
+            </div>
+          ) : null}
+          {composer}
+        </div>
       </aside>
     </section>
   )

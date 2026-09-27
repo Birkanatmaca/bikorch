@@ -11,17 +11,29 @@ function webSessions(): Electron.Session[] {
   return [session.defaultSession, ...WEB_PARTITIONS.map((name) => session.fromPartition(name))]
 }
 
+const HTTP_CACHE_PARTS = [
+  { id: 'app-http', label: 'App HTTP cache', partition: null },
+  { id: 'chatgpt-http', label: 'ChatGPT HTTP cache', partition: 'persist:chatgpt' },
+  { id: 'claude-http', label: 'Claude HTTP cache', partition: 'persist:claude-chat' },
+  { id: 'browser-http', label: 'Workspace browser HTTP cache', partition: 'persist:workspace-browser' }
+] as const
+
 async function browserCacheBytes(): Promise<number> {
   const sizes = await Promise.all(webSessions().map((item) => item.getCacheSize().catch(() => 0)))
   return sizes.reduce((sum, size) => sum + size, 0)
 }
 
-async function codeCacheBytes(): Promise<number> {
-  const root = app.getPath('userData')
-  const roots = [join(root, 'Code Cache'),
-    ...WEB_PARTITIONS.map((name) => join(root, 'Partitions', name.slice('persist:'.length), 'Code Cache'))]
+export async function measureHttpCacheParts(): Promise<Array<{ id: string; label: string; bytes: number }>> {
+  return Promise.all(HTTP_CACHE_PARTS.map(async (part) => ({
+    id: part.id,
+    label: part.label,
+    bytes: await (part.partition ? session.fromPartition(part.partition) : session.defaultSession).getCacheSize().catch(() => 0)
+  })))
+}
+
+async function directoryBytes(root: string): Promise<number> {
   let bytes = 0
-  const pending = [...roots]
+  const pending = [root]
   while (pending.length) {
     const directory = pending.pop()!
     let entries: Dirent[]
@@ -43,6 +55,31 @@ async function codeCacheBytes(): Promise<number> {
     }
   }
   return bytes
+}
+
+function codeCacheRoots(): Array<{ id: string; label: string; path: string }> {
+  const root = app.getPath('userData')
+  return [
+    { id: 'app-code', label: 'App code cache', path: join(root, 'Code Cache') },
+    ...WEB_PARTITIONS.map((name) => {
+      const folder = name.slice('persist:'.length)
+      const label = folder === 'chatgpt' ? 'ChatGPT code cache' : folder === 'claude-chat' ? 'Claude code cache' : 'Workspace browser code cache'
+      return { id: `${folder}-code`, label, path: join(root, 'Partitions', folder, 'Code Cache') }
+    })
+  ]
+}
+
+async function codeCacheBytes(): Promise<number> {
+  const sizes = await Promise.all(codeCacheRoots().map((part) => directoryBytes(part.path)))
+  return sizes.reduce((sum, size) => sum + size, 0)
+}
+
+export async function measureClearableCacheParts(): Promise<Array<{ id: string; label: string; bytes: number }>> {
+  const [http, code] = await Promise.all([
+    measureHttpCacheParts(),
+    Promise.all(codeCacheRoots().map(async (part) => ({ id: part.id, label: part.label, bytes: await directoryBytes(part.path) })))
+  ])
+  return [...http, ...code]
 }
 
 async function clearableBrowserCacheBytes(): Promise<number> {

@@ -144,6 +144,55 @@ export interface SecretaryChatResponse {
   planRevision?: number
   /** Set when this turn saved or updated developer skills. */
   savedSkills?: { id: string; name: string }[]
+  /** Surfaces Manager opened in this turn. CLI prompts still require plan approval. */
+  actions?: ManagerAppAction[]
+}
+
+/** One practical lesson for a local calendar day, written from work memories. */
+export interface DailyLearnLesson {
+  date: string
+  topic: string
+  body: string
+  basis: string
+}
+
+export type DailyLearnView =
+  | { status: 'ready'; lesson: DailyLearnLesson }
+  | { status: 'memory-off' | 'empty' | 'unconfigured' | 'unavailable'; lesson: null }
+
+export const MANAGER_APP_ACTIONS = [
+  'show-files',
+  'show-changes',
+  'show-accounts',
+  'show-memory',
+  'show-tasks',
+  'show-profile',
+  'show-music',
+  'show-timer',
+  'open-terminal',
+  'open-browser',
+  'open-player',
+  'open-timer',
+  'open-ios-preview',
+  'open-android-preview',
+  'layout-free',
+  'layout-tiled',
+  'layout-grid-2x2',
+  'layout-cols-4'
+] as const
+
+export type ManagerAppAction = (typeof MANAGER_APP_ACTIONS)[number]
+
+export function parseManagerAppActions(value: unknown): ManagerAppAction[] {
+  if (!Array.isArray(value)) return []
+  const allowed = new Set<string>(MANAGER_APP_ACTIONS)
+  const actions: ManagerAppAction[] = []
+  for (const item of value) {
+    if (typeof item !== 'string' || !allowed.has(item) || actions.includes(item as ManagerAppAction)) continue
+    actions.push(item as ManagerAppAction)
+    if (actions.length === 4) break
+  }
+  return actions
 }
 
 export interface SecretaryThread {
@@ -153,6 +202,36 @@ export interface SecretaryThread {
   status: SecretaryThreadStatus
   createdAt: number
   updatedAt: number
+}
+
+export type SecretarySessionWorkStatus = 'completed' | 'failed' | 'cancelled' | 'rejected' | 'interrupted' | 'active'
+
+export interface SecretarySessionWork {
+  label: string
+  status: SecretarySessionWorkStatus
+}
+
+/** A saved Manager conversation, with the work that session actually ran. */
+export interface SecretarySessionSummary {
+  id: string
+  projectId: string
+  title: string
+  status: SecretaryThreadStatus
+  createdAt: number
+  updatedAt: number
+  messageCount: number
+  work: SecretarySessionWork[]
+}
+
+export interface SecretaryThreadRenameRequest {
+  threadId: string
+  projectId: string
+  title: string
+}
+
+export interface SecretaryThreadDeleteRequest {
+  threadId: string
+  projectId: string
 }
 
 export interface SecretaryMessage {
@@ -308,8 +387,12 @@ export const SECRETARY_IPC = {
   UPDATE_SETTINGS: 'secretary:updateSettings',
   CREATE_PLAN: 'secretary:createPlan',
   CHAT: 'secretary:chat',
+  GET_DAILY_LEARN: 'secretary:getDailyLearn',
   LIST_THREADS: 'secretary:listThreads',
+  LIST_SESSIONS: 'secretary:listSessions',
   CREATE_THREAD: 'secretary:createThread',
+  RENAME_THREAD: 'secretary:renameThread',
+  DELETE_THREAD: 'secretary:deleteThread',
   GET_THREAD: 'secretary:getThread',
   LIST_RUNS: 'secretary:listRuns',
   GET_RUN: 'secretary:getRun',

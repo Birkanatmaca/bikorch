@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { cliLaunchArgs, detectCli, enrichedPath, getDefaultShell, resolveSpawnConfigCandidates } from '../adapters'
+import { cliLaunchArgs, detectCli, enrichedPath, getDefaultShell, resolveSpawnConfigCandidates, terminalUserEnv } from '../adapters'
 import { existsSync } from 'fs'
 import { join } from 'path'
 
@@ -19,7 +19,7 @@ describe('getDefaultShell', () => {
 
     const shell = getDefaultShell()
     expect(shell.command).toBe('/bin/zsh')
-    expect(shell.args).toEqual(['-l'])
+    expect(shell.args).toEqual(['-il'])
     expect(resolveSpawnConfigCandidates('terminal')[0]).toEqual(shell)
   })
 
@@ -27,7 +27,18 @@ describe('getDefaultShell', () => {
     Object.defineProperty(process, 'platform', { value: 'darwin' })
     delete process.env.SHELL
 
-    expect(getDefaultShell()).toEqual({ command: '/bin/zsh', args: ['-l'] })
+    expect(getDefaultShell()).toEqual({ command: '/bin/zsh', args: ['-il'] })
+  })
+
+  it('drops app process flags so the terminal keeps the user environment', () => {
+    const previous = process.env.ELECTRON_RUN_AS_NODE
+    process.env.ELECTRON_RUN_AS_NODE = '1'
+    const env = terminalUserEnv()
+    expect(env.ELECTRON_RUN_AS_NODE).toBeUndefined()
+    expect(env.TERM).toBe('xterm-256color')
+    expect(env.HOME ?? process.env.HOME).toBe(process.env.HOME)
+    if (previous === undefined) delete process.env.ELECTRON_RUN_AS_NODE
+    else process.env.ELECTRON_RUN_AS_NODE = previous
   })
 })
 

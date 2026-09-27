@@ -53,6 +53,7 @@ export function readSecretaryReply(text: string): {
   openKindsRaw: unknown
   contextSummary: string | null
   skillsRaw: unknown[]
+  actionsRaw: unknown
 } {
   const parsed = parseJsonObject(text)
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -68,8 +69,9 @@ export function readSecretaryReply(text: string): {
       planRaw: body.plan ?? (Array.isArray(body.assignments) ? parsed : null),
       openKindsRaw: body.openKinds ?? body.openPanels ?? null,
       contextSummary: typeof body.contextSummary === 'string' ? body.contextSummary.trim() : null,
-      skillsRaw
+      skillsRaw,
+      actionsRaw: body.actions ?? null
     }
   }
-  return { reply: text.trim(), planRaw: null, openKindsRaw: null, contextSummary: null, skillsRaw: [] }
+  return { reply: text.trim(), planRaw: null, openKindsRaw: null, contextSummary: null, skillsRaw: [], actionsRaw: null }
 }

@@ -1,5 +1,5 @@
 import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
-import { SECRETARY_ASSIGNMENT_MODES } from '@shared/contracts/secretary'
+import { MANAGER_APP_ACTIONS, SECRETARY_ASSIGNMENT_MODES } from '@shared/contracts/secretary'
 
 export interface SecretaryResponseFormat {
   name: string
@@ -55,10 +55,14 @@ export const SECRETARY_CHAT_RESPONSE_FORMAT: SecretaryResponseFormat = {
   schema: {
     type: 'object',
     additionalProperties: false,
-    required: ['reply', 'openKinds', 'plan', 'contextSummary', 'skills'],
+    required: ['reply', 'openKinds', 'plan', 'contextSummary', 'skills', 'actions'],
     properties: {
       reply: { type: 'string' },
       contextSummary: { type: 'string' },
+      actions: {
+        type: 'array',
+        items: { type: 'string', enum: MANAGER_APP_ACTIONS }
+      },
       skills: {
         type: 'array',
         items: {

@@ -11,6 +11,7 @@ import {
   Trash2,
   Zap
 } from 'lucide-react'
+import { CACHE_WARN_STEPS_MB, type CacheAnalysis } from '@shared/contracts/resources'
 import { SecretaryAvatar } from '@renderer/components/workspace/SecretaryAvatar'
 import { useSecretaryStore } from '@renderer/stores/secretary-store'
 import { SectionCard } from './ProfilePrimitives'
@@ -24,6 +25,12 @@ function formatCost(value: number | null): string {
   if (value === 0) return '$0.00'
   if (value < 0.01) return `$${value.toFixed(4)}`
   return `$${value.toFixed(2)}`
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${Math.round(bytes / (1024 * 1024))} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
 }
 
 function formatDate(value: number | null): string {
@@ -46,12 +53,17 @@ export function SecretarySettings(): React.JSX.Element {
   const [apiKey, setApiKey] = useState('')
   const [model, setModel] = useState(settings.model)
   const [saved, setSaved] = useState(false)
+  const [cache, setCache] = useState<CacheAnalysis | null>(null)
 
   useEffect(() => {
     if (!loaded) void load()
   }, [load, loaded])
 
   useEffect(() => setModel(settings.model), [settings.model])
+
+  useEffect(() => {
+    void window.api.resources.cacheAnalysis().then(setCache).catch(() => undefined)
+  }, [])
 
   const submit = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault()
@@ -116,6 +128,33 @@ export function SecretarySettings(): React.JSX.Element {
         >
           <RotateCcw className="h-3 w-3" /> Reset usage
         </button>
+      </SectionCard>
+
+      <SectionCard title="Cache care" description="Manager asks before clearing browser caches that grow during development." className="mt-2.5">
+        <label className="secretary-cache-slider">
+          <span>Ask when cache exceeds</span>
+          <strong>{cache?.warnAtMb ?? 256} MB</strong>
+          <input
+            type="range"
+            min={0}
+            max={CACHE_WARN_STEPS_MB.length - 1}
+            step={1}
+            value={Math.max(0, CACHE_WARN_STEPS_MB.indexOf((cache?.warnAtMb ?? 256) as typeof CACHE_WARN_STEPS_MB[number]))}
+            aria-label="Cache warning level"
+            onChange={(event) => {
+              const megabytes = CACHE_WARN_STEPS_MB[Number(event.target.value)] ?? 256
+              void window.api.resources.setCacheWarn(megabytes).then((next) => {
+                setCache(next)
+                window.dispatchEvent(new Event('bikorch:cache-care'))
+              }).catch(() => undefined)
+            }}
+          />
+        </label>
+        <p className="secretary-cost-note">
+          {cache
+            ? `Clearable cache is ${formatBytes(cache.clearableBytes)}. ${cache.parts[0] ? `${cache.parts[0].label} is the largest part.` : 'No cache has grown yet.'} Sign-ins, projects, and music stay.`
+            : 'Measuring browser HTTP and code caches…'}
+        </p>
       </SectionCard>
 
       <SectionCard title="OpenAI connection" description="Used by Manager to plan and run work. CLI credentials stay separate." className="mt-2.5">
