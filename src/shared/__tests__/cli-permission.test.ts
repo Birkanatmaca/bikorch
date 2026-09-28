@@ -5,7 +5,7 @@ describe('cli permission prompts', () => {
   it('accepts a read-only command and an Enter pause', () => {
     expect(cliPermissionResponse('Run this command?\ngit status\n❯ Allow\n  Deny')).toBe('\r')
     expect(cliPermissionResponse('Allow this command? (y/n)\ngit diff -- src/a.ts')).toBe('y\r')
-    expect(cliPermissionResponse('Press Enter to continue')).toBe('\r')
+    expect(cliPermissionResponse('git status\nPress Enter to continue')).toBe('\r')
     expect(isReadOnlyCliCommand('kubectl get pods')).toBe(true)
     expect(isReadOnlyCliCommand('terraform plan')).toBe(true)
   })
@@ -27,5 +27,46 @@ describe('cli permission prompts', () => {
 
   it('ignores a normal idle prompt', () => {
     expect(cliPermissionResponse('Done.\n❯ ')).toBeNull()
+  })
+
+  it.each([
+    'git branch',
+    'git branch --list',
+    'git branch --show-current',
+    'git branch -a',
+    'git branch -r',
+    'git branch --list -a'
+  ])('accepts an explicitly allowed branch listing: %s', (command) => {
+    expect(isReadOnlyCliCommand(command)).toBe(true)
+    expect(cliPermissionResponse(`${command}\nPress Enter to continue`)).toBe('\r')
+  })
+
+  it.each([
+    'git branch new-feature',
+    'git branch new-feature HEAD',
+    'git branch -d old-feature',
+    'git branch -m old-feature new-feature',
+    'git branch --copy old-feature new-feature',
+    'git branch --force new-feature HEAD',
+    'git branch --set-upstream-to=origin/main',
+    'git branch --unset-upstream',
+    'git branch --edit-description',
+    'git branch --list --delete old-feature'
+  ])('refuses branch creation or mutation: %s', (command) => {
+    expect(isReadOnlyCliCommand(command)).toBe(false)
+    expect(cliPermissionResponse(`Allow this command? (y/n)\n${command}`)).toBeNull()
+    expect(cliPermissionResponse(`${command}\nPress Enter to continue`)).toBeNull()
+  })
+
+  it.each([
+    'Press Enter to continue',
+    'Press Return to continue',
+    'Hit Enter to continue',
+    'Press any key to continue',
+    'Continue?'
+  ])('requires a recognized read-only command before a pause: %s', (prompt) => {
+    expect(cliPermissionResponse(prompt)).toBeNull()
+    expect(cliPermissionResponse(`custom-deployer is about to modify production.\n\n${prompt}`)).toBeNull()
+    expect(cliPermissionResponse(`git status\n${prompt}`)).toBe('\r')
   })
 })
