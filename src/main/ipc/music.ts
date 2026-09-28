@@ -83,12 +83,7 @@ import {
   parseDownloadSettingsUpdate,
   parseJobId
 } from '../music/downloader/validation'
-
-function assertTrustedSender(event: Electron.IpcMainInvokeEvent): void {
-  if (event.sender.isDestroyed()) throw new Error('Unauthorized sender')
-  const win = BrowserWindow.fromWebContents(event.sender)
-  if (!win || win.isDestroyed()) throw new Error('Unauthorized sender')
-}
+import { assertTrustedMainWindow } from './trusted-sender'
 
 async function pickAudioPaths(
   event: Electron.IpcMainInvokeEvent,
@@ -275,14 +270,14 @@ export function registerMusicHandlers(): void {
   })
 
   ipcMain.handle(MUSIC_IPC.ENSURE_PLAYABLE, async (event, payload: unknown) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     const parsed = parseEnsurePlayable(payload)
     if (!parsed) throw new Error('Invalid track id')
     return ensurePlayableTrack(parsed.trackId, parsed.force)
   })
 
   ipcMain.handle(MUSIC_IPC.LIBRARY_READ_PLAYBACK, async (event, payload: unknown) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     const id = parseTrackId(payload)
     if (!id) throw new Error('Invalid track id')
     return readPlaybackMedia(id)
@@ -301,7 +296,7 @@ export function registerMusicHandlers(): void {
   })
 
   ipcMain.handle(MUSIC_IPC.YOUTUBE_SEARCH, async (event, payload: unknown) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     const query = parseYouTubeSearchQuery(payload)
     if (!query) throw new Error('Invalid YouTube search')
     return searchYouTubeVideos(query)
@@ -310,24 +305,24 @@ export function registerMusicHandlers(): void {
   ipcMain.handle('music:recently-played', () => listRecentlyPlayed())
 
   ipcMain.handle(MUSIC_DOWNLOAD_IPC.ENGINE_STATUS, (event) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     return getDownloadEngineStatus()
   })
 
   ipcMain.handle(MUSIC_DOWNLOAD_IPC.ENGINE_INSTALL, async (event) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     return installDownloadEngine()
   })
 
   ipcMain.handle(MUSIC_DOWNLOAD_IPC.ANALYZE, async (event, payload: unknown) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     const url = parseAnalyzeUrl(payload)
     if (!url) throw new Error('Invalid or disallowed URL')
     return analyzeDownloadUrl(url)
   })
 
   ipcMain.handle(MUSIC_DOWNLOAD_IPC.START, async (event, payload: unknown) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     const request = parseDownloadRequest(payload)
     if (!request) throw new Error('Invalid download request')
     const preview = parseAnalysisPreview(payload)
@@ -335,74 +330,74 @@ export function registerMusicHandlers(): void {
   })
 
   ipcMain.handle(MUSIC_DOWNLOAD_IPC.LIST, (event) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     return listDownloadJobs()
   })
 
   ipcMain.handle(MUSIC_DOWNLOAD_IPC.CANCEL, async (event, payload: unknown) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     const id = parseJobId(payload)
     if (!id) throw new Error('Invalid job id')
     return { ok: await cancelDownloadJob(id) }
   })
 
   ipcMain.handle(MUSIC_DOWNLOAD_IPC.DELETE, async (event, payload: unknown) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     const id = parseJobId(payload)
     if (!id) throw new Error('Invalid job id')
     return deleteDownloadJob(id)
   })
 
   ipcMain.handle(MUSIC_DOWNLOAD_IPC.RETRY, async (event, payload: unknown) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     const id = parseJobId(payload)
     if (!id) throw new Error('Invalid job id')
     return retryDownloadJob(id)
   })
 
   ipcMain.handle(MUSIC_DOWNLOAD_IPC.CLEAR_HISTORY, (event) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     return clearDownloadHistory()
   })
 
   ipcMain.handle(MUSIC_DOWNLOAD_IPC.GET_SETTINGS, (event) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     return getDownloadSettings()
   })
 
   ipcMain.handle(MUSIC_DOWNLOAD_IPC.UPDATE_SETTINGS, (event, payload: unknown) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     const updates = parseDownloadSettingsUpdate(payload)
     if (!updates) throw new Error('Invalid download settings')
     return updateDownloadSettings(updates)
   })
 
   ipcMain.handle(MUSIC_DOWNLOAD_IPC.PICK_FOLDER, async (event) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     return pickDownloadFolder(event)
   })
 
   ipcMain.handle(MUSIC_DOWNLOAD_IPC.OPEN_FILE, async (event, payload: unknown) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     const id = parseJobId(payload)
     if (!id) throw new Error('Invalid job id')
     return openDownloadFile(id)
   })
 
   ipcMain.handle(MUSIC_DOWNLOAD_IPC.OPEN_FOLDER, async (event, payload: unknown) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     const id = parseJobId(payload)
     if (!id) throw new Error('Invalid job id')
     return openDownloadFolder(id)
   })
 
   ipcMain.handle(MUSIC_DOWNLOAD_IPC.OPEN_DIR, async (event) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     return openDownloadsDirectory()
   })
 
   ipcMain.handle(MUSIC_DOWNLOAD_IPC.COPY_PATH, (event, payload: unknown) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     const id = parseJobId(payload)
     if (!id) throw new Error('Invalid job id')
     return copyDownloadPath(id)

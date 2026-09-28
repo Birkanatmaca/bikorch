@@ -5,12 +5,7 @@ import {
   type CliTaskNotificationOutcome
 } from '@shared/contracts/notifications'
 import { setNotificationClickHandler, showCliTaskNotification } from '../notifications'
-
-function assertTrustedSender(event: Electron.IpcMainInvokeEvent): void {
-  if (event.sender.isDestroyed()) throw new Error('Unauthorized sender')
-  const win = BrowserWindow.fromWebContents(event.sender)
-  if (!win || win.isDestroyed()) throw new Error('Unauthorized sender')
-}
+import { assertTrustedMainWindow } from './trusted-sender'
 
 function asTrimmed(value: unknown, max: number): string | null {
   if (typeof value !== 'string') return null
@@ -53,7 +48,7 @@ export function registerNotificationHandlers(): void {
   })
 
   ipcMain.handle(NOTIFICATION_IPC.SHOW_CLI_TASK, (event, raw: unknown) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     const payload = parsePayload(raw)
     if (!payload) throw new Error('Invalid notification payload')
     return showCliTaskNotification(payload)

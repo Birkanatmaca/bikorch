@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { ipcMain } from 'electron'
 import {
   type ReadDirectoryRequest,
   type ReadFileRequest,
@@ -8,16 +8,7 @@ import {
 } from '@shared/contracts/filesystem'
 import { listDirectory, readProjectFile, searchProjectFiles, writeProjectFile } from '../filesystem'
 import { loadSnapshot } from '../persistence/database'
-
-function assertTrustedSender(event: IpcMainInvokeEvent): void {
-  if (
-    event.sender.isDestroyed() ||
-    !BrowserWindow.fromWebContents(event.sender) ||
-    event.senderFrame !== event.sender.mainFrame
-  ) {
-    throw new Error('Unauthorized filesystem request')
-  }
-}
+import { assertTrustedMainWindow } from './trusted-sender'
 
 function resolveProjectRoot(projectId: string): string {
   const project = loadSnapshot().projects.find((item) => item.id === projectId)
@@ -60,7 +51,7 @@ function validateWriteFile(payload: unknown): payload is WriteFileRequest {
 
 export function registerFilesystemHandlers(): void {
   ipcMain.handle(FILESYSTEM_IPC.READ_DIRECTORY, async (event, payload: unknown) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     if (!validateReadDirectory(payload)) {
       throw new Error('Invalid read directory request')
     }
@@ -70,7 +61,7 @@ export function registerFilesystemHandlers(): void {
   })
 
   ipcMain.handle(FILESYSTEM_IPC.READ_FILE, async (event, payload: unknown) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     if (!validateReadFile(payload)) {
       throw new Error('Invalid read file request')
     }
@@ -80,7 +71,7 @@ export function registerFilesystemHandlers(): void {
   })
 
   ipcMain.handle(FILESYSTEM_IPC.WRITE_FILE, async (event, payload: unknown) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     if (!validateWriteFile(payload)) {
       throw new Error('Invalid write file request')
     }
@@ -90,7 +81,7 @@ export function registerFilesystemHandlers(): void {
   })
 
   ipcMain.handle(FILESYSTEM_IPC.SEARCH, async (event, payload: unknown) => {
-    assertTrustedSender(event)
+    assertTrustedMainWindow(event)
     if (!validateSearchFiles(payload)) {
       throw new Error('Invalid search files request')
     }
