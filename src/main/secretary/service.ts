@@ -71,6 +71,7 @@ import { buildSessionSummaries } from './sessions'
 import {
   DAILY_LEARN_FORMAT,
   DAILY_LEARN_SYSTEM,
+  dailyLearnLanguageContext,
   lessonForDate,
   localDateKey,
   memoriesForDailyLearn,
@@ -333,7 +334,8 @@ export function getDailyLearn(): Promise<DailyLearnView> {
 
 async function loadDailyLearn(): Promise<DailyLearnView> {
   if (!getDeveloperIntelligenceSettings().includeMemoryInPrompts) return { status: 'memory-off', lesson: null }
-  const facts = memoriesForDailyLearn(listMemories())
+  const memories = listMemories()
+  const facts = memoriesForDailyLearn(memories)
   if (facts.length === 0) return { status: 'empty', lesson: null }
   const today = localDateKey()
   const record = parseDailyLearnRecord(readMetaValue(DAILY_LEARN_META_KEY))
@@ -342,9 +344,12 @@ async function loadDailyLearn(): Promise<DailyLearnView> {
   if (record.failedOn === today) return { status: 'unavailable', lesson: null }
   if (!readApiKey()) return { status: 'unconfigured', lesson: null }
   try {
+    const languageContext = dailyLearnLanguageContext(
+      memories, getSecretaryStore()?.listRecentUserMessages() ?? [], app.getLocale()
+    )
     const text = await callSecretaryModel([
       { role: 'system', content: [{ type: 'input_text', text: DAILY_LEARN_SYSTEM }] },
-      { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({ date: today, recentTopics: recentTopics(record, today), memories: facts }) }] }
+      { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({ date: today, recentTopics: recentTopics(record, today), memories: facts, languageContext }) }] }
     ], DAILY_LEARN_FORMAT)
     const lesson = parseDailyLearnLesson(JSON.parse(text), today)
     if (!lesson) {

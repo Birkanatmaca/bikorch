@@ -371,6 +371,7 @@ export interface SecretaryStore {
   }): SecretaryMessage
   listMessages(threadId: string, limit?: number, before?: SecretaryMessageCursor): SecretaryMessage[]
   listContextMessages(threadId: string, limit?: number): SecretaryMessage[]
+  listRecentUserMessages(limit?: number): string[]
   createRun(input: { threadId: string; projectId: string; requestText: string }): SecretaryRun
   getRun(id: string): SecretaryRun | null
   listRuns(projectId: string, threadId?: string): SecretaryRun[]
@@ -526,6 +527,18 @@ export class SqlSecretaryStore implements SecretaryStore {
       .map(rowToMessage)
       .filter((message): message is SecretaryMessage => Boolean(message))
       .reverse()
+  }
+
+  listRecentUserMessages(limit = 3): string[] {
+    const normalizedLimit = Math.min(Math.max(1, Math.floor(limit)), 10)
+    return toRows(
+      this.db,
+      "SELECT content FROM secretary_messages WHERE role = 'user' AND type = 'chat' ORDER BY created_at DESC, id DESC LIMIT ?",
+      [normalizedLimit]
+    ).flatMap((row) => {
+      const content = text(row['content'])
+      return content ? [content] : []
+    })
   }
 
   createRun(input: { threadId: string; projectId: string; requestText: string }): SecretaryRun {

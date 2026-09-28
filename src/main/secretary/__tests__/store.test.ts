@@ -85,6 +85,22 @@ describe('Secretary SQL store', () => {
     expect(restored).not.toContain('sk-proj-this-must-not-be-stored-1234567890')
   })
 
+  it('returns the latest user chat messages across Manager conversations for language context', () => {
+    const first = store.createThread({ projectId: 'project-1', title: 'First conversation' })
+    const second = store.createThread({ projectId: 'project-2', title: 'Second conversation' })
+    const messages = [
+      store.appendMessage({ threadId: first.id, role: 'user', type: 'chat', content: 'Explain the workflow.' }),
+      store.appendMessage({ threadId: second.id, role: 'user', type: 'chat', content: 'Türkçe devam edelim.' }),
+      store.appendMessage({ threadId: second.id, role: 'assistant', type: 'chat', content: 'English assistant response.' }),
+      store.appendMessage({ threadId: second.id, role: 'user', type: 'approval', content: 'Approve' })
+    ]
+    messages.forEach((message, index) => db.run('UPDATE secretary_messages SET created_at = ? WHERE id = ?', [index + 1, message.id]))
+    expect(store.listRecentUserMessages()).toEqual(['Türkçe devam edelim.', 'Explain the workflow.'])
+    expect(store.listRecentUserMessages(1)).toEqual(['Türkçe devam edelim.'])
+    expect(store.deleteThread(second.id)).toBe('deleted')
+    expect(store.listRecentUserMessages()).toEqual(['Explain the workflow.'])
+  })
+
   it('adds continuity storage when opening an existing Secretary database', async () => {
     const SQL = await initSqlJs()
     const legacy = new SQL.Database()
