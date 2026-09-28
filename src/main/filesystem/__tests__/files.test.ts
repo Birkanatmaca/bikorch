@@ -1,13 +1,13 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { assertPathWithinRoot } from '../path-guard'
 import { readProjectFile, writeProjectFile } from '../index'
 
 describe('assertPathWithinRoot', () => {
   it('allows files inside the project root', () => {
-    const root = '/Users/dev/project'
+    const root = resolve('/Users/dev/project')
     expect(assertPathWithinRoot(root, join(root, 'src/app.ts'))).toBe(join(root, 'src/app.ts'))
   })
 

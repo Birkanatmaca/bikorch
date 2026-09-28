@@ -5,10 +5,15 @@ import type { AgentRunRecord } from '@shared/contracts/git'
 import { loadRepoIsolation, saveRepoIsolation, upsertAgentRun } from './agent-run-store'
 import { isFoldingAgentRunStatus, isTerminalAgentRunStatus, normalizeAgentRunStatus } from './agent-lifecycle'
 import { commitIfDirty, currentBranch, headSha, isWorkingTreeDirty, pathExists, runGit, tryRepoRoot } from './git-exec'
-import { hashRepoRoot, isManagedWorktreePath } from './worktree-paths'
+import { canonicalRepoRoot, hashRepoRoot, isManagedWorktreePath } from './worktree-paths'
 
 function worktreeBaseDir(override?: string): string {
   return override ?? app.getPath('userData')
+}
+
+function worktreePathKey(path: string): string {
+  const canonical = canonicalRepoRoot(path)
+  return process.platform === 'win32' ? canonical.toLowerCase() : canonical
 }
 
 function worktreeLines(porcelain: string): string[] {
@@ -50,8 +55,8 @@ export async function cleanupOrphanWorktrees(input: {
   baseDir: string
 }): Promise<{ kept: number; removed: number }> {
   const state = await loadRepoIsolation(input.repoRoot, input.baseDir)
-  const known = new Set(state.runs.map((run) => run.worktreePath.toLowerCase()))
-  if (state.fold?.integrationPath) known.add(state.fold.integrationPath.toLowerCase())
+  const known = new Set(state.runs.map((run) => worktreePathKey(run.worktreePath)))
+  if (state.fold?.integrationPath) known.add(worktreePathKey(state.fold.integrationPath))
   const listed = worktreeLines(await runGit(input.repoRoot, ['worktree', 'list', '--porcelain']).catch(() => ''))
   let removed = 0
   let kept = 0
@@ -59,7 +64,7 @@ export async function cleanupOrphanWorktrees(input: {
 
   for (const worktreePath of listed) {
     if (!isManagedWorktreePath(input.baseDir, worktreePath)) continue
-    if (known.has(worktreePath.toLowerCase())) {
+    if (known.has(worktreePathKey(worktreePath))) {
       kept += 1
       continue
     }
@@ -79,7 +84,7 @@ export async function cleanupOrphanWorktrees(input: {
     const entries = await readdir(slotRoot).catch(() => [])
     for (const entry of entries) {
       const worktreePath = join(slotRoot, entry)
-      if (known.has(worktreePath.toLowerCase())) continue
+      if (known.has(worktreePathKey(worktreePath))) continue
       if (!(await pathExists(worktreePath))) continue
       if (await isWorkingTreeDirty(worktreePath)) {
         kept += 1

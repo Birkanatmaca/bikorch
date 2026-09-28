@@ -38,7 +38,7 @@ describe('orphan worktree cleanup', () => {
     await Promise.all(trash.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
   })
 
-  it('does not delete a dirty unmanaged worktree', async () => {
+  it('does not delete recorded clean or dirty worktrees during orphan cleanup', async () => {
     const repo = await mkdtemp(join(tmpdir(), 'bikorch-orphan-'))
     const baseDir = await mkdtemp(join(tmpdir(), 'bikorch-orphan-base-'))
     trash.push(repo, baseDir)
@@ -55,6 +55,8 @@ describe('orphan worktree cleanup', () => {
       baseDir
     })
     if (!created.ok || !created.worktreePath) throw new Error('worktree')
+    expect((await cleanupOrphanWorktrees({ repoRoot: repo, baseDir })).removed).toBe(0)
+    expect(await run(created.worktreePath, 'git', ['status', '--porcelain'])).toBe('')
     await writeFile(join(created.worktreePath, 'dirty.ts'), 'export const dirty = true\n')
     const result = await cleanupOrphanWorktrees({ repoRoot: repo, baseDir })
     expect(result.removed).toBe(0)
