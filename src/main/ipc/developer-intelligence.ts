@@ -1,4 +1,5 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron'
+import type { OpenDialogOptions } from 'electron'
 import { readFile, writeFile } from 'fs/promises'
 import { DEVELOPER_INTELLIGENCE_IPC, type SkillUpdate } from '@shared/contracts/developer-intelligence'
 import {
@@ -97,10 +98,10 @@ export function registerDeveloperIntelligenceHandlers(): void {
 
   ipcMain.handle(DEVELOPER_INTELLIGENCE_IPC.IMPORT_SKILL, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    const options = {
+    const options: OpenDialogOptions = {
       title: 'Import skill',
       filters: [{ name: 'Skill', extensions: ['md', 'json', 'txt'] }],
-      properties: ['openFile'] as const
+      properties: ['openFile']
     }
     const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
     if (result.canceled || !result.filePaths[0]) return { ok: false as const, canceled: true as const }
