@@ -213,7 +213,7 @@ async function waitForCliIdle(sessionId: string, timeoutMs = 60000): Promise<boo
 
 export function DeveloperSecretary({ project, panels }: { project: Project; panels: PanelDefinition[] }): React.JSX.Element {
   const usage = useUsageStore((state) => state.providers)
-  const sessions = useTerminalStore((state) => state.sessions)
+  const terminalSessions = useTerminalStore((state) => state.sessions)
   const selectLeftSidebar = useWorkspaceStore((state) => state.selectLeftSidebar)
   const addPanel = useWorkspaceStore((state) => state.addPanel)
   const includeMemory = useDeveloperIntelligenceStore((state) => state.settings.includeMemoryInPrompts)
@@ -233,7 +233,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   const [sending, setSending] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [threadId, setThreadId] = useState<string | null>(null)
-  const [sessions, setSessions] = useState<SecretarySessionSummary[]>([])
+  const [managerSessions, setManagerSessions] = useState<SecretarySessionSummary[]>([])
   const [sessionsTick, setSessionsTick] = useState(0)
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null)
   const [sessionTitle, setSessionTitle] = useState('')
@@ -262,8 +262,8 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     kind: panel.type as typeof AI_ACCOUNT_KINDS[number],
     accountId: panel.accountId,
     title: panel.title,
-    status: sessions[panel.id] ?? 'stopped'
-  })), [panels, sessions])
+    status: terminalSessions[panel.id] ?? 'stopped'
+  })), [panels, terminalSessions])
 
   useEffect(() => {
     if (!settingsLoaded) void loadSettings()
@@ -319,7 +319,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     setAnswering(false)
     setFeedback(null)
     setThreadId(null)
-    setSessions([])
+    setManagerSessions([])
     setRenamingSessionId(null)
     setSessionTitle('')
     setPendingDeleteId(null)
@@ -378,7 +378,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           window.api.secretary.listRuns(project.id)
         ])
         if (run !== runRef.current) return
-        setSessions(nextSessions)
+        setManagerSessions(nextSessions)
         setRecoveryRuns(runs.filter((item) => item.status === 'interrupted' && item.sessionBindings.length > 0).slice(0, 3))
         const thread = nextSessions[0]
         if (!thread || !sameLocalDay(thread.updatedAt, Date.now())) return
@@ -400,7 +400,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   useEffect(() => {
     let active = true
     void window.api.secretary.listSessions(project.id).then((next) => {
-      if (active) setSessions(next)
+      if (active) setManagerSessions(next)
     }).catch(() => undefined)
     return () => {
       active = false
@@ -1170,11 +1170,11 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
               <span>Old sessions</span>
               <button type="button" className="secretary-memory-open" onClick={startNewSession}>New</button>
             </div>
-            {sessions.filter((session) => session.id !== threadId).length === 0 ? (
+            {managerSessions.filter((session) => session.id !== threadId).length === 0 ? (
               <p className="secretary-ops-empty">Yesterday's conversations show up here.</p>
             ) : (
               <ul className="secretary-session-list">
-                {sessions.filter((session) => session.id !== threadId).map((session) => (
+                {managerSessions.filter((session) => session.id !== threadId).map((session) => (
                   <li key={session.id}>
                     {renamingSessionId === session.id ? (
                       <form
