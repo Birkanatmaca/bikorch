@@ -9,7 +9,7 @@ export function isAgentWorktreeKind(value: string): value is AgentWorktreeKind {
 
 export function canonicalRepoRoot(repoRoot: string): string {
   try {
-    return existsSync(repoRoot) ? realpathSync(repoRoot) : resolve(repoRoot)
+    return existsSync(repoRoot) ? realpathSync.native(repoRoot) : resolve(repoRoot)
   } catch {
     return resolve(repoRoot)
   }
@@ -42,18 +42,18 @@ export function buildAgentWorktreePath(
   kind: string,
   panelId: string
 ): string {
-  return join(resolve(baseDir), 'agent-worktrees', hashRepoRoot(repoRoot), sanitizeWorktreeSlot(kind, panelId))
+  return join(canonicalRepoRoot(baseDir), 'agent-worktrees', hashRepoRoot(repoRoot), sanitizeWorktreeSlot(kind, panelId))
 }
 
 export function buildIntegrationWorktreePath(baseDir: string, repoRoot: string, panelId: string): string {
   const safeId = panelId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)
   if (safeId.length < 8) throw new Error('Invalid worktree slot')
-  return join(resolve(baseDir), 'agent-worktrees', hashRepoRoot(repoRoot), `integrate-${safeId}`)
+  return join(canonicalRepoRoot(baseDir), 'agent-worktrees', hashRepoRoot(repoRoot), `integrate-${safeId}`)
 }
 
 export function isManagedWorktreePath(baseDir: string, worktreePath: string): boolean {
-  const root = resolve(baseDir, 'agent-worktrees')
-  const target = resolve(worktreePath)
+  const root = join(canonicalRepoRoot(baseDir), 'agent-worktrees')
+  const target = canonicalRepoRoot(worktreePath)
   const rel = relative(root, target)
   return Boolean(rel) && !rel.startsWith('..') && !isAbsolute(rel)
 }

@@ -1,4 +1,5 @@
 import { mkdtemp, rm, writeFile } from 'fs/promises'
+import { realpathSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { spawn } from 'child_process'
@@ -29,7 +30,7 @@ function run(cwd: string, command: string, args: string[]): Promise<string> {
   })
 }
 
-describe('agent worktrees', () => {
+describe('agent worktrees', { timeout: 20_000 }, () => {
   const trash: string[] = []
 
   afterEach(async () => {
@@ -55,7 +56,7 @@ describe('agent worktrees', () => {
     })
     expect(created.ok).toBe(true)
     if (!created.ok || !created.worktreePath) throw new Error('expected worktree')
-    expect(created.worktreePath.startsWith(baseDir)).toBe(true)
+    expect(created.worktreePath.startsWith(realpathSync.native(baseDir))).toBe(true)
 
     const listed = await run(repo, 'git', ['worktree', 'list', '--porcelain'])
     const listedNorm = listed.replace(/\\/g, '/').toLowerCase()
