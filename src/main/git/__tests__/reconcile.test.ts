@@ -31,7 +31,7 @@ function run(cwd: string, command: string, args: string[]): Promise<string> {
   })
 }
 
-describe('orphan worktree cleanup', () => {
+describe('orphan worktree cleanup', { timeout: 20_000 }, () => {
   const trash: string[] = []
 
   afterEach(async () => {

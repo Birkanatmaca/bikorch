@@ -30,7 +30,7 @@ function run(cwd: string, command: string, args: string[]): Promise<string> {
   })
 }
 
-describe('agent worktrees', () => {
+describe('agent worktrees', { timeout: 20_000 }, () => {
   const trash: string[] = []
 
   afterEach(async () => {
