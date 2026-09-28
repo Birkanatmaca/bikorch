@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DeveloperMemory } from '@shared/contracts/developer-intelligence'
 import {
+  dailyLearnLanguageContext,
   lessonForDate,
   localDateKey,
   memoriesForDailyLearn,
@@ -28,6 +29,35 @@ function memory(overrides: Partial<DeveloperMemory>): DeveloperMemory {
 }
 
 describe('daily learn', () => {
+  it('supplies conversation language independently of the ranked lesson memories', () => {
+    const memories = [
+      ...Array.from({ length: 12 }, (_, index) => memory({ id: `work-${index}` })),
+      memory({ category: 'Communication', content: 'Prefers Turkish replies.', lastSeenAt: 5 }),
+      memory({ category: 'Communication', content: 'Prefers German replies.', enabled: false }),
+      memory({ category: 'About me', content: 'Lives in France.' })
+    ]
+    expect(memoriesForDailyLearn(memories)).toHaveLength(12)
+    expect(dailyLearnLanguageContext(memories, ['Bu akışı Türkçe açıklayabilir misin?'], 'en-US')).toEqual({
+      locale: 'en-US',
+      communicationPreferences: ['Prefers Turkish replies.'],
+      recentUserMessages: ['Bu akışı Türkçe açıklayabilir misin?']
+    })
+  })
+
+  it('bounds and redacts language context and supports a locale-only fallback', () => {
+    const secret = 'sk-proj-this-must-not-be-sent-1234567890'
+    const context = dailyLearnLanguageContext([
+      memory({ category: 'Communication', content: `Prefers Turkish. ${secret} ${'x'.repeat(500)}` })
+    ], [`Türkçe açıkla. ${secret} ${'x'.repeat(500)}`, 'İkinci soru', 'Üçüncü soru', 'Dördüncü soru'], 'tr-TR')
+    expect(context.recentUserMessages).toHaveLength(3)
+    expect(context.recentUserMessages[0]).toHaveLength(400)
+    expect(context.communicationPreferences[0]).toHaveLength(240)
+    expect(JSON.stringify(context)).not.toContain(secret)
+    expect(dailyLearnLanguageContext([], [], 'tr-TR')).toEqual({
+      locale: 'tr-TR', communicationPreferences: [], recentUserMessages: []
+    })
+  })
+
   it('formats the local calendar day', () => {
     expect(localDateKey(new Date(2026, 8, 7))).toBe('2026-09-07')
   })
