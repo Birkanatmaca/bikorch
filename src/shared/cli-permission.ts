@@ -60,7 +60,7 @@ function isReadOnlyGit(args: string[]): boolean {
     return !action || action === 'show' || action === 'get-url'
   }
   if (sub === 'branch') {
-    return !args.some((arg) => ['-d', '-D', '-m', '-M', '-c', '-C', '--delete', '--move', '--copy'].includes(arg))
+    return rest.every((arg) => ['--list', '--show-current', '-a', '-r'].includes(arg))
   }
   if (sub === 'tag') {
     return rest.filter((arg) => !arg.startsWith('-')).length === 0
@@ -166,7 +166,7 @@ function confirmationKind(end: string): '\r' | 'y\r' | null {
 
 /**
  * Keystrokes for an approved CLI waiting on a prompt.
- * Allow, Run, and yes/no are answered only when every visible command is a read-only capability.
+ * Confirmations and Enter pauses require at least one recognized command, all read-only.
  */
 export function cliPermissionResponse(buffer: string): '\r' | 'y\r' | null {
   const tail = buffer.replace(ANSI_RE, '').replace(/\r/g, '').slice(-600)
@@ -179,7 +179,7 @@ export function cliPermissionResponse(buffer: string): '\r' | 'y\r' | null {
     return confirmation
   }
   if (/press (?:enter|return)|hit enter|press any key|continue\?\s*$/i.test(end)) {
-    if (commands.some((command) => !isReadOnlyCliCommand(command))) return null
+    if (commands.length === 0 || commands.some((command) => !isReadOnlyCliCommand(command))) return null
     return '\r'
   }
   return null
