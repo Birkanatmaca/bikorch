@@ -85,7 +85,11 @@ export function ProfilePanel({ visible = true }: ProfilePanelProps): React.JSX.E
     <div className="profile-panel relative flex h-full min-h-0 flex-col bg-app-bg">
       <header className="profile-panel-header shrink-0">
         <div className="flex min-w-0 items-center gap-2">
-          <h2 className="min-w-0 flex-1 truncate text-xs font-medium text-text-primary">Profile</h2>
+          <h2 className="min-w-0 flex-1 truncate text-xs font-medium text-text-primary">
+            {section === 'overview' || section === 'insights' || section === 'prompts' || section === 'sessions'
+              ? 'Developer Profile'
+              : 'Settings'}
+          </h2>
           {showsMetrics && (
             <select
               value={range}
@@ -100,7 +104,21 @@ export function ProfilePanel({ visible = true }: ProfilePanelProps): React.JSX.E
           )}
         </div>
         <nav className="profile-nav" aria-label="Profile sections">
-          {SECTIONS.map(({ id, label, icon: Icon }) => (
+          <span className="profile-nav-group-label">PROFILE</span>
+          {SECTIONS.slice(0, 4).map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setSection(id)}
+              className={cn('profile-nav-item', section === id && 'profile-nav-item-active')}
+              aria-current={section === id ? 'page' : undefined}
+            >
+              <Icon className="h-3 w-3" aria-hidden />
+              <span>{label}</span>
+            </button>
+          ))}
+          <span className="profile-nav-group-label">SETTINGS</span>
+          {SECTIONS.slice(4).map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               type="button"

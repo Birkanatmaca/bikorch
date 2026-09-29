@@ -31,8 +31,20 @@
 .file-tree-inline-error { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px 16px; color: #e7b6c5; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
 .studio-launcher { background: #0f1119; padding: 28px clamp(18px, 4vw, 40px); }
 .studio-launcher::before, .studio-launcher::after { display: none; }
-.studio-launcher-content { position: relative; width: min(440px, 100%); margin: auto; }
+.studio-launcher-content { position: relative; width: min(480px, 100%); margin: auto; }
+.studio-launch-intro { margin-bottom: 18px; }
+.studio-launch-intro > span { color: #bca7e2; font-size: 10px; font-weight: 700; letter-spacing: .14em; }
+.studio-launch-intro h1 { margin-top: 7px; color: #f3edf9; font-size: clamp(22px, 2.4vw, 28px); font-weight: 650; letter-spacing: -.035em; }
+.studio-launch-intro p { max-width: 390px; margin-top: 5px; color: #aaa3b8; font-size: 12px; line-height: 1.5; }
 .studio-launch-panel { overflow: hidden; border: 1px solid #b9a5d426; border-radius: 14px; background: #161821; box-shadow: inset 0 1px 0 #ffffff06; }
+.studio-manager-launch { display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 14px; padding: 12px 14px; border: 1px solid #b9a5d41c; border-radius: 13px; background: #171721; color: #c9bfd5; text-align: left; cursor: pointer; }
+.studio-manager-launch:hover { border-color: #b9a5d44a; background: #1d1a29; }
+.studio-manager-launch:focus-visible { outline: 2px solid #c4b5ff; outline-offset: 2px; }
+.studio-manager-launch-icon { display: grid; width: 32px; height: 32px; flex: 0 0 auto; place-items: center; border-radius: 9px; background: #a380dc16; color: #bda8e4; }
+.studio-manager-launch > span:nth-child(2) { display: grid; flex: 1; gap: 2px; }
+.studio-manager-launch strong { color: #e7dff1; font-size: 12px; font-weight: 600; }
+.studio-manager-launch small { color: #9e95aa; font-size: 11px; }
+.studio-manager-launch > svg { color: #82768f; }
 .studio-launch-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 58px; padding: 10px 14px; border: 0; border-bottom: 1px solid #b9a5d418; background: transparent; color: inherit; text-align: left; cursor: pointer; transition: background 160ms ease; }
 .studio-launch-row:last-child { border-bottom: 0; }
 .studio-launch-row:hover { background: #211e2e; }
@@ -52,6 +64,34 @@
 .studio-launch-footer button:hover { color: #e4d8f6; }
 .studio-launch-footer button svg { width: 12px; height: 12px; }
 .secretary-sidebar { border-color: #b39bd938; background: linear-gradient(150deg, #9c73c90b, transparent 55%), #15141f; }
+.activity-rail-group { display: flex; flex-direction: column; align-items: center; gap: 9px; }
+.activity-rail-divider { width: 20px; height: 1px; flex: 0 0 auto; background: #bda4dd29; }
+.activity-rail-spacer { flex: 1; min-height: 12px; }
+.activity-rail-tools { color: #a896bd !important; }
+.activity-rail-tools-group { padding-bottom: 2px; }
+.agent-work-intro { margin: 1px 1px 10px; padding: 10px 11px; border: 1px solid #b9a5d42b; border-radius: 11px; background: #a585cf0d; }
+.agent-work-intro strong { color: #e9e0f4; font-size: 12px; font-weight: 650; }
+.agent-work-intro p { margin-top: 4px; color: #a9a1b5; font-size: 10px; line-height: 1.5; }
+.intelligence-intro { margin-bottom: 10px; padding: 11px 12px; border: 1px solid #b9a5d42b; border-radius: 12px; background: #a585cf0d; }
+.intelligence-intro strong { color: #eee6f7; font-size: 13px; font-weight: 650; }
+.intelligence-intro p { margin-top: 4px; color: #a9a1b5; font-size: 10px; line-height: 1.5; }
+.intelligence-skill-description { margin: 3px 0 9px; color: #a9a1b5; font-size: 10px; line-height: 1.4; }
+.intelligence-profile-link { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 10px; padding: 11px 12px; border: 1px solid #b9a5d428; border-radius: 12px; background: #10131a; text-align: left; cursor: pointer; }
+.intelligence-profile-link:hover { border-color: #b9a5d455; background: #1a1b27; }
+.intelligence-profile-link > span { display: grid; flex: 1; gap: 3px; }
+.intelligence-profile-link strong { color: #eee6f7; font-size: 12px; }
+.intelligence-profile-link small { color: #9b93aa; font-size: 10px; }
+.intelligence-profile-link > svg { color: #a998bf; }
+.intelligence-daily { display: grid; gap: 4px; margin-top: 10px; padding: 11px 12px; border: 1px solid #b9a5d428; border-radius: 12px; background: linear-gradient(145deg, #a585cf17, #10131a 75%); }
+.intelligence-daily > span { color: #c5afe8; font-size: 9px; font-weight: 700; letter-spacing: .1em; }
+.intelligence-daily strong { color: #f0e9f8; font-size: 12px; }
+.intelligence-daily p { margin: 0; color: #aaa1b5; font-size: 10px; line-height: 1.5; }
+.profile-nav-group-label { display: inline-flex; align-items: center; color: #8c849b; font-size: 8px; font-weight: 700; letter-spacing: .1em; white-space: nowrap; }
+.profile-nav-group-label { grid-column: 1 / -1; margin-top: 4px; }
+.panel-menu-group + .panel-menu-group { border-top: 1px solid #b9a5d422; padding-top: 5px; }
+.panel-menu-group p { padding-top: 6px; }
+.welcome-workflow { max-width: 370px; margin: 8px auto 0; color: #aaa0b9; font-size: 12px; line-height: 1.5; }
+.welcome-tagline { letter-spacing: .08em; text-transform: none; }
 
 @media (max-width: 900px) {
   .app-status-bar > div:first-child > span:last-child:not(:first-of-type) { display: none; }
@@ -76,6 +116,9 @@
   .workspace-frame, .platform-macos .workspace-frame { flex-direction: column; padding: 6px; gap: 6px; }
   .workspace-main { order: 1; width: 100%; border-radius: 14px; }
   .workstation-rail { order: 2; width: 100%; flex-direction: row; justify-content: space-evenly; gap: 1px; padding: 4px 0 max(4px, env(safe-area-inset-bottom)); border: 1px solid #bca2d320; border-radius: 14px; background: #15151f; overflow-x: auto; }
+  .activity-rail-group { flex-direction: row; gap: 1px; }
+  .activity-rail-divider { width: 1px; height: 24px; }
+  .activity-rail-spacer { min-width: 4px; min-height: 0; }
   .workstation-rail .glass-icon-btn { width: 40px; height: 44px; }
   .workspace-sidebar-overlay { width: min(380px, 100%) !important; min-width: 0; max-width: 100%; }
   .workspace-sidebar-overlay-handle { display: none; }

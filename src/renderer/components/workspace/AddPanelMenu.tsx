@@ -25,24 +25,10 @@ const PANEL_MENU_LABELS: Partial<Record<PanelType, string>> = {
   'android-preview': 'Android Device'
 }
 
-const ADDABLE_PANEL_TYPES: PanelType[] = [
-  'terminal',
-  'claude',
-  'cursor',
-  'gemini',
-  'antigravity',
-  'codex',
-  'chatgpt',
-  'claude-chat',
-  'file-explorer',
-  'git-changes',
-  'diff',
-  'logs',
-  'player',
-  'timer',
-  'browser',
-  'ios-preview',
-  'android-preview'
+const PANEL_GROUPS: Array<{ label: string; types: PanelType[] }> = [
+  { label: 'Agents & terminal', types: ['terminal', 'claude', 'cursor', 'gemini', 'antigravity', 'codex', 'chatgpt', 'claude-chat'] },
+  { label: 'Workspace', types: ['file-explorer', 'git-changes', 'diff', 'logs', 'browser', 'ios-preview', 'android-preview'] },
+  { label: 'Tools', types: ['player', 'timer'] }
 ]
 
 export { ADD_PANEL_MENU_EVENT } from '@renderer/lib/app-events'
@@ -125,26 +111,28 @@ export function AddPanelMenu(): React.JSX.Element {
       ref={menuRef}
       role="menu"
       aria-label="Add panel"
-      className="header-dropdown-menu fixed z-[10001] min-w-[200px] overflow-hidden rounded-xl py-1 shadow-2xl animate-scale-in"
+      className="header-dropdown-menu fixed z-[10001] max-h-[calc(100vh-64px)] min-w-[200px] overflow-y-auto rounded-xl py-1 shadow-2xl animate-scale-in"
       style={{ top: menuStyle.top, left: menuStyle.left }}
     >
-      <p className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-text-muted">
-        Add panel
-      </p>
-      {ADDABLE_PANEL_TYPES.map((type) => (
-        <button
-          key={type}
-          type="button"
-          role="menuitem"
-          onClick={() => {
-            addPanel(type, type === 'chatgpt' || type === 'claude-chat' ? 'right' : 'center')
-            closeMenu()
-          }}
-          className="menu-action flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-text-secondary"
-        >
-          <PanelIcon type={type} className="text-text-muted" />
-          {PANEL_MENU_LABELS[type] ?? PANEL_TYPE_LABELS[type]}
-        </button>
+      {PANEL_GROUPS.map(({ label, types }) => (
+        <div key={label} className="panel-menu-group" role="group" aria-label={label}>
+          <p className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-text-muted">{label}</p>
+          {types.map((type) => (
+            <button
+              key={type}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                addPanel(type, type === 'chatgpt' || type === 'claude-chat' ? 'right' : 'center')
+                closeMenu()
+              }}
+              className="menu-action flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-text-secondary"
+            >
+              <PanelIcon type={type} className="text-text-muted" />
+              {PANEL_MENU_LABELS[type] ?? PANEL_TYPE_LABELS[type]}
+            </button>
+          ))}
+        </div>
       ))}
     </div>
   ) : null

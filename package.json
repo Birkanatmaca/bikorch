@@ -2,7 +2,7 @@
   "name": "ai-dev-workspace",
   "productName": "Bikorch",
   "version": "0.1.2",
-  "description": "Bikorch — multi-CLI desktop workspace orchestrator",
+  "description": "Bikorch — desktop developer workspace for multiple AI coding agents",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",

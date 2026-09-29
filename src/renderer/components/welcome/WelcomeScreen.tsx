@@ -64,7 +64,8 @@ export function WelcomeScreen(): React.JSX.Element {
             <AppLogo size="xl" />
           </div>
           <AppWordmark size="xl" className="mt-6 min-w-[200px]" />
-          <p className="welcome-tagline">Multi-CLI workspace orchestrator</p>
+          <p className="welcome-tagline">Your desktop workspace for AI coding agents</p>
+          <p className="welcome-workflow">Open a project, work directly with your agents, and review changes in one place.</p>
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

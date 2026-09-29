@@ -1,8 +1,8 @@
-import { ChevronRight, Command, Terminal } from 'lucide-react'
+import { Bot, ChevronRight, Command, Terminal } from 'lucide-react'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { getCliLogo } from '@renderer/lib/cli-logos'
 import type { PanelType, PanelZone } from '@shared/types'
-import { ADD_PANEL_MENU_EVENT, COMMAND_PALETTE_EVENT } from '@renderer/lib/app-events'
+import { ADD_PANEL_MENU_EVENT, COMMAND_PALETTE_EVENT, OPEN_MANAGER_EVENT } from '@renderer/lib/app-events'
 import { ContextMenu } from '@renderer/components/ui/ContextMenu'
 import { useOrchestratorContextMenu } from '@renderer/components/workspace/use-orchestrator-context-menu'
 import { useRef } from 'react'
@@ -72,6 +72,11 @@ export function WorkspaceCenterEmpty(): React.JSX.Element {
       onContextMenu={(e) => openAt(e)}
     >
       <div className="studio-launcher-content animate-fade-in">
+        <div className="studio-launch-intro">
+          <span>WORKSPACE</span>
+          <h1>Work with your agents</h1>
+          <p>Open an agent or terminal in this project. Review its work in Agent Work & Changes.</p>
+        </div>
         <div className="studio-launch-panel">
           {LAUNCHERS.map((item) => (
             <LaunchRow
@@ -83,6 +88,16 @@ export function WorkspaceCenterEmpty(): React.JSX.Element {
             />
           ))}
         </div>
+
+        <button
+          type="button"
+          className="studio-manager-launch"
+          onClick={() => window.dispatchEvent(new Event(OPEN_MANAGER_EVENT))}
+        >
+          <span className="studio-manager-launch-icon"><Bot className="h-4 w-4" aria-hidden /></span>
+          <span><strong>Manager</strong><small>Let Bikorch coordinate your agents for you.</small></span>
+          <ChevronRight className="h-4 w-4" aria-hidden />
+        </button>
 
         <div className="studio-launch-footer">
           <span className="studio-launch-keys">

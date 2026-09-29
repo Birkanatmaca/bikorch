@@ -10,6 +10,8 @@ import { TimerPanel } from '@renderer/components/timer/TimerPanel'
 import { SidebarTimerDock } from '@renderer/components/timer/SidebarTimerDock'
 import { cn } from '@renderer/lib/utils'
 import { Button } from '@renderer/components/ui/Button'
+import { useActiveProject } from '@renderer/hooks/use-active-project'
+import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import type { LeftSidebarView } from '@shared/types'
 
 interface LeftSidebarProps {
@@ -19,17 +21,19 @@ interface LeftSidebarProps {
 
 const TITLES: Record<LeftSidebarView, string> = {
   files: 'Files',
-  changes: 'Changes',
+  changes: 'Agent Work & Changes',
   accounts: 'CLI accounts',
-  memory: 'Memory',
+  memory: 'Intelligence',
   tasks: 'Tasks',
-  profile: 'Profile',
+  profile: 'Developer Profile',
   music: 'Music',
   timer: 'Timer'
 }
 
 export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Element {
   const title = TITLES[view] ?? 'Files'
+  const { projectId } = useActiveProject()
+  const selectLeftSidebar = useWorkspaceStore((state) => state.selectLeftSidebar)
   return (
     <div className="workstation-sidebar panel-shell relative flex h-full flex-col overflow-hidden">
       <header className="sidebar-header app-no-drag">
@@ -56,7 +60,10 @@ export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Eleme
           <AiAccountsPanel />
         </div>
         <div className={cn('h-full overflow-x-hidden overflow-y-auto p-2.5', view !== 'memory' && 'hidden')}>
-          <MemoryManager />
+          <MemoryManager
+            active={view === 'memory'}
+            onOpenProfile={() => { if (projectId) selectLeftSidebar(projectId, 'profile') }}
+          />
         </div>
         <div className={cn('h-full', view !== 'tasks' && 'hidden')}>
           <TasksPanel />

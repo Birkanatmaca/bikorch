@@ -65,6 +65,7 @@ export function SkillList(): React.JSX.Element {
           </button>
         </div>
       </div>
+      <p className="intelligence-skill-description">Reusable guidance for coordinated agent work.</p>
       {adding && (
         <form
           className="profile-skill-form"
@@ -75,7 +76,7 @@ export function SkillList(): React.JSX.Element {
         >
           <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Name" aria-label="Skill name" maxLength={80} required />
           <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="When to use it" aria-label="Skill description" maxLength={280} />
-          <textarea value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="How Manager should work" aria-label="Skill instructions" rows={4} maxLength={4000} required />
+          <textarea value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="Instructions for coordinated work" aria-label="Skill instructions" rows={4} maxLength={4000} required />
           <button type="submit" className={buttonStyles({ variant: 'primary', size: 'sm' })} disabled={!name.trim() || instructions.trim().length < 8}>
             Save
           </button>

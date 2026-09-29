@@ -12,14 +12,26 @@ app.commandLine.appendSwitch('disable-gpu')
 let server
 let win
 const delay = (ms) => new Promise((done) => setTimeout(done, ms))
-const evaluate = (source) => win.webContents.executeJavaScript(source)
+const evaluate = async (source) => {
+  try {
+    return await win.webContents.executeJavaScript(source)
+  } catch (error) {
+    throw new Error(`Renderer evaluation failed for ${source}: ${error}`, { cause: error })
+  }
+}
 async function until(source, label) {
   const deadline = Date.now() + 30_000
+  let lastError
   while (Date.now() < deadline) {
-    if (await evaluate(source)) return
+    try {
+      if (await evaluate(source)) return
+    } catch (error) {
+      // A navigation can replace the execution context between polling attempts.
+      lastError = error
+    }
     await delay(80)
   }
-  throw new Error('Timed out: ' + label)
+  throw new Error('Timed out: ' + label + (lastError ? ` (${lastError})` : ''))
 }
 async function screenshot(name, width, height) {
   win.setContentSize(width, height)
@@ -60,8 +72,15 @@ app.whenReady().then(async () => {
   assert.equal(await evaluate(`Boolean(document.querySelector('.welcome-action-card'))`), true, 'cancel picker')
   await evaluate(`window.studioFixture.setFolder('/projects/aurora-studio'); document.querySelector('.welcome-action-card').click()`)
   await until(`Boolean(document.querySelector('.studio-launcher'))`, 'open project')
+  await until(`getComputedStyle(document.querySelector('.studio-launcher-content')).opacity === '1'`, 'workspace launcher visible')
+  assert.equal(await evaluate(`document.querySelector('.studio-launch-intro h1').textContent`), 'Work with your agents')
+  assert.equal(await evaluate(`document.querySelectorAll('.studio-launch-row').length`), 6, 'direct agent and terminal launchers')
+  assert.equal(await evaluate(`document.querySelector('.studio-manager-launch strong').textContent`), 'Manager', 'optional Manager entry')
   await screenshot('workspace-mobile', 390, 844)
   await screenshot('workspace-desktop', 1280, 900)
+  await evaluate(`document.querySelector('[aria-label="Tools"]').click()`)
+  assert.equal(await evaluate(`document.querySelector('[aria-label="Tools"]').getAttribute('aria-expanded')`), 'true', 'tools expand separately')
+  await evaluate(`document.querySelector('[aria-label="Tools"]').click()`)
   await evaluate(`document.querySelector('[aria-label="Show files"]').click()`)
   await until(`document.querySelector('.file-tree-list')?.textContent.includes('README.md')`, 'registered project files')
   assert.deepEqual(await evaluate('window.studioFixture.errors'), [])
@@ -108,7 +127,7 @@ app.whenReady().then(async () => {
   await delay(1000)
   assert.equal(await evaluate(`document.querySelector('[data-bootstrap-ready]').dataset.bootstrapError`), '')
   assert.equal(await evaluate('window.studioFixture.emptySaves()'), 0, 'effect replay must not persist the empty pre-hydration store')
-  assert.equal(await evaluate(`document.querySelector('.studio-project-tag').textContent`), 'Restored project')
+  assert.equal(await evaluate(`document.querySelector('.project-tab-name').textContent`), 'Restored project')
   assert.deepEqual(errors, [], 'renderer console errors')
   console.log('Studio smoke passed: 4 viewport sizes, picker cancel/open, project registration, empty folders, recovery/retry, stale responses, project home and StrictMode bootstrap.')
   console.log('Screenshots: ' + output)

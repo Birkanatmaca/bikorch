@@ -1,5 +1,6 @@
 export const COMMAND_PALETTE_EVENT = 'bikorch:open-command-palette'
 export const ADD_PANEL_MENU_EVENT = 'bikorch:open-add-panel-menu'
+export const OPEN_MANAGER_EVENT = 'bikorch:open-secretary'
 export const FOCUS_TERMINAL_EVENT = 'bikorch:focus-terminal'
 export const FOCUS_PANEL_EVENT = 'bikorch:focus-panel'
 export const TERMINAL_LAYOUT_LOCK_EVENT = 'bikorch:terminal-layout-lock'
