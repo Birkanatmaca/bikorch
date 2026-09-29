@@ -369,6 +369,7 @@ export interface SecretaryStore {
     type: SecretaryMessageType
     content: string
   }): SecretaryMessage
+  linkMessageToRun(messageId: string, threadId: string, runId: string): void
   listMessages(threadId: string, limit?: number, before?: SecretaryMessageCursor): SecretaryMessage[]
   listContextMessages(threadId: string, limit?: number): SecretaryMessage[]
   listRecentUserMessages(limit?: number): string[]
@@ -481,7 +482,8 @@ export class SqlSecretaryStore implements SecretaryStore {
     type: SecretaryMessageType
     content: string
   }): SecretaryMessage {
-    const now = Date.now()
+    const latest = toRows(this.db, 'SELECT MAX(created_at) AS latest FROM secretary_messages WHERE thread_id = ?', [input.threadId])[0]
+    const now = Math.max(Date.now(), (integer(latest?.['latest']) ?? 0) + 1)
     const message: SecretaryMessage = {
       id: randomUUID(),
       threadId: input.threadId,
@@ -499,6 +501,11 @@ export class SqlSecretaryStore implements SecretaryStore {
     this.db.run('UPDATE secretary_threads SET updated_at = ? WHERE id = ?', [now, message.threadId])
     schedulePersistToDisk()
     return message
+  }
+
+  linkMessageToRun(messageId: string, threadId: string, runId: string): void {
+    this.db.run('UPDATE secretary_messages SET run_id = ? WHERE id = ? AND thread_id = ?', [runId, messageId, threadId])
+    schedulePersistToDisk()
   }
 
   listMessages(threadId: string, limit = 100, before?: SecretaryMessageCursor): SecretaryMessage[] {

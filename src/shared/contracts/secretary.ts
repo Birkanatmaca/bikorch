@@ -343,6 +343,7 @@ export type SecretaryEvent =
   | {
       type: 'run-report'
       projectId: string
+      threadId: string
       runId: string
       reply: string
       /** Git snapshot facts captured by the main process, not CLI claims. */
@@ -357,6 +358,7 @@ export type SecretaryEvent =
   | {
       type: 'run-followup'
       projectId: string
+      threadId: string
       completedRunId: string
       runId: string
       reply: string
@@ -367,6 +369,7 @@ export type SecretaryEvent =
   | {
       type: 'run-needs-user'
       projectId: string
+      threadId: string
       runId: string
       assignmentId: string
       assignmentTitle: string
@@ -375,6 +378,7 @@ export type SecretaryEvent =
   | {
       type: 'run-failed'
       projectId: string
+      threadId: string
       runId: string
       message: string
     }

@@ -835,6 +835,14 @@ input:not(.xterm-helper-textarea), select, textarea:not(.xterm-helper-textarea) 
 .secretary-report-warning { color: #e6bd7c; }
 .secretary-review-changes { justify-self: start; border: 1px solid rgb(139 124 248 / 0.28); border-radius: 6px; padding: 4px 7px; color: var(--color-text-primary); background: rgb(139 124 248 / 0.1); font-size: 9px; }
 .secretary-review-changes:hover { border-color: rgb(139 124 248 / 0.5); background: rgb(139 124 248 / 0.18); }
+.secretary-work-card { display: grid; gap: 8px; margin-top: 8px; }
+.secretary-work-card > .secretary-review-changes { justify-self: start; }
+.secretary-needs-input { display: grid; gap: 8px; margin-top: 8px; }
+.secretary-needs-input p { color: var(--color-text-secondary); font-size: 10px; line-height: 1.5; }
+.secretary-needs-input textarea { width: 100%; resize: vertical; border: 1px solid rgb(196 181 255 / .24); border-radius: 8px; padding: 7px 8px; outline: 0; background: rgb(0 0 0 / .24); color: var(--color-text-primary); font: inherit; font-size: 10px; line-height: 15px; }
+.secretary-needs-input textarea:focus { border-color: rgb(196 181 255 / .64); box-shadow: 0 0 0 2px rgb(119 103 220 / .16); }
+.secretary-needs-input button:disabled { opacity: .45; cursor: not-allowed; }
+.secretary-result-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .secretary-assignment-dependency { display: block; margin-top: 6px; color: var(--color-purple-light); font-size: 9px; white-space: normal; }
 @keyframes secretary-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Check, Loader2, PanelRightClose, Pencil, Save, ShieldCheck, SlidersHorizontal } from 'lucide-react'
+import { ArrowUp, Check, Loader2, PanelRightClose, SlidersHorizontal } from 'lucide-react'
 import type { PanelDefinition, Project } from '@shared/types'
-import type { ManagerAppAction, SecretaryMessageCursor, SecretaryPlan, SecretaryRun, SecretaryRunEvidence, SecretaryRunStatus, SecretarySessionSummary, SecretarySessionWork, SecretaryThreadDetail } from '@shared/contracts/secretary'
+import type { ManagerAppAction, SecretaryMessageCursor, SecretaryPlan, SecretaryRun, SecretaryRunStatus, SecretarySessionSummary, SecretarySessionWork, SecretaryThreadDetail } from '@shared/contracts/secretary'
 import type { CacheAnalysis } from '@shared/contracts/resources'
 import type { WorkspaceCanvasMode } from '@shared/types'
 import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
@@ -11,6 +11,7 @@ import type { CliUsageKind } from '@shared/contracts/usage'
 import { pickCliAccountId } from '@shared/cli-account'
 import { AppLogo } from '@renderer/components/brand/AppLogo'
 import { SecretaryAvatar, type SecretaryAvatarMood } from './SecretaryAvatar'
+import { ManagerConversation, type ManagerChatItem } from './ManagerConversation'
 import { focusTerminal, focusWorkspacePanel, OPEN_MANAGER_EVENT } from '@renderer/lib/app-events'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import { useSecretaryStore } from '@renderer/stores/secretary-store'
@@ -25,20 +26,7 @@ import { cn } from '@renderer/lib/utils'
 
 const CLI_TYPES = new Set(AI_ACCOUNT_KINDS)
 
-interface ChatItem {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  plan?: SecretaryPlan | null
-  runId?: string
-  planRevision?: number
-  planOpenKinds?: CliUsageKind[]
-  planStatus?: 'awaiting-approval' | 'dispatching' | 'sent' | 'completed' | 'rejected' | 'cancelled' | 'failed' | 'interrupted'
-  awaitingAnswer?: boolean
-  awaitingAssignmentId?: string
-  report?: SecretaryRunEvidence
-  error?: boolean
-}
+type ChatItem = ManagerChatItem
 
 function workspaceForRequest(actions: ManagerAppAction[], plan: SecretaryPlan | null): ManagerAppAction[] {
   const prepared = [...actions]
@@ -88,6 +76,9 @@ function chatItemsFromThread(detail: SecretaryThreadDetail): ChatItem[] {
       id: message.id,
       role: message.role,
       content: message.content,
+      createdAt: message.createdAt,
+      ...(run ? { run } : {}),
+      ...(run?.requestText.startsWith('Follow-up requested after CLI result for:') ? { followUp: true } : {}),
       ...(plan
         ? {
             plan,
@@ -386,16 +377,20 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
 
   useEffect(() => window.api.secretary.onEvent((event) => {
     if (event.projectId !== project.id) return
+    setSessionsTick((value) => value + 1)
+    if (event.threadId !== threadId) return
     if (event.type === 'run-report') {
       setSidebarOpen(true)
       setMessages((current) => [
         ...current.map((item) => item.runId === event.runId
-          ? { ...item, planStatus: 'completed' as const, awaitingAnswer: false }
+          ? { ...item, planStatus: 'completed' as const, awaitingAnswer: false,
+              ...(item.run ? { run: { ...item.run, status: 'completed' as const, evidence: event.evidence } } : {}) }
           : item),
         {
           id: newId(),
           role: 'assistant',
           content: event.reply,
+          runId: event.runId,
           report: event.evidence
         }
       ])
@@ -406,14 +401,16 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       setSidebarOpen(true)
       setMessages((current) => [
         ...current.map((item) => item.runId === event.completedRunId
-          ? { ...item, planStatus: 'completed' as const, awaitingAnswer: false }
+          ? { ...item, planStatus: 'completed' as const, awaitingAnswer: false,
+              ...(item.run ? { run: { ...item.run, status: 'completed' as const, evidence: event.completedEvidence } } : {}) }
           : item),
-        { id: newId(), role: 'assistant', content: event.reply, report: event.completedEvidence },
+        { id: newId(), role: 'assistant', content: event.reply, runId: event.completedRunId, report: event.completedEvidence },
         {
           id: newId(),
           role: 'assistant',
-          content: event.reply,
+          content: 'A follow-up plan is ready for review.',
           plan: event.plan,
+          followUp: true,
           runId: event.runId,
           planOpenKinds: event.openKinds,
           planStatus: 'awaiting-approval' as const
@@ -425,7 +422,8 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     if (event.type === 'run-needs-user') {
       setSidebarOpen(true)
       setMessages((current) => [
-        ...current,
+        ...current.map((item) => item.runId === event.runId && item.run
+          ? { ...item, run: { ...item.run, status: 'needs-user' as const } } : item),
         {
           id: newId(),
           role: 'assistant',
@@ -435,7 +433,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           awaitingAssignmentId: event.assignmentId
         }
       ])
-      setFeedback('The CLI needs input. Reply here and Manager will forward it to the waiting session.')
+      setFeedback('The agent needs input. Use its answer card when you are ready.')
       return
     }
     setMessages((current) => [
@@ -445,7 +443,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       { id: newId(), role: 'assistant', content: event.message, error: true }
     ])
     setFeedback(null)
-  }), [project.id])
+  }), [project.id, threadId])
 
   useLayoutEffect(() => {
     const node = logRef.current
@@ -588,8 +586,11 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   }
 
   const startNewSession = (): void => {
+    runRef.current += 1
     setThreadId(null)
     setMessages([])
+    setLoading(false)
+    setAnswering(false)
     setOldestMessageCursor(null)
     setHasOlderMessages(false)
     setBrief('')
@@ -605,8 +606,11 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     try {
       const detail = await window.api.secretary.getThread(id)
       if (!detail || detail.thread.projectId !== project.id || run !== runRef.current) return
+      runRef.current += 1
       setThreadId(detail.thread.id)
       setMessages(chatItemsFromThread(detail))
+      setLoading(false)
+      setAnswering(false)
       setOldestMessageCursor(detail.messages[0]
         ? { createdAt: detail.messages[0].createdAt, id: detail.messages[0].id }
         : null)
@@ -869,9 +873,11 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       )))
       const sent = await dispatch(bound.plan, run, persistedRunId)
       if (run !== runRef.current) return
+      const persisted = sent > 0 && persistedRunId ? await window.api.secretary.getRun(persistedRunId) : null
       setMessages((current) => current.map((item) => (
         item.id === messageId
-          ? { ...item, planStatus: sent > 0 ? 'sent' as const : 'failed' as const }
+          ? { ...item, ...(persisted ? { run: persisted, createdAt: persisted.createdAt } : {}),
+              planStatus: item.planStatus === 'completed' ? 'completed' as const : sent > 0 ? 'sent' as const : 'failed' as const }
           : item
       )))
       if (sent > 0) setFeedback('CLI work is running. Manager will post the final report when it finishes.')
@@ -906,50 +912,44 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     }
   }
 
+  const answerRun = async (messageId: string, runId: string, assignmentId: string | undefined, answer: string): Promise<boolean> => {
+    if (answering || !answer.trim()) return false
+    const generation = runRef.current
+    setAnswering(true)
+    try {
+      await window.api.secretary.answerRun({
+        runId,
+        projectId: project.id,
+        ...(assignmentId ? { assignmentId } : {}),
+        message: answer.trim()
+      })
+      if (generation !== runRef.current) return false
+      setMessages((current) => [
+        ...current.map((item) => item.id === messageId
+          ? { ...item, awaitingAnswer: false }
+          : item.runId === runId && item.run
+            ? { ...item, run: { ...item.run, status: 'running' as const } } : item),
+        { id: newId(), role: 'user', content: answer.trim(), runId }
+      ])
+      setFeedback('Answer sent to the waiting agent.')
+      return true
+    } catch (cause) {
+      if (generation !== runRef.current) return false
+      setMessages((current) => [...current, {
+        id: newId(), role: 'assistant',
+        content: cause instanceof Error ? cause.message : 'Could not send the answer to the waiting agent',
+        error: true
+      }])
+      return false
+    } finally {
+      if (generation === runRef.current) setAnswering(false)
+    }
+  }
+
   const sendMessage = async (): Promise<void> => {
     const text = brief.trim()
     if (!text || !settings.configured || loading) return
-    const waitingItem = [...messages].reverse().find((item) => item.awaitingAnswer && item.runId)
-    const run = ++runRef.current
-    if (waitingItem?.runId) {
-      const userItem: ChatItem = { id: newId(), role: 'user', content: text, runId: waitingItem.runId }
-      setBrief('')
-      setSidebarOpen(true)
-      setLoading(true)
-      setAnswering(true)
-      setFeedback(null)
-      setMessages((current) => [...current, userItem])
-      try {
-        await window.api.secretary.answerRun({
-          runId: waitingItem.runId,
-          projectId: project.id,
-          ...(waitingItem.awaitingAssignmentId ? { assignmentId: waitingItem.awaitingAssignmentId } : {}),
-          message: text
-        })
-        if (run !== runRef.current) return
-        setMessages((current) => current.map((item) => (
-          item.id === waitingItem.id ? { ...item, awaitingAnswer: false } : item
-        )))
-        setFeedback('Answer sent. Manager is watching the CLI for the next result.')
-      } catch (cause) {
-        if (run !== runRef.current) return
-        setMessages((current) => [
-          ...current,
-          {
-            id: newId(),
-            role: 'assistant',
-            content: cause instanceof Error ? cause.message : 'Could not send the answer to the waiting CLI',
-            error: true
-          }
-        ])
-      } finally {
-        if (run === runRef.current) {
-          setLoading(false)
-          setAnswering(false)
-        }
-      }
-      return
-    }
+    const run = runRef.current
     const history = messages
       .filter((item) => !item.error && item.content.trim())
       .map((item) => ({ role: item.role, content: item.content }))
@@ -985,6 +985,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           ...(plan
             ? {
                 plan,
+                createdAt: Date.now(),
                 ...(response.runId ? { runId: response.runId, planRevision: response.planRevision } : {}),
                 planOpenKinds: response.openKinds ?? [],
                 planStatus: 'awaiting-approval' as const
@@ -1023,11 +1024,13 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       : 'idle'
   const placeholder = !settings.configured
     ? 'Connect Manager in Profile to start…'
-    : waitingForUser
-      ? 'Answer the waiting CLI here…'
-      : `Tell Manager what to run in ${project.name}…`
+    : `Ask Manager about ${project.name} or request work…`
 
   const revealCli = (panelId: string): void => {
+    if (!panels.some((panel) => panel.id === panelId)) {
+      selectLeftSidebar(project.id, 'changes')
+      return
+    }
     focusWorkspacePanel(panelId)
     focusTerminal(panelId)
   }
@@ -1277,226 +1280,35 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
               <div className="secretary-empty-stage">
                 <SecretaryAvatar mood="idle" variant="hero" />
                 <div className="secretary-empty-intro">
-                  <span>Optional coordination</span>
-                  <strong>Let Manager coordinate.</strong>
-                  <p>Give Manager a task, review its plan, and find agent results in Agent Work & Changes.</p>
+                  <span>Developer supervisor</span>
+                  <strong>One conversation for your project.</strong>
+                  <p>Ask a question, request work, approve a plan, and review agent evidence here.</p>
                 </div>
                 <span className="secretary-empty-status"><i /> Online</span>
               </div>
             </div>
           ) : null}
-            {messages.map((item) => (
-              <article
-                key={item.id}
-                className={cn(
-                  'secretary-bubble',
-                  item.role === 'user' ? 'is-user' : 'is-assistant',
-                  item.error && 'is-error'
-                )}
-              >
-                <p>{item.content}</p>
-                {item.report ? (
-                  <div className="secretary-report-facts secretary-run-card">
-                    <div className="secretary-run-card-header">
-                      <strong>Mission outcome</strong>
-                      <span>{item.report.verificationLevel === 'git-observed' ? 'Git activity observed' : item.report.verificationLevel === 'cli-reported' ? 'CLI-reported' : 'Unverified signal'}</span>
-                    </div>
-                    <div className="secretary-run-timeline" aria-label="Task progress">
-                      <span>Plan approved</span>
-                      <span>CLI responded</span>
-                      <span className={item.report.assignments.every((assignment) => assignment.patchCheckExitCode === 0) ? 'is-observed' : 'is-pending'}>
-                        {item.report.assignments.every((assignment) => assignment.patchCheckExitCode === 0) ? 'Tracked patch check passed' : item.report.assignments.some((assignment) => assignment.patchCheckExitCode !== null && assignment.patchCheckExitCode !== 0) ? 'Tracked patch check failed' : 'Patch check unavailable'}
-                      </span>
-                      <span className="is-pending">Tests not run by Bikorch</span>
-                    </div>
-                    <div className="secretary-run-assignments">
-                      {item.report.assignments.map((assignment) => {
-                        const account = accounts.find((candidate) => candidate.id === assignment.accountId)
-                        return (
-                          <div key={assignment.assignmentId}>
-                            <strong>{assignment.title}</strong>
-                            <small>{AI_ACCOUNT_LABELS[assignment.kind]} · {account?.name ?? (assignment.accountId ? 'Account removed' : 'Default account')} · {assignment.completionEvidence === 'cli-reported' ? 'CLI claim' : 'Idle inferred'}</small>
-                            {assignment.preexistingChangedFiles.length > 0 ? (
-                              <small>{assignment.preexistingChangedFiles.length} file(s) were already changed before this assignment.</small>
-                            ) : null}
-                            {assignment.sessionId && panels.some((panel) => panel.id === assignment.sessionId) ? (
-                              <button type="button" onClick={() => revealCli(assignment.sessionId)}>Open terminal</button>
-                            ) : null}
-                          </div>
-                        )
-                      })}
-                    </div>
-                    <div className="secretary-completion-evidence">
-                      <span>Completion signal</span>
-                      <strong>
-                        {item.report.assignments.filter((assignment) => assignment.completionEvidence === 'cli-reported').length} CLI-reported
-                        {' · '}
-                        {item.report.assignments.filter((assignment) => assignment.completionEvidence === 'terminal-idle-inferred').length} terminal-idle inferred
-                      </strong>
-                      <small>Git is observed independently, but task success and test/build results have not been independently verified.</small>
-                    </div>
-                    <div className="secretary-report-facts-heading">
-                      <span>Git snapshot files (may include earlier edits)</span>
-                      <strong>{item.report.changedFiles.length}</strong>
-                    </div>
-                    {item.report.changedFiles.length > 0 ? (
-                      <ul>
-                        {item.report.changedFiles.slice(0, 8).map((path) => <li key={path}>{path}</li>)}
-                        {item.report.changedFiles.length > 8 ? <li>+{item.report.changedFiles.length - 8} more</li> : null}
-                      </ul>
-                    ) : <p className="secretary-report-empty">No new repository changes were verified.</p>}
-                    {item.report.unverifiedReportedFiles.length > 0 ? (
-                      <p className="secretary-report-warning">
-                        CLI mentioned {item.report.unverifiedReportedFiles.length} file(s) that Git could not verify.
-                      </p>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="secretary-review-changes"
-                      onClick={() => reviewSecretaryChanges(item.report?.assignments.map((assignment) => assignment.sessionId).filter(Boolean) ?? [])}
-                    >
-                      Review changes in Git
-                    </button>
-                  </div>
-                ) : null}
-                {item.plan ? (
-                  <div className="secretary-plan">
-                    {editingPlanMessageId === item.id && planDraft ? (
-                      <div className="secretary-plan-editor">
-                        <label>
-                          <span>Plan overview</span>
-                          <textarea
-                            value={planDraft.overview}
-                            rows={2}
-                            onChange={(event) => setPlanDraft((current) => current ? { ...current, overview: event.target.value } : current)}
-                            disabled={revisingPlan}
-                          />
-                        </label>
-                        {planDraft.assignments.map((assignment) => (
-                          <label key={assignment.id}>
-                            <span>{AI_ACCOUNT_LABELS[assignment.kind]} assignment</span>
-                            <input
-                              value={assignment.title}
-                              onChange={(event) => setPlanDraft((current) => current ? {
-                                ...current,
-                                assignments: current.assignments.map((entry) => entry.id === assignment.id
-                                  ? { ...entry, title: event.target.value }
-                                  : entry)
-                              } : current)}
-                              disabled={revisingPlan}
-                            />
-                            <textarea
-                              value={assignment.instruction}
-                              rows={4}
-                              onChange={(event) => setPlanDraft((current) => current ? {
-                                ...current,
-                                assignments: current.assignments.map((entry) => entry.id === assignment.id
-                                  ? { ...entry, instruction: event.target.value }
-                                  : entry)
-                              } : current)}
-                              disabled={revisingPlan}
-                            />
-                          </label>
-                        ))}
-                        <div className="secretary-plan-actions">
-                          <span>Changes are safety-checked and saved before approval.</span>
-                          <button type="button" onClick={() => void savePlanRevision(item.id, item.planRevision ?? 1, item.runId)} disabled={revisingPlan || sending}>
-                            {revisingPlan ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                            Save revision
-                          </button>
-                          <button type="button" onClick={cancelPlanRevision} disabled={revisingPlan}>Cancel</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="secretary-plan-heading">
-                          <div>
-                            <span>{sending ? 'Sending to CLI' : `CLI run${item.planRevision ? ` · revision ${item.planRevision}` : ''}`}</span>
-                            <p>{item.plan.overview}</p>
-                            <small className="secretary-plan-topology">
-                              {item.plan.assignments.length} task{item.plan.assignments.length === 1 ? '' : 's'} · {' '}
-                              {item.plan.assignments.filter((assignment) => !assignment.dependsOn?.length).length} parallel root{item.plan.assignments.filter((assignment) => !assignment.dependsOn?.length).length === 1 ? '' : 's'}
-                            </small>
-                          </div>
-                          <SecretaryAvatar mood="working" variant="card" decorative />
-                        </div>
-                        <div className="secretary-assignments">
-                          {item.plan.assignments.map((assignment) => (
-                            <article key={assignment.id}>
-                              <div><span>{AI_ACCOUNT_LABELS[assignment.kind]} · {assignment.mode}</span><small>{assignment.usageNote}</small></div>
-                              <strong>{assignment.title}</strong>
-                              <p>{assignment.instruction}</p>
-                              <small className="secretary-assignment-expected">
-                                Expected: {assignment.expectedResult}
-                              </small>
-                              {assignment.dependsOn && assignment.dependsOn.length > 0 ? (
-                                <small className="secretary-assignment-dependency">
-                                  After: {assignment.dependsOn.map((dependency) => item.plan!.assignments.find((entry) => entry.id === dependency)?.title ?? dependency).join(', ')}
-                                </small>
-                              ) : null}
-                            </article>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                    {editingPlanMessageId !== item.id ? (
-                    <div className="secretary-plan-actions">
-                      {item.planStatus === 'awaiting-approval' ? (
-                        <>
-                          <span><ShieldCheck className="h-3.5 w-3.5" /> Review this plan before any CLI or prompt is started</span>
-                          {item.runId ? (
-                            <button type="button" onClick={() => startPlanRevision(item.id, item.plan!)} disabled={sending || revisingPlan}>
-                              <Pencil className="h-3.5 w-3.5" /> Edit plan
-                            </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            onClick={() => void approvePlan(item.id, item.plan!, item.planOpenKinds ?? [], item.runId)}
-                            disabled={sending}
-                          >
-                            {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowUp className="h-3.5 w-3.5" />}
-                            Approve &amp; run
-                          </button>
-                          <button type="button" onClick={() => void rejectPlan(item.id, item.runId)} disabled={sending}>
-                            Reject
-                          </button>
-                        </>
-                      ) : null}
-                      {item.planStatus === 'dispatching' ? (
-                        <span><Loader2 className="h-3.5 w-3.5 animate-spin" /> Preparing approved CLI work…</span>
-                      ) : null}
-                      {item.planStatus === 'sent' ? (
-                        <>
-                          <span><Check className="h-3.5 w-3.5" /> Approved; prompts were sent to the CLI</span>
-                          {item.runId ? (
-                            <button type="button" onClick={() => void cancelRun(item.id, item.runId)} disabled={Boolean(cancellingRunId)}>
-                              {cancellingRunId === item.runId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                              Cancel run
-                            </button>
-                          ) : null}
-                        </>
-                      ) : null}
-                      {item.planStatus === 'completed' ? (
-                        <span><Check className="h-3.5 w-3.5" /> CLI completion received; review the outcome card for verification limits.</span>
-                      ) : null}
-                      {item.planStatus === 'rejected' ? (
-                        <span>Plan rejected; no CLI was started.</span>
-                      ) : null}
-                      {item.planStatus === 'cancelled' ? (
-                        <span>Run cancelled; no further Manager prompts will be sent.</span>
-                      ) : null}
-                      {item.planStatus === 'failed' ? (
-                        <span>Run failed. Inspect its terminal and error before starting new work.</span>
-                      ) : null}
-                      {item.planStatus === 'interrupted' ? (
-                        <span>Observation stopped when Bikorch restarted. Inspect the original CLI terminal in Recovery before doing more work.</span>
-                      ) : null}
-                    </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </article>
-            ))}
+            <ManagerConversation
+              items={messages}
+              editingPlanMessageId={editingPlanMessageId}
+              planDraft={planDraft}
+              revisingPlan={revisingPlan}
+              sending={sending}
+              cancellingRunId={cancellingRunId}
+              answering={answering}
+              onPlanDraftChange={setPlanDraft}
+              onStartPlanRevision={startPlanRevision}
+              onCancelPlanRevision={cancelPlanRevision}
+              onSavePlanRevision={(messageId, revision, runId) => void savePlanRevision(messageId, revision, runId)}
+              onApprovePlan={(messageId, plan, kinds, runId) => void approvePlan(messageId, plan, kinds, runId)}
+              onRejectPlan={(messageId, runId) => void rejectPlan(messageId, runId)}
+              onCancelRun={(messageId, runId) => void cancelRun(messageId, runId)}
+              onAnswerRun={answerRun}
+              onOpenAgent={revealCli}
+              onReviewChanges={reviewSecretaryChanges}
+              onOpenAgentWork={() => selectLeftSidebar(project.id, 'changes')}
+              panelStatuses={Object.fromEntries(cliPanels.map((panel) => [panel.id, panel.status]))}
+            />
             {loading ? (
               <div className="secretary-bubble is-assistant is-pending">
                 <SecretaryAvatar mood={answering ? 'working' : 'thinking'} variant="mini" decorative />

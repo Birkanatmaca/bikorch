@@ -197,7 +197,7 @@ function failTrackedRun(runId: string, message: string): void {
     store.updateRun(runId, { status: 'failed', errorCode: 'CLI_RESULT_COLLECTION_FAILED', errorMessage: message })
     store.appendMessage({ threadId: current.threadId, runId, role: 'assistant', type: 'error', content: message })
   }
-  emitSecretaryEvent({ type: 'run-failed', projectId: tracked.run.projectId, runId, message })
+  emitSecretaryEvent({ type: 'run-failed', projectId: tracked.run.projectId, threadId: tracked.run.threadId, runId, message })
 }
 
 async function finishTrackedRun(runId: string): Promise<void> {
@@ -264,9 +264,10 @@ async function finishTrackedRun(runId: string): Promise<void> {
       emitSecretaryEvent({
         type: 'run-followup',
         projectId: result.completedRun.projectId,
+        threadId: result.completedRun.threadId,
         completedRunId: result.completedRun.id,
         runId: result.followUpRun.id,
-        reply: result.followUpRun.reply ?? 'A follow-up plan is ready for review.',
+        reply: result.completedRun.reply ?? 'A follow-up plan is ready for review.',
         plan: result.followUpRun.plan,
         openKinds: result.followUpRun.openKinds,
         completedEvidence: result.completedRun.evidence ?? buildSecretaryRunEvidence(results, [])
@@ -276,6 +277,7 @@ async function finishTrackedRun(runId: string): Promise<void> {
     emitSecretaryEvent({
       type: 'run-report',
       projectId: result.completedRun.projectId,
+      threadId: result.completedRun.threadId,
       runId: result.completedRun.id,
       reply: result.completedRun.reply ?? 'CLI work completed.',
       changedFiles,
@@ -299,7 +301,7 @@ async function finishTrackedRun(runId: string): Promise<void> {
       store.updateRun(runId, { status: 'failed', errorCode: 'CLI_FINAL_REPORT_FAILED', errorMessage: message })
       store.appendMessage({ threadId: current.threadId, runId, role: 'assistant', type: 'error', content: message })
     }
-    emitSecretaryEvent({ type: 'run-failed', projectId: completed.run.projectId, runId, message })
+    emitSecretaryEvent({ type: 'run-failed', projectId: completed.run.projectId, threadId: completed.run.threadId, runId, message })
   } finally {
     // Keep project/session ownership until the final report event has been
     // persisted and emitted; a new run must not race finalization.
@@ -362,6 +364,7 @@ function pauseForUser(runId: string, sessionId: string, message: string): void {
     emitSecretaryEvent({
       type: 'run-needs-user',
       projectId: tracked.run.projectId,
+      threadId: tracked.run.threadId,
       runId,
       assignmentId: target.assignment.id,
       assignmentTitle: target.assignment.title,
