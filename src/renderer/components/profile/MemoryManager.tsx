@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Sparkles, Trash2, X } from 'lucide-react'
+import { ChevronRight, Sparkles, Trash2, X } from 'lucide-react'
 import type { DeveloperMemory } from '@shared/contracts/developer-intelligence'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
@@ -9,8 +9,9 @@ import { Toggle } from './ProfilePrimitives'
 import { formatDateTime } from './profile-format'
 import { MemoryBrain } from './MemoryBrain'
 import { SkillList } from './SkillList'
+import { DailyLearnCard } from './DailyLearnCard'
 
-export function MemoryManager(): React.JSX.Element {
+export function MemoryManager({ active, onOpenProfile }: { active: boolean; onOpenProfile: () => void }): React.JSX.Element {
   const memories = useDeveloperIntelligenceStore((state) => state.memories)
   const memoriesLoaded = useDeveloperIntelligenceStore((state) => state.memoriesLoaded)
   const loadMemories = useDeveloperIntelligenceStore((state) => state.loadMemories)
@@ -60,46 +61,55 @@ export function MemoryManager(): React.JSX.Element {
 
   return (
     <>
-    <section className="profile-brain-shell">
-      <MemoryBrain
-        memories={memories}
-        selectedId={selectedId}
-        learning={learning}
-        onSelectMemory={setSelectedId}
-      />
-      {selected && (
-        <MemoryDetail
-          memory={selected}
-          projectName={selected.projectId ? projectNames.get(selected.projectId) : undefined}
-          onClose={() => setSelectedId(null)}
-          onDelete={() => {
-            if (window.confirm('Delete this memory?')) {
-              void deleteMemory(selected.id)
-              setSelectedId(null)
-            }
-          }}
-        />
-      )}
-      <div className="profile-brain-controls">
-        <Toggle
-          checked={settings.includeMemoryInPrompts}
-          onChange={(value) => void updateSettings({ includeMemoryInPrompts: value })}
-          label="Use in Manager"
-        />
+      <div className="intelligence-intro">
+        <strong>Intelligence</strong>
+        <p>Your memory, skills, and developer profile live here. Use them with Manager when you choose to.</p>
       </div>
-      {memories.length > 0 && (
-        <div className="profile-brain-actions">
-          <button type="button" className={buttonStyles({ variant: 'secondary', size: 'sm' })} disabled={analyzing || learning} onClick={() => void runAnalysis()}>
-            {analyzing ? 'Discovering…' : 'Discover locally'}
-          </button>
-          <button type="button" className={buttonStyles({ variant: 'secondary', size: 'sm' })} disabled={learning || analyzing || !canLearn} onClick={() => void learnWithAi()}>
-            <Sparkles className="h-3 w-3" aria-hidden="true" />{learning ? 'Learning…' : 'Learn with AI'}
-          </button>
+      <section className="profile-brain-shell">
+        <MemoryBrain
+          memories={memories}
+          selectedId={selectedId}
+          learning={learning}
+          onSelectMemory={setSelectedId}
+        />
+        {selected && (
+          <MemoryDetail
+            memory={selected}
+            projectName={selected.projectId ? projectNames.get(selected.projectId) : undefined}
+            onClose={() => setSelectedId(null)}
+            onDelete={() => {
+              if (window.confirm('Delete this memory?')) {
+                void deleteMemory(selected.id)
+                setSelectedId(null)
+              }
+            }}
+          />
+        )}
+        <div className="profile-brain-controls">
+          <Toggle
+            checked={settings.includeMemoryInPrompts}
+            onChange={(value) => void updateSettings({ includeMemoryInPrompts: value })}
+            label="Share memory with Manager"
+          />
         </div>
-      )}
-      {feedback && <p className="profile-brain-feedback" role="status">{feedback}</p>}
-    </section>
-    <SkillList />
+        {memories.length > 0 && (
+          <div className="profile-brain-actions">
+            <button type="button" className={buttonStyles({ variant: 'secondary', size: 'sm' })} disabled={analyzing || learning} onClick={() => void runAnalysis()}>
+              {analyzing ? 'Discovering…' : 'Discover locally'}
+            </button>
+            <button type="button" className={buttonStyles({ variant: 'secondary', size: 'sm' })} disabled={learning || analyzing || !canLearn} onClick={() => void learnWithAi()}>
+              <Sparkles className="h-3 w-3" aria-hidden="true" />{learning ? 'Learning…' : 'Learn with AI'}
+            </button>
+          </div>
+        )}
+        {feedback && <p className="profile-brain-feedback" role="status">{feedback}</p>}
+      </section>
+      <SkillList />
+      <button type="button" className="intelligence-profile-link" onClick={onOpenProfile}>
+        <span><strong>Developer Profile</strong><small>Insights, prompts, and sessions</small></span>
+        <ChevronRight className="h-4 w-4" aria-hidden />
+      </button>
+      <DailyLearnCard active={active} />
     </>
   )
 }

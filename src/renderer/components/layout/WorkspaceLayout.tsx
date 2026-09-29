@@ -13,6 +13,7 @@ import {
   WIDE_LEFT_SIDEBAR_VIEWS
 } from '@shared/types'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
+import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import { PanelShell } from '@renderer/components/panels/PanelShell'
 import { SidebarActivityBar } from '@renderer/components/layout/SidebarActivityBar'
 import { LeftSidebar } from '@renderer/components/layout/LeftSidebar'
@@ -495,9 +496,19 @@ export function WorkspaceLayout(): React.JSX.Element {
         onSelectAccounts={() => selectLeftSidebar(activeProjectId, 'accounts')}
         onSelectMemory={() => selectLeftSidebar(activeProjectId, 'memory')}
         onSelectTasks={() => selectLeftSidebar(activeProjectId, 'tasks')}
-        onSelectProfile={() => selectLeftSidebar(activeProjectId, 'profile')}
+        onSelectProfile={() => {
+          const currentSection = useDeveloperIntelligenceStore.getState().section
+          useDeveloperIntelligenceStore.getState().setSection('overview')
+          if (leftCollapsed || leftSidebarView !== 'profile' || currentSection === 'overview') {
+            selectLeftSidebar(activeProjectId, 'profile')
+          }
+        }}
         onSelectMusic={() => selectLeftSidebar(activeProjectId, 'music')}
         onSelectTimer={() => selectLeftSidebar(activeProjectId, 'timer')}
+        onSelectSettings={() => {
+          useDeveloperIntelligenceStore.getState().setSection('runtime')
+          if (leftCollapsed || leftSidebarView !== 'profile') selectLeftSidebar(activeProjectId, 'profile')
+        }}
       />
       <div
         ref={workspaceMainRef}

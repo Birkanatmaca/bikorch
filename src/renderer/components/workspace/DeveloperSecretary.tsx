@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, Check, Loader2, PanelRightClose, Pencil, Save, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import type { PanelDefinition, Project } from '@shared/types'
-import type { DailyLearnView, ManagerAppAction, SecretaryMessageCursor, SecretaryPlan, SecretaryRun, SecretaryRunEvidence, SecretaryRunStatus, SecretarySessionSummary, SecretarySessionWork, SecretaryThreadDetail } from '@shared/contracts/secretary'
+import type { ManagerAppAction, SecretaryMessageCursor, SecretaryPlan, SecretaryRun, SecretaryRunEvidence, SecretaryRunStatus, SecretarySessionSummary, SecretarySessionWork, SecretaryThreadDetail } from '@shared/contracts/secretary'
 import type { CacheAnalysis } from '@shared/contracts/resources'
 import type { WorkspaceCanvasMode } from '@shared/types'
 import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
@@ -11,7 +11,7 @@ import type { CliUsageKind } from '@shared/contracts/usage'
 import { pickCliAccountId } from '@shared/cli-account'
 import { AppLogo } from '@renderer/components/brand/AppLogo'
 import { SecretaryAvatar, type SecretaryAvatarMood } from './SecretaryAvatar'
-import { focusTerminal, focusWorkspacePanel } from '@renderer/lib/app-events'
+import { focusTerminal, focusWorkspacePanel, OPEN_MANAGER_EVENT } from '@renderer/lib/app-events'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import { useSecretaryStore } from '@renderer/stores/secretary-store'
 import { useUsageStore } from '@renderer/stores/usage-store'
@@ -115,7 +115,6 @@ function chatItemsFromThread(detail: SecretaryThreadDetail): ChatItem[] {
 }
 
 const SECRETARY_OPEN_KEY = 'bikorch.secretarySidebarOpen'
-const OPEN_SECRETARY_EVENT = 'bikorch:open-secretary'
 
 function newId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -123,9 +122,9 @@ function newId(): string {
 
 function readSecretaryOpen(): boolean {
   try {
-    return window.localStorage.getItem(SECRETARY_OPEN_KEY) !== '0'
+    return window.localStorage.getItem(SECRETARY_OPEN_KEY) === '1'
   } catch {
-    return true
+    return false
   }
 }
 
@@ -248,8 +247,6 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     enabled: true,
     facts: []
   })
-  const [dailyLearn, setDailyLearn] = useState<DailyLearnView | null>(null)
-  const [dailyLearnLoading, setDailyLearnLoading] = useState(false)
   const [revisingPlan, setRevisingPlan] = useState(false)
   const [cancellingRunId, setCancellingRunId] = useState<string | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
@@ -285,22 +282,6 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     }
   }, [open, project.id, includeMemory, memoryCount])
 
-  useEffect(() => {
-    if (!open || !settings.configured) return
-    let active = true
-    setDailyLearnLoading(true)
-    void window.api.secretary.getDailyLearn().then((view) => {
-      if (active) setDailyLearn(view)
-    }).catch(() => {
-      if (active) setDailyLearn({ status: 'unavailable', lesson: null })
-    }).finally(() => {
-      if (active) setDailyLearnLoading(false)
-    })
-    return () => {
-      active = false
-    }
-  }, [open, settings.configured, includeMemory, memoryCount])
-
   const setSidebarOpen = (next: boolean): void => {
     setOpen(next)
     writeSecretaryOpen(next)
@@ -334,8 +315,8 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
 
   useEffect(() => {
     const openSidebar = (): void => setSidebarOpen(true)
-    window.addEventListener(OPEN_SECRETARY_EVENT, openSidebar)
-    return () => window.removeEventListener(OPEN_SECRETARY_EVENT, openSidebar)
+    window.addEventListener(OPEN_MANAGER_EVENT, openSidebar)
+    return () => window.removeEventListener(OPEN_MANAGER_EVENT, openSidebar)
   }, [])
 
   useEffect(() => {
@@ -344,10 +325,6 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       void window.api.resources.cacheAnalysis().then((analysis) => {
         if (!active) return
         setCacheAnalysis(analysis)
-        if (analysis.pressured && !analysis.dismissed) {
-          setOpen(true)
-          writeSecretaryOpen(true)
-        }
       }).catch(() => undefined)
     }
     loadCache()
@@ -1097,6 +1074,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           onClick={() => setSidebarOpen(true)}
           aria-expanded={false}
           aria-label="Open Manager sidebar"
+          title="Manager · Let Bikorch coordinate your agents for you"
         >
           <span className="secretary-rail-mark"><AppLogo size="xs" /></span>
           {railAttention ? <i className="secretary-rail-pulse" aria-hidden /> : null}
@@ -1299,9 +1277,9 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
               <div className="secretary-empty-stage">
                 <SecretaryAvatar mood="idle" variant="hero" />
                 <div className="secretary-empty-intro">
-                  <span>Workspace manager</span>
-                  <strong>Ready to run the work.</strong>
-                  <p>Manager already knows you from memory, then runs the CLI plan.</p>
+                  <span>Optional coordination</span>
+                  <strong>Let Manager coordinate.</strong>
+                  <p>Give Manager a task, review its plan, and find agent results in Agent Work & Changes.</p>
                 </div>
                 <span className="secretary-empty-status"><i /> Online</span>
               </div>
@@ -1536,29 +1514,6 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
             ) : null}
         </div>
         <div className="secretary-compose">
-          {settings.configured ? (
-            <div className="secretary-daily" aria-label="Daily learn">
-              <span>Daily learn{dailyLearn?.lesson ? ` · ${dailyLearn.lesson.basis}` : ''}</span>
-              {dailyLearn?.status === 'ready' && dailyLearn.lesson ? (
-                <>
-                  <strong>{dailyLearn.lesson.topic}</strong>
-                  <p>{dailyLearn.lesson.body}</p>
-                </>
-              ) : (
-                <p>
-                  {dailyLearnLoading || !dailyLearn
-                    ? "Preparing today's lesson…"
-                    : dailyLearn.status === 'memory-off'
-                      ? 'Turn on Use in Manager to get a lesson from your work.'
-                      : dailyLearn.status === 'empty'
-                        ? 'Daily Learn starts once memory knows how you work.'
-                        : dailyLearn.status === 'unconfigured'
-                          ? "Connect Manager to receive today's lesson."
-                          : "Today's lesson is not ready. It will try again tomorrow."}
-                </p>
-              )}
-            </div>
-          ) : null}
           {composer}
         </div>
       </aside>

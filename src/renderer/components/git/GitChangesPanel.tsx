@@ -275,6 +275,10 @@ export function GitChangesPanel({
       )}
 
       <div className="flex-1 overflow-auto p-2">
+        <div className="agent-work-intro">
+          <strong>Agent Work</strong>
+          <p>Work from agents you open and tasks Manager coordinates comes together here. Review it before applying to the project.</p>
+        </div>
         {bundle.error && (
           <p className="mb-2 rounded-md bg-error/10 px-2 py-1 text-xs text-error">{bundle.error}</p>
         )}

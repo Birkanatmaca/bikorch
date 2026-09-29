@@ -1,27 +1,7 @@
-import {
-  Brain,
-  CheckSquare2,
-  CircleUser,
-  FolderTree,
-  GitBranch,
-  Music2,
-  SquareTerminal,
-  Timer
-} from 'lucide-react'
-import { TASK_PRIORITIES, TASK_PRIORITY_LABELS, type ProjectTask } from '@shared/contracts/tasks'
-import { useActiveProject } from '@renderer/hooks/use-active-project'
-import { cn } from '@renderer/lib/utils'
-import { useMusicStore } from '@renderer/stores/music-store'
-import { useTasksStore } from '@renderer/stores/tasks-store'
-import { useTimerStore } from '@renderer/stores/timer-store'
-import { displayMs, formatTimerClock } from '@shared/contracts/timer'
+import { Brain, CircleUser, FolderTree, GitBranch, SquareTerminal } from 'lucide-react'
 import type { LeftSidebarView } from '@shared/types'
-
-const NO_TASKS: ProjectTask[] = []
-
-function formatNodeCount(count: number): string {
-  return count > 9 ? '9+' : String(count)
-}
+import { cn } from '@renderer/lib/utils'
+import { SidebarToolsGroup } from './SidebarToolsGroup'
 
 interface SidebarActivityBarProps {
   isOpen: boolean
@@ -37,6 +17,7 @@ interface SidebarActivityBarProps {
   onSelectProfile: () => void
   onSelectMusic: () => void
   onSelectTimer: () => void
+  onSelectSettings: () => void
 }
 
 export function SidebarActivityBar({
@@ -52,203 +33,88 @@ export function SidebarActivityBar({
   onSelectTasks,
   onSelectProfile,
   onSelectMusic,
-  onSelectTimer
+  onSelectTimer,
+  onSelectSettings
 }: SidebarActivityBarProps): React.JSX.Element {
   const filesActive = isOpen && view === 'files'
   const changesActive = isOpen && view === 'changes'
   const accountsActive = isOpen && view === 'accounts'
   const memoryActive = isOpen && view === 'memory'
-  const tasksActive = isOpen && view === 'tasks'
   const profileActive = isOpen && view === 'profile'
-  const musicActive = isOpen && view === 'music'
-  const timerActive = isOpen && view === 'timer'
-  const musicPlaying = useMusicStore((state) => state.status === 'playing')
-  const timerSession = useTimerStore((state) => state.session)
-  const timerNow = useTimerStore((state) => state.nowMs)
-  const timerRunning = timerSession.status === 'running'
-  const timerClock = formatTimerClock(displayMs(timerSession, timerNow))
   const badge = changesCount > 99 ? '99+' : String(changesCount)
   const overlapBadge = overlapCount > 9 ? '9+' : String(overlapCount)
   const gitAlert = conflict || overlapCount > 0
-  const { projectId } = useActiveProject()
-  const tasks = useTasksStore((state) => state.tasksByProject[projectId ?? ''] ?? NO_TASKS)
-  const openByPriority = { high: 0, medium: 0, low: 0 }
-  for (const task of tasks) {
-    if (task.status !== 'done') openByPriority[task.priority] += 1
-  }
-  const openTotal = openByPriority.high + openByPriority.medium + openByPriority.low
-  const taskSummary = TASK_PRIORITIES.filter((priority) => openByPriority[priority] > 0)
-    .map((priority) => `${openByPriority[priority]} ${TASK_PRIORITY_LABELS[priority].toLowerCase()}`)
-    .join(', ')
 
   return (
     <aside className="activity-rail workstation-rail flex w-12 shrink-0 flex-col items-center gap-2 py-2.5" aria-label="Workspace navigation">
-      <button
-        type="button"
-        onClick={onSelectFiles}
-        aria-pressed={filesActive}
-        title={filesActive ? 'Hide files' : 'Show files'}
-        aria-label={filesActive ? 'Hide files' : 'Show files'}
-        className={cn('glass-icon-btn h-9 w-9', filesActive && 'glass-icon-btn-active')}
-      >
-        <FolderTree className="h-4 w-4" />
-      </button>
-      <button
-        type="button"
-        onClick={onSelectChanges}
-        aria-pressed={changesActive}
-        title={
-          conflict
-            ? 'Needs attention'
-            : overlapCount > 0
-              ? 'Review recommended'
-              : changesActive
-                ? 'Hide changes'
-                : 'Show changes'
-        }
-        aria-label={
-          conflict
-            ? 'Show changes, needs attention'
-            : overlapCount > 0
-              ? 'Show changes, review recommended'
-              : changesActive
-                ? 'Hide changes'
-                : 'Show changes'
-        }
-        className={cn('glass-icon-btn relative h-9 w-9', changesActive && 'glass-icon-btn-active')}
-      >
-        <GitBranch className="h-4 w-4" />
-        {gitAlert ? (
-          <span className={cn('activity-badge', conflict ? 'is-conflict' : 'is-overlap')}>
-            {conflict && overlapCount === 0 ? '!' : overlapBadge}
-          </span>
-        ) : (
-          changesCount > 0 && <span className="activity-badge">{badge}</span>
-        )}
-      </button>
-      <button
-        type="button"
-        onClick={onSelectAccounts}
-        aria-pressed={accountsActive}
-        title={accountsActive ? 'Hide CLI accounts' : 'Show CLI accounts'}
-        aria-label={accountsActive ? 'Hide CLI accounts' : 'Show CLI accounts'}
-        className={cn('glass-icon-btn h-9 w-9', accountsActive && 'glass-icon-btn-active')}
-      >
-        <SquareTerminal className="h-4 w-4" />
-      </button>
-      <button
-        type="button"
-        onClick={onSelectMemory}
-        aria-pressed={memoryActive}
-        title={memoryActive ? 'Hide memory' : 'Show memory'}
-        aria-label={memoryActive ? 'Hide memory' : 'Show memory'}
-        className={cn('glass-icon-btn h-9 w-9', memoryActive && 'glass-icon-btn-active')}
-      >
-        <Brain className="h-4 w-4" />
-      </button>
-      <button
-        type="button"
-        onClick={onSelectMusic}
-        aria-pressed={musicActive}
-        title={musicPlaying ? 'Playing' : musicActive ? 'Hide music' : 'Show music'}
-        aria-label={
-          musicPlaying
-            ? musicActive
-              ? 'Hide music, now playing'
-              : 'Show music, now playing'
-            : musicActive
-              ? 'Hide music'
-              : 'Show music'
-        }
-        className={cn(
-          'glass-icon-btn relative h-9 w-9',
-          musicActive && 'glass-icon-btn-active',
-          musicPlaying && 'is-playing'
-        )}
-      >
-        <Music2 className="h-4 w-4" />
-        {musicPlaying && (
-          <span className="rail-music-eq" aria-hidden>
-            <span />
-            <span />
-            <span />
-          </span>
-        )}
-      </button>
-      <button
-        type="button"
-        onClick={onSelectProfile}
-        aria-pressed={profileActive}
-        title={profileActive ? 'Hide profile' : 'Show profile'}
-        aria-label={profileActive ? 'Hide profile' : 'Show profile'}
-        className={cn('glass-icon-btn h-9 w-9', profileActive && 'glass-icon-btn-active')}
-      >
-        <CircleUser className="h-4 w-4" />
-      </button>
-      <button
-        type="button"
-        onClick={onSelectTasks}
-        aria-pressed={tasksActive}
-        title={
-          openTotal > 0
-            ? `${tasksActive ? 'Hide' : 'Show'} tasks · ${taskSummary}`
-            : tasksActive
-              ? 'Hide tasks'
-              : 'Show tasks'
-        }
-        aria-label={
-          openTotal > 0
-            ? `${tasksActive ? 'Hide' : 'Show'} tasks, ${taskSummary} open`
-            : tasksActive
-              ? 'Hide tasks'
-              : 'Show tasks'
-        }
-        className={cn('glass-icon-btn relative h-9 w-9', tasksActive && 'glass-icon-btn-active')}
-      >
-        <CheckSquare2 className="h-4 w-4" />
-        {openTotal > 0 ? (
-          <span className="task-rail-counts" aria-hidden>
-            {TASK_PRIORITIES.map((priority) =>
-              openByPriority[priority] > 0 ? (
-                <span key={priority} className={cn('task-rail-node', `is-${priority}`)}>
-                  {formatNodeCount(openByPriority[priority])}
-                </span>
-              ) : null
-            )}
-          </span>
-        ) : null}
-      </button>
-      <button
-        type="button"
-        onClick={onSelectTimer}
-        aria-pressed={timerActive}
-        title={
-          timerSession.status !== 'idle'
-            ? `${timerActive ? 'Hide' : 'Show'} timer · ${timerClock}`
-            : timerActive
-              ? 'Hide timer'
-              : 'Show timer'
-        }
-        aria-label={
-          timerSession.status !== 'idle'
-            ? `${timerActive ? 'Hide' : 'Show'} timer, ${timerClock}${timerRunning ? ', running' : ', paused'}`
-            : timerActive
-              ? 'Hide timer'
-              : 'Show timer'
-        }
-        className={cn(
-          'glass-icon-btn relative h-9 w-9',
-          timerActive && 'glass-icon-btn-active',
-          timerRunning && 'is-timing'
-        )}
-      >
-        <Timer className="h-4 w-4" />
-        {timerSession.status !== 'idle' && (
-          <span className={cn('rail-timer-badge', timerRunning && 'is-live')} aria-hidden>
-            {timerClock}
-          </span>
-        )}
-      </button>
+      <div className="activity-rail-group" aria-label="Workspace">
+        <button
+          type="button"
+          onClick={onSelectFiles}
+          aria-pressed={filesActive}
+          title={filesActive ? 'Hide files' : 'Show files'}
+          aria-label={filesActive ? 'Hide files' : 'Show files'}
+          className={cn('glass-icon-btn h-9 w-9', filesActive && 'glass-icon-btn-active')}
+        >
+          <FolderTree className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onSelectChanges}
+          aria-pressed={changesActive}
+          title={conflict ? 'Needs attention' : overlapCount > 0 ? 'Review recommended' : changesActive ? 'Hide Agent Work & Changes' : 'Show Agent Work & Changes'}
+          aria-label={conflict ? 'Show Agent Work & Changes, needs attention' : overlapCount > 0 ? 'Show Agent Work & Changes, review recommended' : changesActive ? 'Hide Agent Work & Changes' : 'Show Agent Work & Changes'}
+          className={cn('glass-icon-btn relative h-9 w-9', changesActive && 'glass-icon-btn-active')}
+        >
+          <GitBranch className="h-4 w-4" />
+          {gitAlert ? (
+            <span className={cn('activity-badge', conflict ? 'is-conflict' : 'is-overlap')}>
+              {conflict && overlapCount === 0 ? '!' : overlapBadge}
+            </span>
+          ) : changesCount > 0 ? <span className="activity-badge">{badge}</span> : null}
+        </button>
+        <button
+          type="button"
+          onClick={onSelectAccounts}
+          aria-pressed={accountsActive}
+          title={accountsActive ? 'Hide CLI accounts' : 'Show CLI accounts'}
+          aria-label={accountsActive ? 'Hide CLI accounts' : 'Show CLI accounts'}
+          className={cn('glass-icon-btn h-9 w-9', accountsActive && 'glass-icon-btn-active')}
+        >
+          <SquareTerminal className="h-4 w-4" />
+        </button>
+      </div>
+      <span className="activity-rail-divider" aria-hidden="true" />
+      <div className="activity-rail-group" aria-label="Intelligence">
+        <button
+          type="button"
+          onClick={onSelectMemory}
+          aria-pressed={memoryActive}
+          title={memoryActive ? 'Hide Intelligence' : 'Show Intelligence'}
+          aria-label={memoryActive ? 'Hide Intelligence' : 'Show Intelligence'}
+          className={cn('glass-icon-btn h-9 w-9', memoryActive && 'glass-icon-btn-active')}
+        >
+          <Brain className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onSelectProfile}
+          aria-pressed={profileActive}
+          title={profileActive ? 'Hide developer profile' : 'Show developer profile'}
+          aria-label={profileActive ? 'Hide developer profile' : 'Show developer profile'}
+          className={cn('glass-icon-btn h-9 w-9', profileActive && 'glass-icon-btn-active')}
+        >
+          <CircleUser className="h-4 w-4" />
+        </button>
+      </div>
+      <SidebarToolsGroup
+        isOpen={isOpen}
+        view={view}
+        onSelectTasks={onSelectTasks}
+        onSelectMusic={onSelectMusic}
+        onSelectTimer={onSelectTimer}
+        onSelectSettings={onSelectSettings}
+      />
     </aside>
   )
 }
