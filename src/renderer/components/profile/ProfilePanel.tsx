@@ -5,8 +5,10 @@ import {
   History,
   LayoutDashboard,
   MessageSquareText,
+  Settings,
   ShieldCheck,
   Sparkles,
+  Terminal,
   type LucideIcon
 } from 'lucide-react'
 import type { MetricsRangeKey } from '@shared/contracts/developer-intelligence'
@@ -23,16 +25,24 @@ import { SessionTimeline } from './SessionTimeline'
 import { PrivacySettings } from './PrivacySettings'
 import { RuntimePanel } from './RuntimePanel'
 import { SecretarySettings } from './SecretarySettings'
+import { SectionCard } from './ProfilePrimitives'
 
-const SECTIONS: Array<{ id: ProfileSection; label: string; icon: LucideIcon }> = [
+const PROFILE_SECTIONS: Array<{ id: ProfileSection; label: string; icon: LucideIcon }> = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'insights', label: 'Insights', icon: Sparkles },
   { id: 'prompts', label: 'Prompts', icon: MessageSquareText },
-  { id: 'sessions', label: 'Sessions', icon: History },
+  { id: 'sessions', label: 'Sessions', icon: History }
+]
+
+const SETTINGS_SECTIONS: Array<{ id: ProfileSection; label: string; icon: LucideIcon }> = [
+  { id: 'general', label: 'General', icon: Settings },
   { id: 'secretary', label: 'Manager', icon: Bot },
+  { id: 'cli-accounts', label: 'CLI Accounts', icon: Terminal },
   { id: 'privacy', label: 'Privacy', icon: ShieldCheck },
   { id: 'runtime', label: 'Runtime', icon: Gauge }
 ]
+
+const SECTIONS = [...PROFILE_SECTIONS, ...SETTINGS_SECTIONS]
 
 const RANGE_OPTIONS: Array<{ value: MetricsRangeKey; label: string }> = [
   { value: 'today', label: 'Today' },
@@ -86,9 +96,7 @@ export function ProfilePanel({ visible = true }: ProfilePanelProps): React.JSX.E
       <header className="profile-panel-header shrink-0">
         <div className="flex min-w-0 items-center gap-2">
           <h2 className="min-w-0 flex-1 truncate text-xs font-medium text-text-primary">
-            {section === 'overview' || section === 'insights' || section === 'prompts' || section === 'sessions'
-              ? 'Developer Profile'
-              : 'Settings'}
+            {PROFILE_SECTIONS.some((item) => item.id === section) ? 'Developer Profile' : 'Settings'}
           </h2>
           {showsMetrics && (
             <select
@@ -105,7 +113,7 @@ export function ProfilePanel({ visible = true }: ProfilePanelProps): React.JSX.E
         </div>
         <nav className="profile-nav" aria-label="Profile sections">
           <span className="profile-nav-group-label">PROFILE</span>
-          {SECTIONS.slice(0, 4).map(({ id, label, icon: Icon }) => (
+          {PROFILE_SECTIONS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               type="button"
@@ -118,7 +126,7 @@ export function ProfilePanel({ visible = true }: ProfilePanelProps): React.JSX.E
             </button>
           ))}
           <span className="profile-nav-group-label">SETTINGS</span>
-          {SECTIONS.slice(4).map(({ id, label, icon: Icon }) => (
+          {SETTINGS_SECTIONS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               type="button"
@@ -138,10 +146,40 @@ export function ProfilePanel({ visible = true }: ProfilePanelProps): React.JSX.E
         {section === 'insights' && <DeveloperInsights />}
         {section === 'prompts' && <PromptHistory />}
         {section === 'sessions' && <SessionTimeline />}
+        {section === 'general' && <GeneralSettings />}
         {section === 'secretary' && <SecretarySettings />}
+        {section === 'cli-accounts' && <CliAccountsSettings />}
         {section === 'privacy' && <PrivacySettings />}
         {section === 'runtime' && <RuntimePanel />}
       </div>
     </div>
+  )
+}
+
+function GeneralSettings(): React.JSX.Element {
+  return (
+    <SectionCard title="General" description="One Manager for the workspace. Choose how it thinks in Manager settings.">
+      <p className="secretary-cost-note">The interface stays in English. Dates follow this computer.</p>
+    </SectionCard>
+  )
+}
+
+function CliAccountsSettings(): React.JSX.Element {
+  const projectId = useWorkspaceStore((state) => state.activeProjectId)
+  const selectLeftSidebar = useWorkspaceStore((state) => state.selectLeftSidebar)
+  return (
+    <SectionCard
+      title="CLI accounts"
+      description="Coding agents use these profiles. A Manager CLI session, when it is available, stays separate from those coding sessions."
+    >
+      <button
+        type="button"
+        className="ui-control ui-control-primary ui-control-sm"
+        disabled={!projectId}
+        onClick={() => { if (projectId) selectLeftSidebar(projectId, 'accounts') }}
+      >
+        Open CLI accounts
+      </button>
+    </SectionCard>
   )
 }

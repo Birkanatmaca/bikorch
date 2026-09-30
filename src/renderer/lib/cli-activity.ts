@@ -1,4 +1,5 @@
 import type { PtyKind, PtySessionStatus } from '@shared/contracts/pty'
+import { looksWorkspaceTrustPrompt } from '@shared/cli-permission'
 
 const ANSI_RE = /\u001b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g
 const SPINNER_RE = /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷◐◓◑◒]/
@@ -57,10 +58,7 @@ export function inferCliActivity(buffer: string): 'waiting' | 'busy' | null {
   return null
 }
 
-export function looksWorkspaceTrustPrompt(buffer: string): boolean {
-  const tail = stripAnsi(buffer).replace(/\r/g, '')
-  return /workspace trust required|trust this workspace|do you trust the (?:files|contents) of this directory/i.test(tail)
-}
+export { looksWorkspaceTrustPrompt }
 
 export const TRUST_ACCEPT_SEQUENCE = 'a\r'
 

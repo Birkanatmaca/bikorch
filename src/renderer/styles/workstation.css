@@ -409,6 +409,25 @@ input:not(.xterm-helper-textarea), select, textarea:not(.xterm-helper-textarea) 
 .secretary-connect { color: var(--color-text-muted); text-align: left; cursor: pointer; }
 .secretary-connect > span:nth-child(2) { min-width: 0; flex: 1; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .secretary-connect:hover { color: var(--color-text-secondary); }
+.secretary-connect-panel {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 12px 12px;
+}
+.secretary-connect-panel strong { color: var(--color-text-primary); font-size: 12px; font-weight: 560; }
+.secretary-connect-panel p { margin: 0; color: var(--color-text-muted); font-size: 11px; }
+.secretary-connect-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.secretary-connect-actions button {
+  border: 1px solid rgb(196 181 255 / 0.28);
+  border-radius: 8px;
+  padding: 5px 8px;
+  background: rgb(96 70 200 / 0.16);
+  color: var(--color-text-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.secretary-connect-actions button:hover { border-color: rgb(196 181 255 / 0.5); }
 .secretary-settings-shortcut { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; color: var(--color-purple-light); font-size: 10px; }
 .secretary-inline-message {
   display: flex;
@@ -2797,7 +2816,8 @@ kbd {
 .secretary-reset-usage { margin-top: 7px; padding-inline: 0; color: var(--color-text-muted); }
 .secretary-profile-form { display: grid; gap: 8px; margin-top: 9px; }
 .secretary-profile-form label > span { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; color: var(--color-text-secondary); font-size: 9px; font-weight: 500; }
-.secretary-profile-form input {
+.secretary-profile-form input,
+.secretary-profile-form select {
   width: 100%;
   height: 31px;
   border: 1px solid var(--surface-edge-strong);
@@ -2809,6 +2829,15 @@ kbd {
   font-family: var(--font-mono);
   font-size: 9px;
 }
+.secretary-profile-form select:disabled { opacity: 0.7; }
+.secretary-source-options { display: flex; gap: 14px; margin: 8px 0 0; border: 0; padding: 0; }
+.secretary-source-options legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.secretary-source-options label { display: inline-flex; align-items: center; gap: 6px; color: var(--color-text-secondary); font-size: 11px; }
+.secretary-source-options input { width: auto; height: auto; }
+.secretary-source-status { margin: 0; color: var(--color-text-secondary); font-size: 10px; }
+.secretary-profile-form label.secretary-source-fallback { display: flex; align-items: center; gap: 6px; }
+.secretary-profile-form label.secretary-source-fallback input { width: auto; height: auto; }
+.secretary-profile-form label.secretary-source-fallback > span { display: inline; margin: 0; color: var(--color-text-secondary); font-size: 10px; font-weight: 450; }
 .secretary-profile-form input:focus { border-color: rgb(139 124 248 / 0.52); box-shadow: 0 0 0 2px rgb(139 124 248 / 0.08); }
 .secretary-profile-form input::placeholder { color: #626b78; }
 .secretary-security-note { display: flex; align-items: flex-start; gap: 6px; color: var(--color-text-muted); font-size: 8px; line-height: 1.45; }

@@ -13,13 +13,15 @@ import { AppLogo } from '@renderer/components/brand/AppLogo'
 import { SecretaryAvatar, type SecretaryAvatarMood } from './SecretaryAvatar'
 import { ManagerConversation, type ManagerChatItem } from './ManagerConversation'
 import { focusTerminal, focusWorkspacePanel, OPEN_MANAGER_EVENT } from '@renderer/lib/app-events'
+import { isTiledWorkspace, syncGridWithPanelIds, tiledCenterPanelIds } from '@shared/workspace-grid'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import { useSecretaryStore } from '@renderer/stores/secretary-store'
 import { useUsageStore } from '@renderer/stores/usage-store'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useAiAccountsStore } from '@renderer/stores/ai-accounts-store'
-import { inferCliActivity, looksWorkspaceTrustPrompt, stripAnsi } from '@renderer/lib/cli-activity'
+import { cliPermissionResponse, looksWorkspaceTrustPrompt } from '@shared/cli-permission'
+import { inferCliActivity, stripAnsi } from '@renderer/lib/cli-activity'
 import { submitCliPrompt } from '@renderer/lib/submit-cli-prompt'
 import { flushPersistence } from '@renderer/lib/persistence-sync'
 import { cn } from '@renderer/lib/utils'
@@ -37,6 +39,40 @@ function workspaceForRequest(actions: ManagerAppAction[], plan: SecretaryPlan | 
   if (modes.has('review') || modes.has('validate')) add('show-changes')
   else if (modes.has('implement') || modes.has('analyze')) add('show-files')
   return prepared
+}
+
+function presentWorkingPanels(panelIds: string[]): void {
+  const store = useWorkspaceStore.getState()
+  const projectId = store.activeProjectId
+  const workspace = store.getActiveWorkspace()
+  if (!projectId || !workspace) return
+  const visible = panelIds.filter((id) => workspace.panels.some((panel) => panel.id === id))
+  for (const panelId of visible) {
+    const panel = workspace.panels.find((item) => item.id === panelId)
+    if (panel && panel.zone !== 'center') store.movePanel(panelId, 'center')
+  }
+  const next = store.getActiveWorkspace()
+  if (!next) return
+  if (isTiledWorkspace(next.layout)) {
+    store.updateLayout(projectId, {
+      centerGrid: syncGridWithPanelIds(next.layout.centerGrid ?? null, tiledCenterPanelIds(next.panels))
+    })
+  } else {
+    visible.forEach((panelId, index) => {
+      const columns = Math.min(visible.length, 2)
+      const width = columns === 1 ? 78 : 46
+      store.updateCenterPanelRect(panelId, {
+        x: 4 + (index % columns) * 48,
+        y: 6 + Math.floor(index / columns) * 46,
+        w: width,
+        h: visible.length > 2 ? 42 : 84
+      })
+    })
+  }
+  const focusId = visible.at(-1)
+  if (!focusId) return
+  focusWorkspacePanel(focusId)
+  focusTerminal(focusId)
 }
 
 function planStatusForRun(status: SecretaryRunStatus): ChatItem['planStatus'] {
@@ -182,6 +218,7 @@ function sleep(ms: number): Promise<void> {
 
 async function waitForCliIdle(sessionId: string, timeoutMs = 60000): Promise<boolean> {
   const started = Date.now()
+  let trustReplies = 0
   while (Date.now() - started < timeoutMs) {
     const terminal = useTerminalStore.getState()
     const status = terminal.getStatus(sessionId)
@@ -192,7 +229,16 @@ async function waitForCliIdle(sessionId: string, timeoutMs = 60000): Promise<boo
       throw new Error('The CLI process exited before the task could be sent.')
     }
     const tail = stripAnsi(terminal.getOutputTail(sessionId))
-    if (looksWorkspaceTrustPrompt(tail)) {
+    const panel = useWorkspaceStore.getState().getActiveWorkspace()?.panels.find((item) => item.id === sessionId)
+    const managedWorktree = Boolean(panel?.worktreePath && panel.worktreePath.includes('/agent-worktrees/'))
+    const permission = cliPermissionResponse(tail, { managedWorktree })
+    if (looksWorkspaceTrustPrompt(tail) && permission && trustReplies < 3) {
+      trustReplies += 1
+      await window.api.pty.write({ sessionId, data: permission })
+      await sleep(400)
+      continue
+    }
+    if (looksWorkspaceTrustPrompt(tail) && !managedWorktree) {
       throw new Error('The CLI is waiting for workspace trust. Review and approve it in the terminal before sending this task.')
     }
     if (inferCliActivity(tail) === 'waiting') return true
@@ -539,13 +585,17 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       )
       if (panelId) {
         usedPanelIds.add(panelId)
-        if (!existing) openedPanelIds.push(panelId)
+        openedPanelIds.push(panelId)
       }
       return panelId
     }
 
     if (!plan) {
-      for (const kind of [...new Set(openKinds)]) bindPanel(kind)
+      const counts = new Map<CliUsageKind, number>()
+      for (const kind of openKinds) counts.set(kind, (counts.get(kind) ?? 0) + 1)
+      for (const [kind, count] of counts) {
+        for (let index = 0; index < count; index += 1) bindPanel(kind, null, undefined, index > 0)
+      }
       return { plan: null, openedPanelIds }
     }
 
@@ -866,6 +916,9 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     try {
       const bound = applyWorkspaceActions(openKinds, proposedPlan)
       if (run !== runRef.current || !bound.plan) return
+      presentWorkingPanels(bound.plan.assignments
+        .map((assignment) => assignment.panelId)
+        .filter((id): id is string => Boolean(id)))
       setMessages((current) => current.map((item) => (
         item.id === messageId
           ? { ...item, plan: bound.plan, planStatus: 'dispatching' as const }
@@ -974,6 +1027,10 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       if (response.savedSkills?.length) void useDeveloperIntelligenceStore.getState().loadSkills()
       const plan = response.plan
       applyManagerActions(workspaceForRequest(response.actions ?? [], plan))
+      if (!plan && response.openKinds.length > 0) {
+        const opened = applyWorkspaceActions(response.openKinds, null)
+        presentWorkingPanels(opened.openedPanelIds)
+      }
       setMessages((current) => [
         ...current,
         {
@@ -1023,7 +1080,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       ? 'working'
       : 'idle'
   const placeholder = !settings.configured
-    ? 'Connect Manager in Profile to start…'
+    ? 'Manager is not connected'
     : `Ask Manager about ${project.name} or request work…`
 
   const revealCli = (panelId: string): void => {
@@ -1036,11 +1093,15 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   }
 
   const composer = !settings.configured ? (
-    <button type="button" className="secretary-composer secretary-connect" onClick={openSettings}>
-      <span className="secretary-mark"><AppLogo size="xs" /></span>
-      <span>Connect Manager in Profile to start…</span>
-      <span className="secretary-settings-shortcut"><SlidersHorizontal className="h-3.5 w-3.5" /> Profile</span>
-    </button>
+    <div className="secretary-connect-panel">
+      <strong>Manager is not connected</strong>
+      <p>Choose how Manager should think.</p>
+      <div className="secretary-connect-actions">
+        <button type="button" onClick={() => { void useSecretaryStore.getState().updateProvider({ source: 'api' }); openSettings() }}>Use API</button>
+        <button type="button" onClick={() => { void useSecretaryStore.getState().updateProvider({ source: 'cli' }); openSettings() }}>Use CLI</button>
+        <button type="button" onClick={openSettings}>Configure Manager</button>
+      </div>
+    </div>
   ) : (
     <div className="secretary-composer">
       <textarea

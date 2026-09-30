@@ -59,10 +59,116 @@ export interface SecretaryProjectRef {
   folderPath: string | null
 }
 
+export type ManagerProviderSource = 'api' | 'cli'
+
+/** Shown when CLI cannot yet return a normalized Manager response. Never a fake success. */
+export const CLI_MANAGER_PROVIDER_UNAVAILABLE = 'CLI Manager provider is not available yet'
+
+export interface ManagerProviderSettings {
+  source: ManagerProviderSource
+  api: {
+    provider: 'openai'
+    model: string
+  }
+  cli: {
+    kind: CliUsageKind | null
+    accountId: string | null
+    model: string | null
+  }
+  fallbackToApi: boolean
+}
+
+export interface ManagerProviderPatch {
+  source?: ManagerProviderSource
+  api?: { model?: string }
+  cli?: {
+    kind?: CliUsageKind | null
+    accountId?: string | null
+    model?: string | null
+  }
+  fallbackToApi?: boolean
+}
+
+export type ManagerApiConnectionStatus =
+  | 'configured'
+  | 'connected'
+  | 'invalid-key'
+  | 'unreachable'
+  | 'not-configured'
+
+export type ManagerCliConnectionStatus =
+  | 'ready'
+  | 'cli-unavailable'
+  | 'account-unavailable'
+  | 'authentication-required'
+  | 'unavailable'
+
+export const MANAGER_API_STATUS_LABEL: Record<ManagerApiConnectionStatus, string> = {
+  configured: 'Configured',
+  connected: 'Connected',
+  'invalid-key': 'Invalid API key',
+  unreachable: 'Connection failed',
+  'not-configured': 'No API key'
+}
+
+export const MANAGER_CLI_STATUS_LABEL: Record<ManagerCliConnectionStatus, string> = {
+  ready: 'Ready',
+  'cli-unavailable': 'CLI not installed',
+  'account-unavailable': 'No account selected',
+  'authentication-required': 'Authentication required',
+  unavailable: 'Unavailable'
+}
+
+/** Renderer view. The API key stays in secure storage and is never part of this object. */
+export interface ManagerProviderView extends ManagerProviderSettings {
+  api: ManagerProviderSettings['api'] & {
+    hasKey: boolean
+    status: ManagerApiConnectionStatus
+    statusLabel: string
+  }
+  cli: ManagerProviderSettings['cli'] & {
+    status: ManagerCliConnectionStatus
+    statusLabel: string
+    generationAvailable: boolean
+    /** Thinking session owned by Manager. Coding-agent PTY sessions are never reused. */
+    session: 'dedicated-manager'
+  }
+}
+
+export interface ManagerConnectionTest {
+  source: ManagerProviderSource
+  status: ManagerApiConnectionStatus | ManagerCliConnectionStatus
+  message: string
+}
+
+export function defaultManagerProviderView(model = 'gpt-5'): ManagerProviderView {
+  return {
+    source: 'api',
+    api: {
+      provider: 'openai',
+      model,
+      hasKey: false,
+      status: 'not-configured',
+      statusLabel: MANAGER_API_STATUS_LABEL['not-configured']
+    },
+    cli: {
+      kind: null,
+      accountId: null,
+      model: null,
+      status: 'account-unavailable',
+      statusLabel: MANAGER_CLI_STATUS_LABEL['account-unavailable'],
+      generationAvailable: true,
+      session: 'dedicated-manager'
+    },
+    fallbackToApi: false
+  }
+}
+
 export interface SecretarySettings {
   configured: boolean
   model: string
   usage: SecretaryUsageStats
+  provider: ManagerProviderView
 }
 
 export interface SecretaryUsageStats {
@@ -389,6 +495,7 @@ export const SECRETARY_IPC = {
   CLEAR_KEY: 'secretary:clearKey',
   RESET_USAGE: 'secretary:resetUsage',
   UPDATE_SETTINGS: 'secretary:updateSettings',
+  TEST_CONNECTION: 'secretary:testConnection',
   CREATE_PLAN: 'secretary:createPlan',
   CHAT: 'secretary:chat',
   GET_DAILY_LEARN: 'secretary:getDailyLearn',

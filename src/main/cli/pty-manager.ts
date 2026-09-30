@@ -257,7 +257,7 @@ class PtyManager {
       this.kill(sessionId)
     }
 
-    if (kind === 'antigravity') {
+    if (kind === 'antigravity' && request.launchMode === 'login') {
       for (const session of this.sessions.values()) {
         if (session.kind === kind && session.id !== sessionId) {
           this.kill(session.id)

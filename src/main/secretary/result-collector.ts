@@ -3,7 +3,7 @@ import type { GitSessionSnapshot } from '@shared/contracts/git'
 import type { SecretaryAssignment, SecretaryCompletionEvidence, SecretaryRun, SecretaryRunAnswerRequest } from '@shared/contracts/secretary'
 import { formatCliPaste } from '@shared/cli-prompt'
 import { readSecretaryCliResult, wrapSecretaryCliInstruction, type SecretaryCliOutcome } from '@shared/secretary-result-protocol'
-import { cliPermissionResponse } from '@shared/cli-permission'
+import { cliPermissionResponse, looksWorkspaceTrustPrompt } from '@shared/cli-permission'
 import { ptyManager } from '../cli/pty-manager'
 import { checkAgentGitPatch, snapshotAgentGit } from '../git/session-snapshot'
 import { emitSecretaryEvent } from './events'
@@ -49,10 +49,6 @@ let unsubscribe: (() => void) | null = null
 
 function stripAnsi(value: string): string {
   return value.replace(/\u001b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '')
-}
-
-function looksWorkspaceTrustPrompt(buffer: string): boolean {
-  return /workspace trust required|trust this workspace|do you trust the (?:files|contents) of this directory/i.test(buffer)
 }
 
 function inferActivity(buffer: string): 'waiting' | 'busy' | null {
@@ -424,7 +420,7 @@ export async function answerTrackedSecretaryRun(payload: unknown): Promise<Secre
 
 const PERMISSION_REPLY_LIMIT = 12
 
-async function answerCliPermission(target: Target, response: '\r' | 'y\r', key: string): Promise<void> {
+async function answerCliPermission(target: Target, response: '\r' | 'y\r' | 'a\r', key: string): Promise<void> {
   const now = Date.now()
   if (target.permissionReplies >= PERMISSION_REPLY_LIMIT) return
   if (now - target.lastPermissionAt < 1200) return
@@ -449,11 +445,13 @@ function handlePtyEvent(event: PtyEvent): void {
   if (event.type === 'data') {
     target.output = `${target.output}${event.data}`.slice(-OUTPUT_LIMIT)
     const clean = stripAnsi(target.output)
-    if (looksWorkspaceTrustPrompt(clean)) {
+    const permission = cliPermissionResponse(clean, {
+      managedWorktree: target.cwd.includes('/agent-worktrees/')
+    })
+    if (looksWorkspaceTrustPrompt(clean) && !permission) {
       failTrackedRun(runId, 'The CLI is waiting for workspace trust. Review it in the terminal, then create a fresh plan.')
       return
     }
-    const permission = cliPermissionResponse(clean)
     if (permission) {
       void answerCliPermission(target, permission, clean.slice(-240))
       return

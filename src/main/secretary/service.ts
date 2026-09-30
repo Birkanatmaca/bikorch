@@ -21,13 +21,16 @@ import {
   type SecretaryThreadDeleteRequest,
   type SecretaryThreadDetail,
   type SecretaryThreadRenameRequest,
+  type ManagerConnectionTest,
+  type ManagerProviderPatch,
   type SecretaryRun,
   type SecretaryUsageStats
 } from '@shared/contracts/secretary'
 import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import type { SecretaryCliOutcome } from '@shared/secretary-result-protocol'
-import { flushPersistenceToDisk, readMetaValue, writeMetaValue } from '../persistence/database'
+import { detectCli } from '../cli/adapters'
+import { flushPersistenceToDisk, listPersistedAiAccounts, readMetaValue, writeMetaValue } from '../persistence/database'
 import {
   estimateSecretaryCostUsd,
   type SecretaryResponseUsage
@@ -41,7 +44,21 @@ import {
   SECRETARY_PLAN_RESPONSE_FORMAT,
   type SecretaryResponseFormat
 } from './response-schema'
-import { createOpenAiManagerProvider } from './manager-ai-provider'
+import { createCliManagerProvider } from './cli-manager-provider'
+import { cliManagerSupportsKind } from './cli-manager-launch'
+import { createManagerCliRunner } from './cli-manager-session'
+import { createOpenAiManagerProvider, resolveManagerAiProvider } from './manager-ai-provider'
+import {
+  MANAGER_PROVIDER_META_KEY,
+  apiProbeFailure,
+  applyManagerProviderUpdate,
+  assessCliManager,
+  buildManagerProviderView,
+  managerCanThink,
+  parseManagerProviderSettings,
+  storedManagerProvider,
+  type ManagerCliAccountRef
+} from './provider-settings'
 import { validateSecretaryPlan } from './plan-validator'
 import { sanitizeSecretaryModelText } from './input-sanitizer'
 import { releaseSecretaryRunLock } from './run-lock'
@@ -50,7 +67,7 @@ import {
   isValidSecretaryModelId,
   resolveSecretaryModel
 } from './model-policy'
-import { messageRequestsCliWork } from './message-intent'
+import { cliPanelsToOpen, messageRequestsCliWork } from './message-intent'
 import { MEMORY_CATEGORIES, type LearnMemoriesResult } from '@shared/contracts/developer-intelligence'
 import {
   applyAiMemorySuggestions,
@@ -164,22 +181,144 @@ function readApiKey(): string | null {
   }
 }
 
-export function getSecretarySettings(): SecretarySettings {
-  const savedModel = readMetaValue(MODEL_META_KEY)?.trim()
+function readManagerProviderConfig() {
+  const model = resolveSecretaryModel(readMetaValue(MODEL_META_KEY)?.trim())
+  return parseManagerProviderSettings(readMetaValue(MANAGER_PROVIDER_META_KEY), model)
+}
+
+function persistedCliAccount(accountId: string | null): ManagerCliAccountRef | null {
+  if (!accountId) return null
+  const account = listPersistedAiAccounts().find((item) => item.id === accountId)
+  if (!account) return null
   return {
-    configured: Boolean(readApiKey()),
-    model: resolveSecretaryModel(savedModel),
-    usage: readUsage()
+    id: account.id,
+    kind: account.kind,
+    profileReady: account.profileReady,
+    lastAuthenticatedAt: account.lastAuthenticatedAt
+  }
+}
+
+function inspectCliManager(config = readManagerProviderConfig()) {
+  let installed = false
+  if (config.cli.kind) {
+    try {
+      installed = detectCli(config.cli.kind).installed
+    } catch {
+      installed = false
+    }
+  }
+  return assessCliManager({
+    kind: config.cli.kind,
+    accountId: config.cli.accountId,
+    installed,
+    account: persistedCliAccount(config.cli.accountId),
+    generationSupported: cliManagerSupportsKind(config.cli.kind)
+  })
+}
+
+export function getSecretarySettings(): SecretarySettings {
+  const config = readManagerProviderConfig()
+  const hasApiKey = Boolean(readApiKey())
+  const cliStatus = inspectCliManager(config).status
+  return {
+    configured: managerCanThink(config, hasApiKey, cliStatus),
+    model: config.api.model,
+    usage: readUsage(),
+    provider: buildManagerProviderView({
+      settings: config,
+      hasApiKey,
+      cliStatus
+    })
   }
 }
 
 export function updateSecretarySettings(payload: unknown): SecretarySettings {
-  const model = (payload as { model?: unknown })?.model
-  if (typeof model !== 'string' || !isValidSecretaryModelId(model)) {
+  if (!payload || typeof payload !== 'object') throw new Error('Enter a valid model identifier')
+  const body = payload as { model?: unknown; provider?: ManagerProviderPatch }
+  if (body.model === undefined && body.provider === undefined) {
     throw new Error('Enter a valid model identifier')
   }
-  writeMetaValue(MODEL_META_KEY, model.trim())
+  if (body.model !== undefined) {
+    if (typeof body.model !== 'string' || !isValidSecretaryModelId(body.model)) {
+      throw new Error('Enter a valid model identifier')
+    }
+    writeMetaValue(MODEL_META_KEY, body.model.trim())
+  }
+  if (body.provider !== undefined) {
+    const next = applyManagerProviderUpdate(readManagerProviderConfig(), body.provider)
+    writeMetaValue(MODEL_META_KEY, next.api.model)
+    writeMetaValue(MANAGER_PROVIDER_META_KEY, storedManagerProvider(next))
+  }
   return getSecretarySettings()
+}
+
+const managerAiProvider = createOpenAiManagerProvider({
+  apiKey: readApiKey,
+  model: () => getSecretarySettings().model,
+  recordUsage
+})
+
+const managerCliRunner = createManagerCliRunner()
+
+const cliManagerProvider = createCliManagerProvider({
+  settings: () => {
+    const config = readManagerProviderConfig()
+    return config.cli
+  },
+  runner: managerCliRunner
+})
+
+function activeManagerProvider() {
+  const config = readManagerProviderConfig()
+  return resolveManagerAiProvider({
+    source: config.source,
+    fallbackToApi: config.fallbackToApi,
+    hasApiKey: Boolean(readApiKey()),
+    cliGenerationAvailable: cliManagerSupportsKind(config.cli.kind),
+    api: managerAiProvider,
+    cli: cliManagerProvider
+  })
+}
+
+const CONNECTION_PROBE_FORMAT: SecretaryResponseFormat = {
+  name: 'manager_connection_probe',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['ok'],
+    properties: { ok: { type: 'boolean' } }
+  }
+}
+
+export async function testManagerConnection(request: unknown): Promise<ManagerConnectionTest> {
+  const source = (request as { source?: unknown })?.source
+  if (source === 'cli') {
+    const result = inspectCliManager()
+    if (result.status !== 'ready') return { source: 'cli', status: result.status, message: result.message }
+    const config = readManagerProviderConfig()
+    if (!config.cli.kind || !config.cli.accountId) {
+      return { source: 'cli', status: 'account-unavailable', message: 'No account selected' }
+    }
+    try {
+      await managerCliRunner.open(config.cli.kind, config.cli.accountId)
+      return { source: 'cli', status: 'ready', message: 'Ready' }
+    } catch (cause) {
+      const message = cause instanceof Error && cause.message.trim() ? cause.message : 'Unavailable'
+      const status = message === 'Authentication required' ? 'authentication-required' as const : 'unavailable' as const
+      return { source: 'cli', status, message }
+    }
+  }
+  if (source !== 'api') throw new Error('Choose API or CLI to test')
+  if (!readApiKey()) return { source: 'api', status: 'not-configured', message: 'No API key' }
+  try {
+    await managerAiProvider.generate([
+      { role: 'user', content: [{ type: 'input_text', text: 'Reply with ok set to true.' }] }
+    ], CONNECTION_PROBE_FORMAT)
+    return { source: 'api', status: 'connected', message: 'Connected' }
+  } catch (cause) {
+    const failure = apiProbeFailure(cause instanceof Error ? cause.message : '')
+    return { source: 'api', status: failure.status, message: failure.message }
+  }
 }
 
 export function saveSecretaryApiKey(value: unknown): SecretarySettings {
@@ -223,14 +362,16 @@ async function callSecretaryModel(
   input: Array<{ role: 'system' | 'user' | 'assistant'; content: Array<{ type: 'input_text'; text: string }> }>,
   responseFormat: SecretaryResponseFormat
 ): Promise<string> {
-  return managerAiProvider.generate(input, responseFormat)
+  const config = readManagerProviderConfig()
+  try {
+    return await activeManagerProvider().generate(input, responseFormat)
+  } catch (cause) {
+    if (config.source === 'cli' && config.fallbackToApi && readApiKey()) {
+      return managerAiProvider.generate(input, responseFormat)
+    }
+    throw cause
+  }
 }
-
-const managerAiProvider = createOpenAiManagerProvider({
-  apiKey: readApiKey,
-  model: () => getSecretarySettings().model,
-  recordUsage
-})
 
 const MEMORY_LEARNING_FORMAT: SecretaryResponseFormat = {
   name: 'developer_memory_learning',
@@ -639,7 +780,7 @@ function parseOpenKinds(raw: unknown): CliUsageKind[] {
   for (const item of raw) {
     if (typeof item !== 'string') continue
     const kind = item.trim().toLowerCase() as CliUsageKind
-    if (!AI_ACCOUNT_KINDS.includes(kind) || kinds.includes(kind)) continue
+    if (!AI_ACCOUNT_KINDS.includes(kind) || kinds.filter((itemKind) => itemKind === kind).length >= 3) continue
     kinds.push(kind)
   }
   return kinds
@@ -694,8 +835,9 @@ export async function chatWithSecretary(payload: unknown): Promise<SecretaryChat
       { role: 'user', content: [{ type: 'input_text', text: request.message }] }
     ], SECRETARY_CHAT_RESPONSE_FORMAT)
     const parsed = readSecretaryReply(text)
-    const parsedPlan = parsePlan(parsed.planRaw, request, false)
-    const openKinds = parseOpenKinds(parsed.openKindsRaw)
+    const requestedPanels = cliPanelsToOpen(request.message)
+    const parsedPlan = requestedPanels.length > 0 ? null : parsePlan(parsed.planRaw, request, false)
+    const openKinds = requestedPanels.length > 0 ? requestedPanels : parseOpenKinds(parsed.openKindsRaw)
     if (parsedPlan) {
       for (const assignment of parsedPlan.assignments) {
         if (!openKinds.includes(assignment.kind) && !assignment.panelId) openKinds.push(assignment.kind)

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { SecretarySettings } from '@shared/contracts/secretary'
+import { defaultManagerProviderView, type ManagerProviderPatch, type SecretarySettings } from '@shared/contracts/secretary'
 
 const EMPTY_SETTINGS: SecretarySettings = {
   configured: false,
@@ -12,7 +12,8 @@ const EMPTY_SETTINGS: SecretarySettings = {
     totalTokens: 0,
     estimatedCostUsd: 0,
     lastRequestAt: null
-  }
+  },
+  provider: defaultManagerProviderView('gpt-5')
 }
 
 interface SecretaryStore {
@@ -24,6 +25,7 @@ interface SecretaryStore {
   saveKey: (key: string) => Promise<boolean>
   clearKey: () => Promise<boolean>
   updateModel: (model: string) => Promise<boolean>
+  updateProvider: (provider: ManagerProviderPatch) => Promise<boolean>
   resetUsage: () => Promise<boolean>
 }
 
@@ -79,6 +81,18 @@ export const useSecretaryStore = create<SecretaryStore>((set) => ({
       return true
     } catch (cause) {
       set({ loading: false, error: messageFor(cause, 'Could not update the model') })
+      return false
+    }
+  },
+
+  updateProvider: async (provider) => {
+    set({ loading: true, error: null })
+    try {
+      const settings = await window.api.secretary.updateSettings({ provider })
+      set({ settings, loaded: true, loading: false })
+      return true
+    } catch (cause) {
+      set({ loading: false, error: messageFor(cause, 'Could not update Manager settings') })
       return false
     }
   },

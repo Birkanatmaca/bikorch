@@ -28,7 +28,9 @@ export type ProfileSection =
   | 'insights'
   | 'prompts'
   | 'sessions'
+  | 'general'
   | 'secretary'
+  | 'cli-accounts'
   | 'privacy'
   | 'runtime'
 

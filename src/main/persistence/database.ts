@@ -725,6 +725,16 @@ function parseAccounts(raw: unknown): AiAccount[] {
   })
 }
 
+export function listPersistedAiAccounts(): AiAccount[] {
+  const raw = readMetaValue('ai_accounts')
+  if (!raw) return []
+  try {
+    return parseAccounts(JSON.parse(raw))
+  } catch {
+    return []
+  }
+}
+
 function parseSubscriptions(raw: unknown): SubscriptionRecord[] {
   if (!Array.isArray(raw)) return []
 

@@ -1,4 +1,6 @@
+import type { ManagerProviderSource } from '@shared/contracts/secretary'
 import type { SecretaryResponseUsage } from './pricing'
+import { resolveManagerProviderKind } from './provider-settings'
 import type { SecretaryResponseFormat } from './response-schema'
 import { extractResponseText } from './response-text'
 import {
@@ -17,6 +19,21 @@ export type ManagerModelMessage = {
 /** Conversation logic depends on this normalized interface, not a transport. */
 export interface ManagerAiProvider {
   generate(input: ManagerModelMessage[], format: SecretaryResponseFormat): Promise<string>
+}
+
+export function resolveManagerAiProvider(input: {
+  source: ManagerProviderSource
+  fallbackToApi: boolean
+  hasApiKey: boolean
+  cliGenerationAvailable: boolean
+  api: ManagerAiProvider
+  cli: ManagerAiProvider
+}): ManagerAiProvider {
+  const kind = resolveManagerProviderKind(input, {
+    hasApiKey: input.hasApiKey,
+    cliGenerationAvailable: input.cliGenerationAvailable
+  })
+  return kind === 'cli' ? input.cli : input.api
 }
 
 export function createOpenAiManagerProvider(dependencies: {

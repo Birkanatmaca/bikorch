@@ -21,6 +21,7 @@ import {
   reviseSecretaryPlan,
   resetSecretaryUsage,
   saveSecretaryApiKey,
+  testManagerConnection,
   updateSecretarySettings
 } from '../secretary/service'
 import { dispatchSecretaryRun, prepareSecretaryRun } from '../secretary/orchestrator'
@@ -34,6 +35,7 @@ export function registerSecretaryHandlers(): void {
   ipcMain.handle(SECRETARY_IPC.CLEAR_KEY, (event) => { assertTrustedMainWindow(event); return clearSecretaryApiKey() })
   ipcMain.handle(SECRETARY_IPC.RESET_USAGE, (event) => { assertTrustedMainWindow(event); return resetSecretaryUsage() })
   ipcMain.handle(SECRETARY_IPC.UPDATE_SETTINGS, (event, settings: unknown) => { assertTrustedMainWindow(event); return updateSecretarySettings(settings) })
+  ipcMain.handle(SECRETARY_IPC.TEST_CONNECTION, (event, request: unknown) => { assertTrustedMainWindow(event); return testManagerConnection(request) })
   ipcMain.handle(SECRETARY_IPC.CREATE_PLAN, (event, request: unknown) => { assertTrustedMainWindow(event); return createSecretaryPlan(request) })
   ipcMain.handle(SECRETARY_IPC.CHAT, (event, request: unknown) => { assertTrustedMainWindow(event); return chatWithSecretary(request) })
   ipcMain.handle(SECRETARY_IPC.GET_DAILY_LEARN, (event) => { assertTrustedMainWindow(event); return getDailyLearn() })

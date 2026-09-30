@@ -141,6 +141,9 @@ import {
 import {
   SECRETARY_IPC,
   type DailyLearnView,
+  type ManagerConnectionTest,
+  type ManagerProviderPatch,
+  type ManagerProviderSource,
   type SecretaryChatRequest,
   type SecretaryChatResponse,
   type SecretaryPlan,
@@ -400,7 +403,8 @@ export interface SecretaryApi {
   saveKey: (key: string) => Promise<SecretarySettings>
   clearKey: () => Promise<SecretarySettings>
   resetUsage: () => Promise<SecretarySettings>
-  updateSettings: (settings: { model: string }) => Promise<SecretarySettings>
+  updateSettings: (settings: { model?: string; provider?: ManagerProviderPatch }) => Promise<SecretarySettings>
+  testConnection: (request: { source: ManagerProviderSource }) => Promise<ManagerConnectionTest>
   createPlan: (request: SecretaryPlanRequest) => Promise<SecretaryPlan>
   chat: (request: SecretaryChatRequest) => Promise<SecretaryChatResponse>
   getDailyLearn: () => Promise<DailyLearnView>
@@ -729,6 +733,7 @@ const secretaryApi: SecretaryApi = {
   clearKey: () => ipcRenderer.invoke(SECRETARY_IPC.CLEAR_KEY),
   resetUsage: () => ipcRenderer.invoke(SECRETARY_IPC.RESET_USAGE),
   updateSettings: (settings) => ipcRenderer.invoke(SECRETARY_IPC.UPDATE_SETTINGS, settings),
+  testConnection: (request) => ipcRenderer.invoke(SECRETARY_IPC.TEST_CONNECTION, request),
   createPlan: (request) => ipcRenderer.invoke(SECRETARY_IPC.CREATE_PLAN, request),
   chat: (request) => ipcRenderer.invoke(SECRETARY_IPC.CHAT, request),
   getDailyLearn: () => ipcRenderer.invoke(SECRETARY_IPC.GET_DAILY_LEARN),

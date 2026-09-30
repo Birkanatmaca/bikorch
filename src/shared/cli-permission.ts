@@ -1,5 +1,6 @@
 const ANSI_RE = /\u001b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g
-const TRUST_RE = /workspace trust required|trust this workspace|do you trust the (?:files|contents) of this directory/i
+const TRUST_RE = /workspace trust required|trust this workspace|do you trust the (?:files|contents) of this (?:directory|project|folder)|i trust this folder/i
+const MANAGED_WORKTREE_RE = /\/Bikorch\/agent-worktrees\//i
 
 const READ_BINS = new Set([
   'ls', 'pwd', 'cat', 'head', 'tail', 'wc', 'file', 'stat', 'which', 'whereis',
@@ -157,6 +158,21 @@ function commandLines(tail: string): string[] {
   })
 }
 
+export function looksWorkspaceTrustPrompt(buffer: string): boolean {
+  return TRUST_RE.test(buffer.replace(ANSI_RE, '').replace(/\r/g, ''))
+}
+
+/** Enter confirms trust only for a Bikorch agent worktree, and only while Yes stays selected. */
+function managedWorktreeTrustResponse(tail: string, managedWorktree = false): '\r' | 'a\r' | null {
+  if (!TRUST_RE.test(tail)) return null
+  if (!managedWorktree && !MANAGED_WORKTREE_RE.test(tail)) return null
+  const lines = tail.split('\n').map((line) => line.trim())
+  if (lines.some((line) => /^(?:>|❯|▶|▸|›)\s*no\b/i.test(line))) return null
+  if (lines.some((line) => /\[a\]\s*trust/i.test(line))) return 'a\r'
+  if (/yes,\s*i trust|trust this (?:folder|workspace|directory)/i.test(tail)) return '\r'
+  return null
+}
+
 function confirmationKind(end: string): '\r' | 'y\r' | null {
   if (/\(y\/n\)|\[y\]es|\byes\/no\b/i.test(end)) return 'y\r'
   if (/(?:^|\n)\s*(?:❯|›|▶|▸|>)\s*.{0,48}\b(yes|allow|run|approve|accept|continue)\b/i.test(end)) return '\r'
@@ -168,9 +184,13 @@ function confirmationKind(end: string): '\r' | 'y\r' | null {
  * Keystrokes for an approved CLI waiting on a prompt.
  * Confirmations and Enter pauses require at least one recognized command, all read-only.
  */
-export function cliPermissionResponse(buffer: string): '\r' | 'y\r' | null {
-  const tail = buffer.replace(ANSI_RE, '').replace(/\r/g, '').slice(-600)
-  if (!tail.trim() || TRUST_RE.test(tail)) return null
+export function cliPermissionResponse(
+  buffer: string,
+  options?: { managedWorktree?: boolean }
+): '\r' | 'y\r' | 'a\r' | null {
+  const tail = buffer.replace(ANSI_RE, '').replace(/\r/g, '').slice(-1200)
+  if (!tail.trim()) return null
+  if (TRUST_RE.test(tail)) return managedWorktreeTrustResponse(tail, options?.managedWorktree === true)
   const end = tail.slice(-400)
   const commands = commandLines(tail)
   const confirmation = confirmationKind(end)

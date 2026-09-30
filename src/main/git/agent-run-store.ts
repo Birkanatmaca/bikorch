@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from 'fs/promises'
+import { randomUUID } from 'crypto'
+import { mkdir, readFile, rename, rm, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'
 import type {
   AgentRunRecord,
@@ -25,6 +26,7 @@ export interface RepoIsolationState {
 
 const memory = new Map<string, RepoIsolationState>()
 const accessedAt = new Map<string, number>()
+const saveQueues = new Map<string, Promise<void>>()
 
 function storePath(baseDir: string, repoRoot: string): string {
   return join(baseDir, 'merge-queue', `${hashRepoRoot(repoRoot)}.json`)
@@ -150,18 +152,36 @@ export async function loadRepoIsolation(repoRoot: string, baseDir: string): Prom
   }
 }
 
+async function writeIsolationFile(file: string, state: RepoIsolationState): Promise<void> {
+  await mkdir(dirname(file), { recursive: true })
+  const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`
+  await writeFile(tmp, JSON.stringify(state, null, 2), 'utf8')
+  try {
+    await rename(tmp, file)
+  } catch (cause) {
+    await rm(tmp, { force: true }).catch(() => undefined)
+    throw cause
+  }
+}
+
 export async function saveRepoIsolation(state: RepoIsolationState, baseDir: string): Promise<void> {
   state.repoRoot = isolationKey(state.repoRoot)
   memory.set(state.repoRoot, state)
   touch(state.repoRoot)
   evictIdleIsolationMemory(memoryLimit)
   const file = storePath(baseDir, state.repoRoot)
-  await mkdir(dirname(file), { recursive: true })
-  const tmp = `${file}.${process.pid}.tmp`
-  const payload = JSON.stringify(state, null, 2)
-  await writeFile(tmp, payload, 'utf8')
-  await rename(tmp, file)
-  persistSink?.(state)
+  const previous = saveQueues.get(file) ?? Promise.resolve()
+  const run = previous.catch(() => undefined).then(async () => {
+    const latest = memory.get(state.repoRoot) ?? state
+    await writeIsolationFile(file, latest)
+    persistSink?.(latest)
+  })
+  let tracked: Promise<void> = Promise.resolve()
+  tracked = run.finally(() => {
+    if (saveQueues.get(file) === tracked) saveQueues.delete(file)
+  })
+  saveQueues.set(file, tracked)
+  await run
 }
 
 export function upsertAgentRun(state: RepoIsolationState, patch: AgentRunRecord): AgentRunRecord {

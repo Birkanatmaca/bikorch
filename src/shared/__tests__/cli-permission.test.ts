@@ -14,6 +14,16 @@ describe('cli permission prompts', () => {
     expect(cliPermissionResponse('Allow this command? (y/n)')).toBeNull()
     expect(cliPermissionResponse('Run this command?\n❯ Allow\n  Deny')).toBeNull()
     expect(cliPermissionResponse('Workspace Trust Required\nDo you trust the contents of this directory?')).toBeNull()
+    expect(cliPermissionResponse(`Accessing workspace:
+/Users/me/projects/helper
+Do you trust the contents of this project?
+> Yes, I trust this folder
+  No, exit`)).toBeNull()
+    expect(cliPermissionResponse(`Accessing workspace:
+/Users/me/Library/Application Support/Bikorch/agent-worktrees/repo/antigravity-1
+Do you trust the contents of this project?
+  Yes, I trust this folder
+> No, exit`)).toBeNull()
     expect(cliPermissionResponse('Allow this command?\ngit push --force')).toBeNull()
     expect(cliPermissionResponse('Allow this command? (y/n)\ngit clean -fd')).toBeNull()
     expect(cliPermissionResponse('Allow this command? (y/n)\nterraform destroy')).toBeNull()
@@ -23,6 +33,31 @@ describe('cli permission prompts', () => {
     expect(cliPermissionResponse('Allow this command? (y/n)\ngit reset --hard')).toBeNull()
     expect(cliPermissionResponse('Allow this command? (y/n)\ngit status && git push')).toBeNull()
     expect(cliPermissionResponse('Press Enter to continue\nterraform destroy')).toBeNull()
+  })
+
+  it('confirms trust for a Bikorch agent worktree when Yes is selected', () => {
+    expect(cliPermissionResponse(`Accessing workspace:
+/Users/me/Library/Application Support/Bikorch/agent-worktrees/repo/antigravity-1
+Do you trust the contents of this project?
+Antigravity CLI requires permission to read, edit, and execute files here.
+> Yes, I trust this folder
+  No, exit
+enter Confirm`)).toBe('\r')
+    expect(cliPermissionResponse(`Workspace Trust Required
+/Users/me/Library/Application Support/Bikorch/agent-worktrees/repo/claude-1
+Do you trust the contents of this directory?
+▶ [a] Trust this workspace`)).toBe('a\r')
+    expect(cliPermissionResponse(`Accessing workspace:
+/Users/me/Library/Application Support/Bikorch/agent-worktrees/repo/antigravity-1
+Do you trust the contents of this project?
+Yes, I trust this folder
+No, exit`, { managedWorktree: true })).toBe('\r')
+    expect(cliPermissionResponse(`Do you trust the contents of this project?
+Yes, I trust this folder
+No, exit`, { managedWorktree: true })).toBe('\r')
+    expect(cliPermissionResponse(`Do you trust the contents of this project?
+Yes, I trust this folder
+> No, exit`, { managedWorktree: true })).toBeNull()
   })
 
   it('ignores a normal idle prompt', () => {

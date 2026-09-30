@@ -57,4 +57,17 @@ describe('isolation memory bound', () => {
       await rm(base, { recursive: true, force: true })
     }
   })
+
+  it('lets two isolation saves of the same repo finish', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'bikorch-iso-race-'))
+    try {
+      const state = await loadRepoIsolation('/repos/race', base)
+      upsertAgentRun(state, run('race1', 'running'))
+      await Promise.all([saveRepoIsolation(state, base), saveRepoIsolation(state, base)])
+      clearRepoIsolationMemory()
+      expect((await loadRepoIsolation('/repos/race', base)).runs[0]?.status).toBe('running')
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
+  })
 })
