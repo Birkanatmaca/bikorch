@@ -22,12 +22,14 @@ import { MusicPlayerHost } from '@renderer/components/music/MusicPlayerHost'
 import { TimerHost } from '@renderer/components/timer/TimerHost'
 import { cn } from '@renderer/lib/utils'
 import { isMacOS, isWindows } from '@renderer/lib/electron-api'
+import { useCliDetection } from '@renderer/hooks/use-cli-detection'
 
 const IdeOverlay = lazy(() =>
   import('@renderer/components/ide/IdeOverlay').then((module) => ({ default: module.IdeOverlay }))
 )
 
 export default function App(): React.JSX.Element {
+  useCliDetection()
   const { isReady, error } = usePersistenceBootstrap()
   const { open, openPalette, closePalette } = useCommandPalette()
   const { openFolderPicker } = useOpenProject()

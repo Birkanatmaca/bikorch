@@ -12,6 +12,7 @@ import type { AuthProfileSummary } from '@shared/contracts/auth-profiles'
 import { cleanCliLabel } from '@shared/terminal-text'
 
 export type AiAccountDraft = Pick<AiAccount, 'kind' | 'name' | 'email' | 'plan' | 'note'>
+const authChangesAt = new Map<string, number>()
 
 interface AiAccountsStore extends AiAccountsSnapshot {
   suppressSystemImportByKind: Record<CliUsageKind, boolean>
@@ -25,7 +26,7 @@ interface AiAccountsStore extends AiAccountsSnapshot {
     accountId: string,
     identity?: { email?: string; name?: string }
   ) => void
-  syncAuthProfiles: (profiles: AuthProfileSummary[]) => void
+  syncAuthProfiles: (profiles: AuthProfileSummary[], observedAt?: number) => void
   markAccountLoggedOut: (accountId: string) => void
 }
 
@@ -71,6 +72,7 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
   ...initialState(),
 
   hydrate: (snapshot) => {
+    authChangesAt.clear()
     const accounts = (Array.isArray(snapshot.accounts) ? snapshot.accounts : []).map(cleanStoredAccount)
     const activeAccountByKind = {
       ...createDefaultActiveAccountByKind(),
@@ -132,6 +134,7 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
     const current = get()
     const removed = current.accounts.find((account) => account.id === accountId)
     if (!removed) return
+    authChangesAt.set(accountId, Date.now())
 
     const accounts = current.accounts.filter((account) => account.id !== accountId)
     const activeAccountByKind = { ...current.activeAccountByKind }
@@ -166,6 +169,7 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
 
   markAccountAuthenticated: (accountId, identity) => {
     const now = Date.now()
+    authChangesAt.set(accountId, now)
     set((state) => {
       const accounts = state.accounts.map((account) =>
         account.id === accountId
@@ -197,6 +201,7 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
   },
 
   markAccountLoggedOut: (accountId) => {
+    authChangesAt.set(accountId, Date.now())
     set((state) => {
       const account = state.accounts.find((item) => item.id === accountId)
       if (!account) return state
@@ -208,12 +213,16 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
     })
   },
 
-  syncAuthProfiles: (profiles) => {
+  syncAuthProfiles: (profiles, observedAt) => {
     const now = Date.now()
     const current = get()
     const profilesById = new Map(profiles.map((profile) => [profile.accountId, profile]))
     const accounts = current.accounts.map((account) => {
       const profile = profilesById.get(account.id)
+      if (observedAt !== undefined && (authChangesAt.get(account.id) ?? account.lastAuthenticatedAt ?? 0) >= observedAt) {
+        profilesById.delete(account.id)
+        return account
+      }
       if (!profile || profile.kind !== account.kind) {
         return account.profileReady ? { ...account, profileReady: false } : account
       }
@@ -231,6 +240,7 @@ export const useAiAccountsStore = create<AiAccountsStore>((set, get) => ({
     const activeAccountByKind = { ...current.activeAccountByKind }
 
     for (const profile of profilesById.values()) {
+      if (observedAt !== undefined && (authChangesAt.get(profile.accountId) ?? 0) >= observedAt) continue
       const account: AiAccount = {
         id: profile.accountId,
         kind: profile.kind,

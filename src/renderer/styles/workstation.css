@@ -2375,6 +2375,19 @@ kbd {
   background: var(--color-elevated);
   box-shadow: var(--surface-highlight), 0 18px 40px rgb(0 0 0 / 0.35);
 }
+.cli-kind-option { position: relative; display: flex; flex-direction: column; min-width: 0; }
+.cli-kind-option .cli-kind-tile { flex: 1; width: 100%; }
+.cli-kind-option > .cli-install-button { position: absolute; top: 9px; right: 9px; }
+.cli-install-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 30px; height: 30px; border: 1px solid var(--surface-edge); border-radius: 8px; background: var(--color-elevated); color: var(--color-primary); cursor: pointer; }
+.cli-install-button:hover:not(:disabled) { background: rgb(139 124 248 / .18); border-color: rgb(139 124 248 / .42); }
+.cli-install-button:disabled { opacity: .5; cursor: wait; }
+.cli-install-button:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.cli-kind-error { padding: 6px; color: var(--color-error); font-size: 10px; overflow-wrap: anywhere; }
+.panel-menu-cli-option { display: flex; align-items: center; flex-wrap: wrap; padding-right: 6px; }
+.panel-menu-cli-option > .menu-action { flex: 1; min-width: 0; width: auto; }
+.panel-menu-cli-option > .menu-action:disabled { opacity: .45; cursor: not-allowed; }
+.panel-menu-cli-option > .cli-kind-error { width: 100%; }
+.panel-menu-cli-status { margin-left: auto; font-size: 9px; color: var(--color-text-muted); }
 .cli-kind-tile {
   display: flex;
   min-width: 0;

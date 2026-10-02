@@ -11,7 +11,6 @@ import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useIsolationStore } from '@renderer/stores/isolation-store'
 import {
   AI_ACCOUNTS_REFRESH_EVENT,
-  AI_ACCOUNT_AUTHENTICATED_EVENT,
   FOCUS_TERMINAL_EVENT,
   TERMINAL_LAYOUT_LOCK_EVENT
 } from '@renderer/lib/app-events'
@@ -48,6 +47,11 @@ import {
 } from '@renderer/lib/terminal-fit'
 import { TerminalInputQueue } from '@renderer/lib/terminal-input-queue'
 import { cn } from '@renderer/lib/utils'
+import { AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
+import { useCliStore } from '@renderer/stores/cli-store'
+import { completeCliSignIn, recoverCompletedCliSignIn } from '@renderer/lib/cli-login-lifecycle'
+import { openCliSignIn } from '@renderer/lib/cli-sign-in'
+import { useAiAccountsStore } from '@renderer/stores/ai-accounts-store'
 
 interface TerminalViewProps {
   sessionId: string
@@ -79,12 +83,13 @@ export function TerminalView({
   )
   const setStatus = useTerminalStore((s) => s.setStatus)
   const removeSession = useTerminalStore((s) => s.removeSession)
-  const clearPanelLaunchMode = useWorkspaceStore((s) => s.clearPanelLaunchMode)
   const sessionError = useTerminalStore((s) => s.errors[sessionId])
-  const [installPrompt, setInstallPrompt] = useState<'cursor' | null>(null)
+  const sessionStatus = useTerminalStore((s) => s.sessions[sessionId])
+  const [installPrompt, setInstallPrompt] = useState<Exclude<PtyKind, 'terminal'> | null>(null)
   const [installing, setInstalling] = useState(false)
   const [installMessage, setInstallMessage] = useState<string | null>(null)
-  const startSessionRef = useRef<(terminal: Terminal) => Promise<void>>(async () => {})
+  const [restartKey, setRestartKey] = useState(0)
+  const [accountRequired, setAccountRequired] = useState(false)
 
   const layoutLockedRef = useRef(false)
   const layoutLockDepthRef = useRef(0)
@@ -261,6 +266,7 @@ export function TerminalView({
 
     const inspectAuthenticatedProfile = async (): Promise<void> => {
       if (
+        !active ||
         !shouldCaptureAccount ||
         !accountId ||
         kind === 'terminal' ||
@@ -287,6 +293,7 @@ export function TerminalView({
           kind === 'antigravity' || kind === 'cursor'
             ? await window.api.authProfiles.importCurrent(request)
             : await window.api.authProfiles.inspect(request)
+        if (!active) return
         if (!result.ok) {
           const message = result.error ?? 'Could not save this CLI account session'
           if (message !== lastAuthCaptureError) {
@@ -296,18 +303,14 @@ export function TerminalView({
           return
         }
         if (!result.ready) return
-        authCaptured = true
+        authCaptured = completeCliSignIn(sessionId, kind, accountId, result.identity)
+        if (!authCaptured) return
         if (authPollTimer !== null) {
           window.clearInterval(authPollTimer)
           authPollTimer = null
         }
-        window.dispatchEvent(
-          new CustomEvent(AI_ACCOUNT_AUTHENTICATED_EVENT, {
-            detail: { accountId, kind, identity: result.identity }
-          })
-        )
-        window.dispatchEvent(new Event(AI_ACCOUNTS_REFRESH_EVENT))
       } catch (captureError) {
+        if (!active) return
         const message =
           captureError instanceof Error
             ? captureError.message
@@ -330,9 +333,9 @@ export function TerminalView({
       }, kind === 'antigravity' || kind === 'cursor' ? 1600 : 900)
     }
 
-    if ((kind === 'cursor' || kind === 'antigravity') && captureAfterLogin && shouldCaptureAccount) {
+    if (captureAfterLogin && shouldCaptureAccount) {
       authPollTimer = window.setInterval(() => {
-        void inspectAuthenticatedProfile()
+        if (ptyReadyRef.current) void inspectAuthenticatedProfile()
       }, 2000)
     }
 
@@ -547,14 +550,38 @@ export function TerminalView({
 
     const startSession = async (term: Terminal, nextLaunchMode: PtyLaunchMode = launchMode): Promise<void> => {
       if (!active) return
-      if (nextLaunchMode === 'login' && (kind === 'cursor' || kind === 'antigravity')) {
+      const existingPanel = Object.values(useWorkspaceStore.getState().workspaces).flatMap((workspace) => workspace.panels)
+        .find((panel) => panel.id === sessionId)
+      let resumeLogin = nextLaunchMode === 'login' && existingPanel?.loginStarted === true
+      if (nextLaunchMode === 'login' && existingPanel && existingPanel.launchMode !== 'login') nextLaunchMode = 'normal'
+      const session = await window.api.pty.snapshot(sessionId).catch(() => null)
+      if (!active) return
+      const liveSession = session && session.projectId === projectIdAtMount && session.kind === kind &&
+        session.accountId === accountId && session.cliModel === cliModel &&
+        session.status !== 'error' && session.status !== 'stopped' ? session : null
+      if (liveSession && nextLaunchMode === 'login') resumeLogin = true
+      if (resumeLogin && accountId && kind !== 'terminal') {
+        try {
+          if (await recoverCompletedCliSignIn(sessionId, kind, accountId, () => active)) {
+            authCaptured = true
+            nextLaunchMode = 'normal'
+            resumeLogin = false
+          }
+        } catch { /* A temporary profile check failure must not reset the pending login. */ }
+        if (!active) return
+      }
+      antigravityLogoutSent = resumeLogin
+      if (nextLaunchMode === 'login' && resumeLogin && kind === 'antigravity') antigravityLoginSent = false
+      setStatus(sessionId, 'starting')
+      ptyReadyRef.current = false
+      if (nextLaunchMode === 'login' && !resumeLogin && (kind === 'cursor' || kind === 'antigravity')) {
         term.writeln(
           `\x1b[90mSigning out the current ${kind === 'cursor' ? 'Cursor' : 'Antigravity'} CLI session so you can add a different account...\x1b[0m`
         )
       }
 
-      let cwd = project?.folderPath ?? ''
-      let worktreePath: string | undefined
+      let cwd = liveSession?.cwd ?? project?.folderPath ?? ''
+      let worktreePath: string | undefined = liveSession?.worktreePath
       const panelAtLaunch = Object.values(useWorkspaceStore.getState().workspaces)
         .flatMap((workspace) => workspace.panels)
         .find((panel) => panel.id === sessionId)
@@ -582,13 +609,14 @@ export function TerminalView({
       }
       const sharedTree = panelAtLaunch?.workspaceIsolation === 'shared' && panelAtLaunch?.panelRole !== 'resolver'
       const isolate =
+        !liveSession &&
         !resolverCwd &&
         !sharedTree &&
         nextLaunchMode !== 'login' &&
         (AGENT_WORKTREE_KINDS as readonly string[]).includes(kind) &&
         Boolean(cwd) &&
         Boolean(window.api.git?.ensureWorktree)
-      if (sharedTree && cwd && panelAtLaunch?.worktreePath && window.api.git?.removeWorktree) {
+      if (!liveSession && sharedTree && cwd && panelAtLaunch?.worktreePath && window.api.git?.removeWorktree) {
         await window.api.git.removeWorktree({
           projectRoot: cwd,
           worktreePath: panelAtLaunch.worktreePath,
@@ -653,6 +681,7 @@ export function TerminalView({
           kind,
           ...launchGrid,
           launchMode: nextLaunchMode,
+          ...(resumeLogin ? { resumeLogin: true } : {}),
           accountId,
           ...(cliModel ? { cliModel } : {})
         })
@@ -668,6 +697,7 @@ export function TerminalView({
       // Remember the grid actually sent, then catch up if the pane resized meanwhile.
       lastPtySizeRef.current = launchGrid
       if (result.status !== 'error' && result.status !== 'stopped') {
+        if (nextLaunchMode === 'login') useWorkspaceStore.getState().markPanelLoginStarted(sessionId)
         ptyReadyRef.current = true
         inputQueue?.ready()
         maybeStartAntigravityLogin()
@@ -682,9 +712,6 @@ export function TerminalView({
           }, 1600)
         }
         sendPtyResize(term.cols, term.rows, true)
-      }
-      if (nextLaunchMode === 'login') {
-        clearPanelLaunchMode(sessionId)
       }
       if (cli) {
         if (result.status === 'error' || (result.reattached && result.status === 'stopped')) {
@@ -720,9 +747,10 @@ export function TerminalView({
       if (result.status === 'error' && result.error && result.error !== printedPtyError) {
         printedPtyError = result.error
         term.writeln(`\x1b[31m[Error] ${result.error}\x1b[0m`)
-        if (result.code === 'CLI_MISSING' && kind === 'cursor') {
-          setInstallPrompt('cursor')
+        if (result.code === 'CLI_MISSING' && kind !== 'terminal') {
+          setInstallPrompt(kind)
         }
+        setAccountRequired(result.code === 'ACCOUNT_REQUIRED')
       } else if (nextLaunchMode === 'login' && (kind === 'cursor' || kind === 'antigravity')) {
         term.writeln(
           `\x1b[33m[Account] Complete sign-in in the browser with the ${kind === 'cursor' ? 'Cursor' : 'Antigravity'} account you want to add.\x1b[0m`
@@ -730,7 +758,6 @@ export function TerminalView({
       }
     }
 
-    startSessionRef.current = startSession
     let launchRequested = false
     const maybeStart = (): void => {
       if (!active || launchRequested || !fitTerminal(false)) return
@@ -855,7 +882,7 @@ export function TerminalView({
       }
       if (!panelStillExists) removeSession(sessionId)
     }
-  }, [sessionId, kind, accountId, cliModel, project?.folderPath, setStatus, removeSession, clearPanelLaunchMode, scheduleFit, settleFit, fitTerminal, sendPtyResize])
+  }, [sessionId, kind, accountId, cliModel, project?.folderPath, restartKey, setStatus, removeSession, scheduleFit, settleFit, fitTerminal, sendPtyResize])
 
   // Refit when project tab becomes active again
   useEffect(() => {
@@ -864,21 +891,32 @@ export function TerminalView({
   }, [activeProjectId, settleFit])
 
   const handleInstall = async (): Promise<void> => {
-    if (!window.api.cli) return
+    if (!installPrompt || installing) return
+    const projectAtClick = activeProjectId
     setInstalling(true)
-    setInstallMessage('Installing Cursor CLI…')
-    const result = await window.api.cli.install('cursor')
+    setInstallMessage(`Installing ${AI_ACCOUNT_LABELS[installPrompt]}…`)
+    const ok = await useCliStore.getState().install(installPrompt)
+    if (disposedRef.current || useWorkspaceStore.getState().activeProjectId !== projectAtClick) return
     setInstalling(false)
-    if (!result.ok) {
-      setInstallMessage(result.error ?? 'Install failed')
+    if (!ok) {
+      setInstallMessage(useCliStore.getState().errorsByKind[installPrompt] ?? 'Another CLI installation is in progress. Try again when it finishes.')
       return
     }
     setInstallPrompt(null)
     setInstallMessage(null)
-    const terminal = terminalRef.current
-    if (terminal) {
-      void startSessionRef.current(terminal)
+    setRestartKey((value) => value + 1)
+  }
+
+  const retrySession = async (): Promise<void> => {
+    if (accountRequired && accountId && kind !== 'terminal') {
+      const account = useAiAccountsStore.getState().accounts.find((item) => item.id === accountId)
+      if (!account) return
+      try { await openCliSignIn(kind, account) }
+      catch (error) { setStatus(sessionId, 'error', error instanceof Error ? error.message : 'Could not open sign-in') }
+      return
     }
+    setStatus(sessionId, 'starting')
+    setRestartKey((value) => value + 1)
   }
 
   return (
@@ -894,12 +932,12 @@ export function TerminalView({
       {compactHost && (
         <div className="terminal-compact-hint" aria-live="polite">Tight space · zoom or scroll</div>
       )}
-      {installPrompt === 'cursor' && (
+      {installPrompt && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-app-bg/80 p-4">
           <div className="w-full max-w-sm rounded-lg border border-border bg-elevated p-4 shadow-xl">
-            <p className="text-sm font-medium text-text-primary">Cursor CLI not found</p>
+            <p className="text-sm font-medium text-text-primary">{AI_ACCOUNT_LABELS[installPrompt]} not found</p>
             <p className="mt-2 text-xs leading-relaxed text-text-secondary">
-              Cursor CLI is not installed on this computer, or it could not be found. Run the official install now?
+              Install {AI_ACCOUNT_LABELS[installPrompt]} to use this agent in Bikorch.
             </p>
             {installMessage && (
               <p className="mt-2 text-[11px] text-warning">{installMessage}</p>
@@ -910,7 +948,7 @@ export function TerminalView({
                 disabled={installing}
                 onClick={() => setInstallPrompt(null)}
               >
-                No
+                Close
               </Button>
               <Button
                 type="button"
@@ -918,15 +956,16 @@ export function TerminalView({
                 disabled={installing}
                 onClick={() => void handleInstall()}
               >
-                {installing ? 'Installing…' : 'Yes, install'}
+                {installing ? 'Installing…' : 'Download and install'}
               </Button>
             </div>
           </div>
         </div>
       )}
-      {sessionError && !installPrompt && (
-        <div className="pointer-events-none absolute bottom-2 left-2 rounded-md bg-error/10 px-2 py-1 font-mono text-[10px] text-error">
-          {sessionError}
+      {!installPrompt && (sessionStatus === 'error' || sessionStatus === 'stopped') && (
+        <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2 rounded-md border border-border bg-elevated px-3 py-2 text-xs">
+          <span className={sessionError ? 'text-error' : 'text-text-secondary'}>{sessionError || 'Process ended'}</span>
+          <Button type="button" onClick={() => void retrySession()}>{accountRequired ? 'Sign in' : 'Retry'}</Button>
         </div>
       )}
     </div>

@@ -27,6 +27,8 @@ export interface PtyCreateRequest {
   cols?: number
   rows?: number
   launchMode?: PtyLaunchMode
+  /** Continue an existing login without deleting its partial credentials. */
+  resumeLogin?: boolean
   accountId?: string
   /** Optional model for this CLI session. Currently supported by Cursor. */
   cliModel?: string
@@ -42,6 +44,17 @@ export interface PtyCreateResponse {
   kind?: PtyKind
   /** True when an already running session was re-attached instead of spawned. */
   reattached?: boolean
+}
+
+export interface PtySessionSnapshot {
+  sessionId: string
+  projectId: string
+  kind: PtyKind
+  accountId?: string
+  cliModel?: string
+  cwd: string
+  worktreePath?: string
+  status: PtySessionStatus
 }
 
 export interface PtyWriteRequest {
@@ -73,11 +86,13 @@ export type PtyEvent =
 
 export const CLI_IPC = {
   DETECT: 'cli:detect',
-  INSTALL: 'cli:install'
+  INSTALL: 'cli:install',
+  STATUS: 'cli:status'
 } as const
 
 export const PTY_IPC = {
   CREATE: 'pty:create',
+  SNAPSHOT: 'pty:snapshot',
   WRITE: 'pty:write',
   RESIZE: 'pty:resize',
   KILL: 'pty:kill',

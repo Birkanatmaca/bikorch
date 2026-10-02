@@ -10,13 +10,17 @@ import {
   type PtyHostServerMessage,
   type PtyHostSpawnRequest
 } from './protocol'
-import { appendOutputBuffer, hostHasRunningSessions } from './session-store'
+import { appendOutputBuffer, hostHasRunningSessions, hostSessionMatchesRequest } from './session-store'
 import { resolveSafeCwd, resolveWindowsSpawnPath } from '../path-validator'
 
 interface HostSession {
   id: string
   kind: string
   accountId?: string
+  projectId?: string
+  cliModel?: string
+  cwd: string
+  worktreePath?: string
   process: IPty | null
   status: 'running' | 'stopped'
   cols: number
@@ -44,8 +48,9 @@ class PtyHostRuntime {
 
   start(): void {
     const path = socketPath()
-    mkdirSync(dirname(path), { recursive: true })
-    if (existsSync(path)) {
+    mkdirSync(dirname(pidPath()), { recursive: true })
+    if (process.platform !== 'win32') mkdirSync(dirname(path), { recursive: true })
+    if (process.platform !== 'win32' && existsSync(path)) {
       try {
         unlinkSync(path)
       } catch {
@@ -72,16 +77,7 @@ class PtyHostRuntime {
   }
 
   private accept(socket: Socket): void {
-    this.clients.add(socket)
-    this.clearIdleTimer()
     let buffer = ''
-    socket.write(
-      encodeMessage({
-        v: 1,
-        type: 'hello',
-        payload: { sessions: this.listSessions() }
-      })
-    )
 
     socket.on('data', (chunk) => {
       const fed = feedNdjson(buffer, chunk.toString('utf8'))
@@ -89,6 +85,16 @@ class PtyHostRuntime {
       for (const line of fed.messages) {
         try {
           const message = JSON.parse(line) as PtyHostClientMessage
+          const token = process.env.BIKORCH_PTY_HOST_TOKEN
+          if (!token || message.token !== token) {
+            socket.destroy()
+            return
+          }
+          if (!this.clients.has(socket)) {
+            this.clients.add(socket)
+            this.clearIdleTimer()
+            socket.write(encodeMessage({ v: 1, type: 'hello', payload: { sessions: this.listSessions() } }))
+          }
           this.handle(socket, message)
         } catch {
           socket.write(encodeMessage({ v: 1, id: 'unknown', type: 'error', error: 'Invalid message' }))
@@ -169,7 +175,9 @@ class PtyHostRuntime {
               ? {
                   sessionId: session.id,
                   status: session.status,
-                  outputBuffer: session.outputBuffer
+                  outputBuffer: session.outputBuffer,
+                  projectId: session.projectId, kind: session.kind, accountId: session.accountId,
+                  cliModel: session.cliModel, cwd: session.cwd, worktreePath: session.worktreePath
                 }
               : { sessionId: message.payload.sessionId, status: 'stopped', outputBuffer: '' }
           })
@@ -182,6 +190,10 @@ class PtyHostRuntime {
   private spawn(requestId: string, payload: PtyHostSpawnRequest): PtyHostServerMessage {
     const existing = this.sessions.get(payload.sessionId)
     if (existing?.process && existing.status === 'running') {
+      const cwd = resolveSafeCwd(payload.workspaceCwd ?? payload.cwd)
+      if (!hostSessionMatchesRequest(existing, { ...payload, cwd, worktreePath: payload.worktreePath ? resolveSafeCwd(payload.worktreePath) : undefined })) {
+        return { v: 1, id: requestId, type: 'error', error: 'Terminal session belongs to a different project, account or workspace' }
+      }
       if (existing.cols !== payload.cols || existing.rows !== payload.rows) {
         existing.cols = payload.cols
         existing.rows = payload.rows
@@ -235,6 +247,10 @@ class PtyHostRuntime {
         id: payload.sessionId,
         kind: payload.kind,
         ...(payload.accountId ? { accountId: payload.accountId } : {}),
+        ...(payload.projectId ? { projectId: payload.projectId } : {}),
+        ...(payload.cliModel ? { cliModel: payload.cliModel } : {}),
+        cwd: resolveSafeCwd(payload.workspaceCwd ?? payload.cwd),
+        ...(payload.worktreePath ? { worktreePath: resolveSafeCwd(payload.worktreePath) } : {}),
         process: shellProcess,
         status: 'running',
         cols: payload.cols,
@@ -356,7 +372,7 @@ class PtyHostRuntime {
     this.clients.clear()
     const path = socketPath()
     this.server?.close()
-    if (existsSync(path)) {
+    if (process.platform !== 'win32' && existsSync(path)) {
       try {
         unlinkSync(path)
       } catch {

@@ -25,6 +25,8 @@ export interface PanelDefinition {
   title: string
   zone: PanelZone
   launchMode?: 'normal' | 'login'
+  /** Persisted once a login process starts; retries preserve its credentials. */
+  loginStarted?: boolean
   accountId?: string
   /** Optional model selected for this CLI panel only. */
   cliModel?: string

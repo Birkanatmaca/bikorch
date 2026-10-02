@@ -258,11 +258,14 @@ export interface CliApi {
   detect: (kind: Exclude<PtyKind, 'terminal'>) => Promise<{
     installed: boolean
     command: string | null
+    error?: string
   }>
   install: (kind: Exclude<PtyKind, 'terminal'>) => Promise<{ ok: boolean; error?: string }>
+  status: () => Promise<import('@shared/contracts/cli').CliSetupSnapshot>
 }
 
 export interface PtyApi {
+  snapshot: (sessionId: string) => Promise<import('@shared/contracts/pty').PtySessionSnapshot | null>
   create: (request: PtyCreateRequest) => Promise<PtyCreateResponse>
   write: (request: PtyWriteRequest) => Promise<void>
   resize: (request: PtyResizeRequest) => Promise<void>
@@ -464,6 +467,7 @@ export interface AppApi {
 }
 
 const ptyApi: PtyApi = {
+  snapshot: (sessionId) => ipcRenderer.invoke(PTY_IPC.SNAPSHOT, sessionId),
   create: (request) => ipcRenderer.invoke(PTY_IPC.CREATE, request),
   write: (request) => ipcRenderer.invoke(PTY_IPC.WRITE, request),
   resize: (request) => ipcRenderer.invoke(PTY_IPC.RESIZE, request),
@@ -481,7 +485,8 @@ const ptyApi: PtyApi = {
 
 const cliApi: CliApi = {
   detect: (kind) => ipcRenderer.invoke(CLI_IPC.DETECT, kind),
-  install: (kind) => ipcRenderer.invoke(CLI_IPC.INSTALL, kind)
+  install: (kind) => ipcRenderer.invoke(CLI_IPC.INSTALL, kind),
+  status: () => ipcRenderer.invoke(CLI_IPC.STATUS)
 }
 
 const fsApi: FilesystemApi = {

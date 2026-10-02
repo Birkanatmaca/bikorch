@@ -40,6 +40,7 @@ export function buildPersistedSnapshot(): PersistedSnapshot {
 }
 
 export async function hydrateFromDisk(signal?: AbortSignal): Promise<void> {
+  const profilesObservedAt = Date.now()
   const profilesPromise = window.api.authProfiles.list().catch(() => null)
   const snapshot = await window.api.persistence.load()
   if (signal?.aborted) return
@@ -66,8 +67,8 @@ export async function hydrateFromDisk(signal?: AbortSignal): Promise<void> {
 
   // Legacy account verification can involve a remote service; never hold up workspace loading.
   void profilesPromise.then((profiles) => {
-    if (!profiles) return
-    useAiAccountsStore.getState().syncAuthProfiles(profiles)
+    if (!profiles || signal?.aborted) return
+    useAiAccountsStore.getState().syncAuthProfiles(profiles, profilesObservedAt)
     window.dispatchEvent(new Event(AI_ACCOUNTS_REFRESH_EVENT))
   }).catch(() => undefined)
 

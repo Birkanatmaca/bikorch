@@ -1,6 +1,8 @@
 import { connect, type Socket } from 'net'
 import { spawn } from 'child_process'
 import { app } from 'electron'
+import type { PtySessionSnapshot } from '@shared/contracts/pty'
+import { hostConnectionToken, hostSocketPath } from './paths'
 import { existsSync, mkdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
@@ -38,7 +40,7 @@ class PtyHostClient {
     const root = app.getPath('userData')
     mkdirSync(root, { recursive: true })
     return {
-      socketPath: join(root, 'pty-host.sock'),
+      socketPath: hostSocketPath(root),
       pidPath: join(root, 'pty-host.pid'),
       hostScript: join(__dirname, 'pty-host.js')
     }
@@ -85,7 +87,8 @@ class PtyHostClient {
           ...process.env,
           ELECTRON_RUN_AS_NODE: '1',
           BIKORCH_PTY_HOST_SOCKET: socketPath,
-          BIKORCH_PTY_HOST_PID: pidPath
+          BIKORCH_PTY_HOST_PID: pidPath,
+          BIKORCH_PTY_HOST_TOKEN: hostConnectionToken(app.getPath('userData'))
         }
       })
       child.unref()
@@ -103,7 +106,7 @@ class PtyHostClient {
 
   private tryConnect(): Promise<boolean> {
     const { socketPath } = this.paths()
-    if (!existsSync(socketPath)) return Promise.resolve(false)
+    if (process.platform !== 'win32' && !existsSync(socketPath)) return Promise.resolve(false)
 
     return new Promise((resolve) => {
       const socket = connect(socketPath)
@@ -202,12 +205,13 @@ class PtyHostClient {
         reject(new Error('PTY host is not connected'))
         return
       }
+      const token = hostConnectionToken(app.getPath('userData'))
       const timer = setTimeout(() => {
         this.pending.delete(message.id)
         reject(new Error('PTY host request timed out'))
       }, 15_000)
       this.pending.set(message.id, { resolve, reject, timer })
-      this.socket.write(encodeMessage(message))
+      this.socket.write(encodeMessage({ ...message, token }))
     })
   }
 
@@ -265,6 +269,18 @@ class PtyHostClient {
       status: response.payload?.status ?? 'stopped',
       outputBuffer: response.payload?.outputBuffer ?? ''
     }
+  }
+
+  async snapshot(sessionId: string): Promise<PtySessionSnapshot | null> {
+    const response = await this.request({ v: 1, id: this.nextId(), type: 'replay', payload: { sessionId } })
+    if (response.type !== 'ok' || !response.payload) return null
+    const session = response.payload
+    if (!session.projectId || !session.cwd || !session.kind || !['terminal', 'cursor', 'claude', 'gemini', 'codex', 'antigravity'].includes(session.kind)) return null
+    return { sessionId, projectId: session.projectId, kind: session.kind as PtySessionSnapshot['kind'],
+      cwd: session.cwd, status: session.status,
+      ...(session.accountId ? { accountId: session.accountId } : {}),
+      ...(session.cliModel ? { cliModel: session.cliModel } : {}),
+      ...(session.worktreePath ? { worktreePath: session.worktreePath } : {}) }
   }
 
   /** Disconnect UI from host without killing durable CLI sessions. */

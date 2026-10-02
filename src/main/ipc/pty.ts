@@ -7,6 +7,7 @@ import {
   PTY_IPC
 } from '@shared/contracts/pty'
 import { isValidSessionId } from '../cli/path-validator'
+import { assertTrustedMainWindow } from './trusted-sender'
 import { ptyManager } from '../cli/pty-manager'
 
 function validateWriteRequest(payload: unknown): payload is PtyWriteRequest {
@@ -43,6 +44,7 @@ function validateCreateRequest(payload: unknown): payload is PtyCreateRequest {
     typeof req.cwd === 'string' &&
     (req.worktreePath === undefined || (typeof req.worktreePath === 'string' && req.worktreePath.length > 0 && req.worktreePath.length <= 4096)) &&
     (req.launchMode === undefined || req.launchMode === 'normal' || req.launchMode === 'login') &&
+    (req.resumeLogin === undefined || typeof req.resumeLogin === 'boolean') &&
     (req.accountId === undefined ||
       (typeof req.accountId === 'string' && req.accountId.length > 0 && req.accountId.length <= 200)) &&
     (req.cliModel === undefined ||
@@ -59,6 +61,10 @@ function validateCreateRequest(payload: unknown): payload is PtyCreateRequest {
 }
 
 export function registerPtyHandlers(): void {
+  ipcMain.handle(PTY_IPC.SNAPSHOT, (event, sessionId: unknown) => {
+    assertTrustedMainWindow(event)
+    return typeof sessionId === 'string' && isValidSessionId(sessionId) ? ptyManager.inspectSessionSnapshot(sessionId) : null
+  })
   ipcMain.handle(PTY_IPC.CREATE, (event, payload: unknown) => {
     if (!validateCreateRequest(payload)) {
       return { sessionId: '', status: 'error' as const, error: 'Invalid create request' }

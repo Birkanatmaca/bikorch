@@ -46,8 +46,14 @@
 .studio-manager-launch small { color: #9e95aa; font-size: 11px; }
 .studio-manager-launch > svg { color: #82768f; }
 .studio-launch-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 58px; padding: 10px 14px; border: 0; border-bottom: 1px solid #b9a5d418; background: transparent; color: inherit; text-align: left; cursor: pointer; transition: background 160ms ease; }
-.studio-launch-row:last-child { border-bottom: 0; }
-.studio-launch-row:hover { background: #211e2e; }
+.studio-launch-entry { display: flex; align-items: center; border-bottom: 1px solid #b9a5d418; }
+.studio-launch-entry:last-child { border-bottom: 0; }
+.studio-launch-entry .studio-launch-row { flex: 1; min-width: 0; border-bottom: 0; }
+.studio-launch-entry .cli-install-button { margin-right: 14px; }
+.studio-launch-row:disabled { opacity: .45; cursor: not-allowed; }
+.studio-launch-row:hover:not(:disabled) { background: #211e2e; }
+.studio-cli-errors { margin-top: 10px; color: var(--color-error); font-size: 11px; overflow-wrap: anywhere; }
+.studio-cli-errors button { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; color: var(--color-text-secondary); }
 .studio-launch-row:focus-visible { outline: 1px solid #c4b5ff; outline-offset: -1px; }
 .studio-launch-mark { display: flex; width: 32px; height: 32px; flex-shrink: 0; align-items: center; justify-content: center; border: 1px solid #ffffff0d; border-radius: 9px; background: #0e1018; }
 .studio-launch-logo { width: 18px; height: 18px; object-fit: contain; }

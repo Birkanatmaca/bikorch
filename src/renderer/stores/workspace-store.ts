@@ -42,7 +42,7 @@ import {
   emptyGridCellId,
   layoutCellCount
 } from '@shared/workspace-grid'
-import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
+import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import type { WorkspaceIsolation } from '@shared/contracts/git'
 import { useAiAccountsStore } from './ai-accounts-store'
@@ -216,6 +216,7 @@ interface WorkspaceStore extends WorkspaceSnapshot {
     view: LeftSidebarView
   ) => void
   clearPanelLaunchMode: (panelId: string) => void
+  markPanelLoginStarted: (panelId: string) => void
   setPanelWorktree: (panelId: string, worktreePath: string | null) => void
   setPanelIsolation: (panelId: string, isolation: WorkspaceIsolation) => void
   workspaceScale: number
@@ -1174,27 +1175,36 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     if (changed) set({ workspaces: nextWorkspaces })
   },
 
-  clearPanelLaunchMode: (panelId) => {
-    const { activeProjectId, workspaces } = get()
-    if (!activeProjectId) return
-    const workspace = workspaces[activeProjectId]
-    if (!workspace) return
-    const panel = workspace.panels.find((candidate) => candidate.id === panelId)
-    if (!panel?.launchMode) return
+  markPanelLoginStarted: (panelId) => {
+    const { workspaces } = get()
+    for (const [projectId, workspace] of Object.entries(workspaces)) {
+      if (!workspace.panels.some((panel) => panel.id === panelId && panel.launchMode === 'login' && !panel.loginStarted)) continue
+      set({ workspaces: { ...workspaces, [projectId]: {
+        ...workspace,
+        panels: workspace.panels.map((panel) => panel.id === panelId ? { ...panel, loginStarted: true } : panel)
+      } } })
+      return
+    }
+  },
 
-    set({
-      workspaces: {
-        ...workspaces,
-        [activeProjectId]: {
+  clearPanelLaunchMode: (panelId) => {
+    const { workspaces } = get()
+    for (const [projectId, workspace] of Object.entries(workspaces)) {
+      if (!workspace.panels.some((panel) => panel.id === panelId && panel.launchMode)) continue
+      set({ workspaces: { ...workspaces, [projectId]: {
           ...workspace,
           panels: workspace.panels.map((candidate) => {
             if (candidate.id !== panelId) return candidate
-            const { launchMode: _launchMode, ...withoutLaunchMode } = candidate
+            const { launchMode: _launchMode, loginStarted: _loginStarted, ...withoutLaunchMode } = candidate
+            const account = useAiAccountsStore.getState().accounts.find((item) => item.id === candidate.accountId)
+            if (account && candidate.title === `${AI_ACCOUNT_LABELS[account.kind]} · Sign in`) {
+              return { ...withoutLaunchMode, title: `${AI_ACCOUNT_LABELS[account.kind]} · ${account.name}` }
+            }
             return withoutLaunchMode
           })
-        }
-      }
-    })
+      } } })
+      return
+    }
   },
 
   setWorkspaceScale: (scale) => {

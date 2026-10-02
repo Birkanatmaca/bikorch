@@ -258,9 +258,15 @@ export function getAuthProfileEnv(
 
 export async function prepareAuthProfileLaunch(
   request: AuthProfileRequest,
-  launchMode: 'normal' | 'login'
+  launchMode: 'normal' | 'login',
+  resumeLogin = false
 ): Promise<AuthProfileResult> {
   try {
+    if (launchMode === 'login' && resumeLogin) {
+      ensureProfileRoot(request.kind, request.accountId)
+      getAuthProfileEnv(request.kind, request.accountId)
+      return inspectAuthProfile(request)
+    }
     if (launchMode === 'login') {
       if (request.kind === 'antigravity') {
         await prepareAntigravityFreshLogin(request.accountId)

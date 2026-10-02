@@ -7,6 +7,12 @@ import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { cn } from '@renderer/lib/utils'
 import { PanelIcon } from '@renderer/components/ui/PanelIcon'
 import { Button } from '@renderer/components/ui/Button'
+import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
+import type { CliUsageKind } from '@shared/contracts/usage'
+import { useCliDetection } from '@renderer/hooks/use-cli-detection'
+import { useCliStore } from '@renderer/stores/cli-store'
+import { CliInstallButton } from '@renderer/components/accounts/CliInstallButton'
+import { openInstalledCli } from '@renderer/lib/cli-sign-in'
 
 const PANEL_MENU_LABELS: Partial<Record<PanelType, string>> = {
   terminal: 'Terminal',
@@ -34,7 +40,14 @@ const PANEL_GROUPS: Array<{ label: string; types: PanelType[] }> = [
 export { ADD_PANEL_MENU_EVENT } from '@renderer/lib/app-events'
 
 export function AddPanelMenu(): React.JSX.Element {
+  useCliDetection()
   const addPanel = useWorkspaceStore((s) => s.addPanel)
+  const installedByKind = useCliStore((s) => s.installedByKind)
+  const installingKind = useCliStore((s) => s.installingKind)
+  const errorsByKind = useCliStore((s) => s.errorsByKind)
+  const [error, setError] = useState<string | null>(null)
+  const [launchingKind, setLaunchingKind] = useState<CliUsageKind | null>(null)
+  const launchInFlight = useRef(false)
   const [open, setOpen] = useState(false)
   const [menuStyle, setMenuStyle] = useState<{ top: number; left: number } | null>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -52,6 +65,7 @@ export function AddPanelMenu(): React.JSX.Element {
   }
 
   const openMenu = (): void => {
+    setError(null)
     updateMenuPosition()
     setOpen(true)
   }
@@ -117,23 +131,42 @@ export function AddPanelMenu(): React.JSX.Element {
       {PANEL_GROUPS.map(({ label, types }) => (
         <div key={label} className="panel-menu-group" role="group" aria-label={label}>
           <p className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-text-muted">{label}</p>
-          {types.map((type) => (
-            <button
-              key={type}
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                addPanel(type, type === 'chatgpt' || type === 'claude-chat' ? 'right' : 'center')
-                closeMenu()
-              }}
-              className="menu-action flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-text-secondary"
-            >
-              <PanelIcon type={type} className="text-text-muted" />
-              {PANEL_MENU_LABELS[type] ?? PANEL_TYPE_LABELS[type]}
-            </button>
-          ))}
+          {types.map((type) => {
+            const kind = AI_ACCOUNT_KINDS.includes(type as CliUsageKind) ? type as CliUsageKind : null
+            const installed = kind ? installedByKind[kind] : true
+            return (
+              <div key={type} className="panel-menu-cli-option" data-cli-kind={type}>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={installed !== true || (kind !== null && (installingKind !== null || launchingKind !== null))}
+                  onClick={() => {
+                    if (kind) {
+                      if (launchInFlight.current) return
+                      launchInFlight.current = true
+                      setLaunchingKind(kind)
+                      void openInstalledCli(kind).then(closeMenu)
+                        .catch((failure) => setError(failure instanceof Error ? failure.message : 'Could not open CLI'))
+                        .finally(() => { launchInFlight.current = false; setLaunchingKind(null) })
+                      return
+                    }
+                    addPanel(type, type === 'chatgpt' || type === 'claude-chat' ? 'right' : 'center')
+                    closeMenu()
+                  }}
+                  className="menu-action flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-text-secondary"
+                >
+                  <PanelIcon type={type} className="text-text-muted" />
+                  {PANEL_MENU_LABELS[type] ?? PANEL_TYPE_LABELS[type]}
+                  {kind && <span className="panel-menu-cli-status">{launchingKind === kind ? 'Opening…' : installingKind === kind ? 'Installing…' : installed === false ? 'Missing' : installed === undefined ? 'Checking…' : ''}</span>}
+                </button>
+                {kind && installed === false && <CliInstallButton kind={kind} />}
+                {kind && errorsByKind[kind] && <p className="cli-kind-error" role="alert">{errorsByKind[kind]}</p>}
+              </div>
+            )
+          })}
         </div>
       ))}
+      {error && <p className="cli-kind-error" role="alert">{error}</p>}
     </div>
   ) : null
 

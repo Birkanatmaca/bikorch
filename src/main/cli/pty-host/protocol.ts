@@ -4,6 +4,11 @@ export type PtyHostSpawnRequest = {
   sessionId: string
   kind: string
   accountId?: string
+  projectId?: string
+  cliModel?: string
+  worktreePath?: string
+  /** Canonical folder before Windows short-path conversion for process spawning. */
+  workspaceCwd?: string
   command: string
   args: string[]
   cwd: string
@@ -12,7 +17,7 @@ export type PtyHostSpawnRequest = {
   env: Record<string, string>
 }
 
-export type PtyHostClientMessage =
+export type PtyHostClientMessage = (
   | { v: 1; id: string; type: 'ping' }
   | { v: 1; id: string; type: 'spawn'; payload: PtyHostSpawnRequest }
   | { v: 1; id: string; type: 'write'; payload: { sessionId: string; data: string } }
@@ -20,6 +25,7 @@ export type PtyHostClientMessage =
   | { v: 1; id: string; type: 'kill'; payload: { sessionId: string } }
   | { v: 1; id: string; type: 'replay'; payload: { sessionId: string } }
   | { v: 1; id: string; type: 'list' }
+) & { token?: string }
 
 export type PtyHostServerMessage =
   | { v: 1; id: string; type: 'pong' }
@@ -33,6 +39,12 @@ export type PtyHostServerMessage =
         reattached?: boolean
         error?: string
         outputBuffer?: string
+        projectId?: string
+        kind?: string
+        accountId?: string
+        cliModel?: string
+        cwd?: string
+        worktreePath?: string
       }
     }
   | { v: 1; id: string; type: 'error'; error: string }

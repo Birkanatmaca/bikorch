@@ -1,10 +1,17 @@
 import { ipcMain } from 'electron'
 import { CLI_IPC, type PtyKind } from '@shared/contracts/pty'
-import { detectCli } from '../cli/adapters'
-import { installCursorCli } from '../cli/install-cli'
+import { inspectCli } from '../cli/health'
+import { installCli } from '../cli/install-cli'
+import { getCliSetupSnapshot } from '../cli/install-state'
+import { initializeManagedSetup } from '../cli/setup-recovery'
+import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
+import { assertTrustedMainWindow } from './trusted-sender'
 
 export function registerCliHandlers(): void {
-  ipcMain.handle(CLI_IPC.DETECT, (_event, kind: unknown) => {
+  getCliSetupSnapshot()
+  void initializeManagedSetup()
+  ipcMain.handle(CLI_IPC.DETECT, (event, kind: unknown) => {
+    assertTrustedMainWindow(event)
     if (
       kind !== 'cursor' &&
       kind !== 'claude' &&
@@ -14,14 +21,20 @@ export function registerCliHandlers(): void {
     ) {
       return { installed: false, command: null }
     }
-    return detectCli(kind)
+    return inspectCli(kind)
   })
 
-  ipcMain.handle(CLI_IPC.INSTALL, async (_event, kind: unknown) => {
-    if (kind !== 'cursor') {
-      return { ok: false, error: 'Only Cursor CLI install is supported right now' }
+  ipcMain.handle(CLI_IPC.INSTALL, async (event, kind: unknown) => {
+    assertTrustedMainWindow(event)
+    if (!AI_ACCOUNT_KINDS.includes(kind as CliDetectKind)) {
+      return { ok: false, error: 'Unknown CLI provider' }
     }
-    return installCursorCli()
+    return installCli(kind as CliDetectKind)
+  })
+
+  ipcMain.handle(CLI_IPC.STATUS, (event) => {
+    assertTrustedMainWindow(event)
+    return getCliSetupSnapshot()
   })
 }
 

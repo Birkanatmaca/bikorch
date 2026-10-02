@@ -1,7 +1,8 @@
-import { existsSync, readdirSync } from 'fs'
+import { existsSync, readFileSync, readdirSync } from 'fs'
 import { homedir } from 'os'
-import { join } from 'path'
+import { join, resolve, sep } from 'path'
 import { type PtyKind } from '@shared/contracts/pty'
+import { managedCliPaths } from './managed-paths'
 
 export interface SpawnConfig {
   command: string
@@ -29,7 +30,12 @@ function extraCliDirs(): string[] {
   const local = localAppData()
   const roaming = process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming')
   const home = homedir()
+  const managed = managedCliPaths()
   const dirs = [
+    managed.nodeBin,
+    managedCliPaths('gemini').packageBin,
+    managedCliPaths('codex').packageBin,
+    managed.packageBin,
     // macOS / Linux — GUI apps (Dock/Finder) often miss these until shell env is loaded.
     '/opt/homebrew/bin',
     '/opt/homebrew/sbin',
@@ -202,11 +208,8 @@ function latestCursorAgentRuntime(): SpawnConfig | null {
 
 function resolveCursorSpawnCandidates(): SpawnConfig[] {
   if (process.platform !== 'win32') {
-    const unixAgent = findOnDisk(['cursor-agent', 'agent', 'cursor'])
+    const unixAgent = findOnDisk(['cursor-agent', 'agent'])
     if (!unixAgent) return []
-    if (unixAgent.endsWith('cursor') && !unixAgent.includes('cursor-agent')) {
-      return [{ command: unixAgent, args: ['agent'] }]
-    }
     return [{ command: unixAgent, args: [] }]
   }
 
@@ -219,9 +222,6 @@ function resolveCursorSpawnCandidates(): SpawnConfig[] {
 
   const agentCmd = findOnDisk(['agent.cmd', 'cursor-agent.cmd', 'agent.exe', 'cursor-agent.exe'])
   if (agentCmd) candidates.push(windowsCmdSpawn(agentCmd))
-
-  const cursor = findOnDisk(['cursor.cmd', 'cursor.exe'])
-  if (cursor) candidates.push(windowsCmdSpawn(cursor, ['agent']))
 
   return candidates
 }
@@ -243,6 +243,8 @@ function resolveClaudeSpawn(): SpawnConfig | null {
 }
 
 function resolveGeminiSpawn(): SpawnConfig | null {
+  const managed = managedPackageSpawn('gemini')
+  if (managed) return managed
   if (process.platform === 'win32') {
     const gemini = findOnDisk(['gemini.cmd', 'gemini.exe', 'gemini'])
     if (!gemini) return null
@@ -267,6 +269,8 @@ function resolveAntigravitySpawn(): SpawnConfig | null {
 }
 
 function resolveCodexSpawn(): SpawnConfig | null {
+  const managed = managedPackageSpawn('codex')
+  if (managed) return managed
   if (process.platform === 'win32') {
     const codex = findOnDisk(['codex.exe', 'codex.cmd', 'codex'])
     if (!codex) return null
@@ -276,6 +280,23 @@ function resolveCodexSpawn(): SpawnConfig | null {
   const codex = findOnDisk(['codex'])
   if (!codex) return null
   return { command: codex, args: [] }
+}
+
+function managedPackageSpawn(kind: 'gemini' | 'codex'): SpawnConfig | null {
+  for (const paths of [managedCliPaths(kind), managedCliPaths()]) {
+    const packageName = kind === 'gemini' ? '@google/gemini-cli' : '@openai/codex'
+    const packageRoot = join(paths.prefix, ...(process.platform === 'win32' ? [] : ['lib']), 'node_modules', packageName)
+    const manifestPath = join(packageRoot, 'package.json')
+    if (!existsSync(paths.node) || !existsSync(manifestPath)) continue
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+      const bin = typeof manifest.bin === 'string' ? manifest.bin : manifest.bin?.[kind]
+      if (typeof bin !== 'string') continue
+      const entry = resolve(packageRoot, bin)
+      if (entry.startsWith(resolve(packageRoot) + sep) && existsSync(entry)) return { command: paths.node, args: [entry] }
+    } catch { /* Fall back to another installation if this package is incomplete. */ }
+  }
+  return null
 }
 
 export function detectCli(kind: Exclude<PtyKind, 'terminal'>): {

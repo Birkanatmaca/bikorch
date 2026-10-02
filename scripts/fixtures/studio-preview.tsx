@@ -7,6 +7,9 @@ import { FileExplorerPanel } from '../../src/renderer/components/file-explorer/F
 import { AppHeader } from '../../src/renderer/components/layout/AppHeader'
 import { SidebarActivityBar } from '../../src/renderer/components/layout/SidebarActivityBar'
 import { useWorkspaceStore } from '../../src/renderer/stores/workspace-store'
+import { useAiAccountsStore } from '../../src/renderer/stores/ai-accounts-store'
+import { AiAccountsPanel } from '../../src/renderer/components/accounts/AiAccountsPanel'
+import type { CliUsageKind } from '../../src/shared/contracts/usage'
 import { buildPersistedSnapshot, startPersistenceSync } from '../../src/renderer/lib/persistence-sync'
 import { usePersistenceBootstrap } from '../../src/renderer/hooks/use-persistence-bootstrap'
 import '../../src/renderer/styles/globals.css'
@@ -18,6 +21,9 @@ let failReads = false
 let nextFolder: string | null = '/projects/aurora-studio'
 const reads: Record<string, number> = {}
 const fixtureErrors: string[] = []
+const installedClis: Partial<Record<CliUsageKind, boolean>> = { claude: true }
+const cliInstalls: CliUsageKind[] = []
+let failInstall = false
 const bootstrapMode = new URLSearchParams(location.search).has('bootstrap')
 let emptySaves = 0
 let snapshotOnDisk = {
@@ -48,7 +54,18 @@ Object.assign(window, {
         snapshotOnDisk = snapshot as typeof snapshotOnDisk
       }
     },
-    authProfiles: { list: async () => null },
+    authProfiles: { list: async () => [], discoverSystem: async () => [] },
+    cli: {
+      status: async () => ({ installation: null }),
+      detect: async (kind: CliUsageKind) => { await delay(150); return { installed: installedClis[kind] === true, command: installedClis[kind] ? kind : null } },
+      install: async (kind: CliUsageKind) => {
+        cliInstalls.push(kind)
+        await delay(300)
+        if (failInstall) return { ok: false, error: 'Fixture download failed. Try again.' }
+        installedClis[kind] = true
+        return { ok: true }
+      }
+    },
     git: { discover: async () => ({ repos: [] }) },
     fs: {
       readDirectory: async ({ projectId, directoryPath }: { projectId: string; directoryPath: string }) => {
@@ -73,6 +90,10 @@ Object.assign(window, {
   },
   studioFixture: {
     reads, errors: fixtureErrors,
+    cliInstalls,
+    setInstallFailure: (value: boolean) => { failInstall = value },
+    panels: () => useWorkspaceStore.getState().getActiveWorkspace()?.panels ?? [],
+    accounts: () => useAiAccountsStore.getState().accounts,
     emptySaves: () => emptySaves,
     setFailure: (value: boolean) => { failReads = value },
     setFolder: (value: string | null) => { nextFolder = value },
@@ -90,15 +111,15 @@ function BootstrapCheck() {
 function Fixture() {
   const projects = useWorkspaceStore((state) => state.projects)
   const home = useWorkspaceStore((state) => state.homeVisible)
-  const [sidebar, setSidebar] = useState(false)
+  const [sidebar, setSidebar] = useState<'files' | 'accounts' | null>(null)
   return <div className="app-shell platform-windows flex h-full flex-col">
     <AppHeader showWorkspaceControls={projects.length > 0} />
     {!projects.length || home ? <WelcomeScreen /> : (
       <div className="workspace-frame flex min-h-0 flex-1">
-        <SidebarActivityBar isOpen={sidebar} view="files" changesCount={0} onSelectFiles={() => setSidebar(!sidebar)} onSelectChanges={() => {}} onSelectAccounts={() => {}} onSelectMemory={() => {}} onSelectTasks={() => {}} onSelectProfile={() => {}} onSelectMusic={() => {}} onSelectTimer={() => {}} onSelectSettings={() => {}} />
+        <SidebarActivityBar isOpen={sidebar !== null} view={sidebar ?? 'files'} changesCount={0} onSelectFiles={() => setSidebar(sidebar === 'files' ? null : 'files')} onSelectChanges={() => {}} onSelectAccounts={() => setSidebar(sidebar === 'accounts' ? null : 'accounts')} onSelectMemory={() => {}} onSelectTasks={() => {}} onSelectProfile={() => {}} onSelectMusic={() => {}} onSelectTimer={() => {}} onSelectSettings={() => {}} />
         <div className="workspace-main relative flex min-h-0 min-w-0 flex-1 flex-col">
           <WorkspaceCenterEmpty />
-          {sidebar && <div className="workspace-sidebar-overlay" style={{ width: 280 }}><div className="workstation-sidebar panel-shell flex h-full flex-col"><header className="sidebar-header"><span className="sidebar-header-title">Files</span><button type="button" aria-label="Hide sidebar" onClick={() => setSidebar(false)}>Close</button></header><FileExplorerPanel /></div></div>}
+          {sidebar && <div className="workspace-sidebar-overlay" style={{ width: 280 }}><div className="workstation-sidebar panel-shell flex h-full flex-col"><header className="sidebar-header"><span className="sidebar-header-title">{sidebar === 'files' ? 'Files' : 'Accounts'}</span><button type="button" aria-label="Hide sidebar" onClick={() => setSidebar(null)}>Close</button></header>{sidebar === 'files' ? <FileExplorerPanel /> : <AiAccountsPanel />}</div></div>}
         </div>
       </div>
     )}

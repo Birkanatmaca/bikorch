@@ -1,5 +1,5 @@
 import { buttonStyles } from '@renderer/components/ui/Button'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   AlertCircle,
   LogOut,
@@ -24,22 +24,26 @@ import {
 } from '@renderer/stores/ai-accounts-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useUsageStore } from '@renderer/stores/usage-store'
-import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useSubscriptionStore } from '@renderer/stores/subscription-store'
 import { cn } from '@renderer/lib/utils'
-import { importSystemAccountForKind } from '@renderer/lib/system-auth-sync'
 import { checkAccountUsage, checkAllAccountUsage, invalidateAccountUsage } from '@renderer/lib/usage-sync'
-
-let installedCliCache: Partial<Record<CliUsageKind, boolean>> = {}
+import { useCliStore } from '@renderer/stores/cli-store'
+import { useCliDetection } from '@renderer/hooks/use-cli-detection'
+import { openCliSignIn, openSavedCliAccount } from '@renderer/lib/cli-sign-in'
+import { CliInstallButton } from './CliInstallButton'
 
 function CliKindPicker({
   accounts,
   installedByKind,
+  errorsByKind,
+  installingKind,
   addingKind,
   onPick
 }: {
   accounts: AiAccount[]
   installedByKind: Partial<Record<CliUsageKind, boolean>>
+  errorsByKind: Partial<Record<CliUsageKind, string>>
+  installingKind: CliUsageKind | null
   addingKind: CliUsageKind | null
   onPick: (kind: CliUsageKind) => void
 }): React.JSX.Element {
@@ -50,30 +54,30 @@ function CliKindPicker({
         const installed = installedByKind[kind]
         const adding = addingKind === kind
         const logo = getCliLogo(kind)
+        const status = installingKind === kind ? 'Installing…'
+          : installed === undefined ? errorsByKind[kind] ? 'Check failed' : 'Checking…'
+            : installed === false ? 'Not installed'
+              : adding ? 'Opening sign-in…'
+                : count > 0 ? `Installed · ${count}` : 'Installed · Sign in'
         return (
-          <button
-            key={kind}
-            type="button"
-            disabled={installed === false || addingKind !== null}
-            onClick={() => onPick(kind)}
-            className={cn('cli-kind-tile', count > 0 && 'is-present')}
-          >
-            {logo ? (
-              <img src={logo} alt="" className="cli-kind-tile-logo" />
-            ) : (
-              <span className="cli-kind-tile-logo" />
-            )}
-            <span className="cli-kind-tile-name">{AI_ACCOUNT_LABELS[kind]}</span>
-            <span className="cli-kind-tile-meta">
-              {installed === false
-                ? 'Missing'
-                : adding
-                  ? 'Adding'
-                  : count > 0
-                    ? String(count)
-                    : 'Add'}
-            </span>
-          </button>
+          <div key={kind} className="cli-kind-option" data-cli-kind={kind}>
+            <button
+              type="button"
+              disabled={installed !== true || addingKind !== null || installingKind !== null}
+              onClick={() => onPick(kind)}
+              className={cn('cli-kind-tile', count > 0 && 'is-present')}
+            >
+              {logo ? (
+                <img src={logo} alt="" className="cli-kind-tile-logo" />
+              ) : (
+                <span className="cli-kind-tile-logo" />
+              )}
+              <span className="cli-kind-tile-name">{AI_ACCOUNT_LABELS[kind]}</span>
+              <span className="cli-kind-tile-meta">{status}</span>
+            </button>
+            {installed === false && <CliInstallButton kind={kind} />}
+            {errorsByKind[kind] && <p className="cli-kind-error" role="alert">{errorsByKind[kind]}</p>}
+          </div>
         )
       })}
     </div>
@@ -299,6 +303,7 @@ function AccountCard({
   isActive,
   isRemoving,
   isChecking,
+  cliAvailable,
   onCheck,
   onLogout,
   onOpen,
@@ -311,6 +316,7 @@ function AccountCard({
   isActive: boolean
   isRemoving: boolean
   isChecking: boolean
+  cliAvailable: boolean
   onCheck: () => void
   onLogout: () => void
   onOpen: () => void
@@ -391,7 +397,7 @@ function AccountCard({
           <button
             type="button"
             onClick={onOpen}
-            disabled={isRemoving}
+            disabled={isRemoving || !cliAvailable}
             className="account-card-go"
             title={actionLabel}
           >
@@ -417,19 +423,16 @@ function AccountCard({
 }
 
 export function AiAccountsPanel(): React.JSX.Element {
+  useCliDetection()
   const accounts = useAiAccountsStore((state) => state.accounts)
   const activeAccountByKind = useAiAccountsStore((state) => state.activeAccountByKind)
-  const setActiveAccount = useAiAccountsStore((state) => state.setActiveAccount)
-  const addAccount = useAiAccountsStore((state) => state.addAccount)
   const removeAccount = useAiAccountsStore((state) => state.removeAccount)
   const markAccountLoggedOut = useAiAccountsStore((state) => state.markAccountLoggedOut)
   const syncAuthProfiles = useAiAccountsStore((state) => state.syncAuthProfiles)
   const usageProviders = useUsageStore((state) => state.providers)
   const removeUsageAccount = useUsageStore((state) => state.removeAccount)
   const subscriptions = useSubscriptionStore((state) => state.subscriptions)
-  const addPanel = useWorkspaceStore((state) => state.addPanel)
   const removePanelsForAccount = useWorkspaceStore((state) => state.removePanelsForAccount)
-  const closeOtherAccountCliPanels = useWorkspaceStore((state) => state.closeOtherAccountCliPanels)
   const [error, setError] = useState<string | null>(null)
   const [formAccount, setFormAccount] = useState<AiAccount | undefined>(undefined)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -437,33 +440,18 @@ export function AiAccountsPanel(): React.JSX.Element {
   const [removingAccountIds, setRemovingAccountIds] = useState<Set<string>>(() => new Set())
   const [refreshingUsage, setRefreshingUsage] = useState(false)
   const [checkingAccountIds, setCheckingAccountIds] = useState<Set<string>>(() => new Set())
-  const [installedByKind, setInstalledByKind] = useState<
-    Partial<Record<CliUsageKind, boolean>>
-  >(() => installedCliCache)
-
-  const refreshInstalledClis = useCallback(async (): Promise<void> => {
-    const entries = await Promise.all(
-      AI_ACCOUNT_KINDS.map(async (kind) => {
-        try {
-          const result = await window.api.cli.detect(kind)
-          return [kind, result.installed] as const
-        } catch {
-          return [kind, false] as const
-        }
-      })
-    )
-    installedCliCache = Object.fromEntries(entries)
-    setInstalledByKind(installedCliCache)
-  }, [])
+  const installedByKind = useCliStore((state) => state.installedByKind)
+  const errorsByKind = useCliStore((state) => state.errorsByKind)
+  const installingKind = useCliStore((state) => state.installingKind)
 
   useEffect(() => {
     let cancelled = false
     void (async () => {
       try {
+        const observedAt = Date.now()
         const profiles = await window.api.authProfiles.list()
         if (cancelled) return
-        syncAuthProfiles(profiles)
-        if (!cancelled) await refreshInstalledClis()
+        syncAuthProfiles(profiles, observedAt)
       } catch (listError) {
         if (!cancelled) {
           setError(listError instanceof Error ? listError.message : 'Could not load saved accounts')
@@ -473,7 +461,7 @@ export function AiAccountsPanel(): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [refreshInstalledClis, syncAuthProfiles])
+  }, [syncAuthProfiles])
 
   const providerByAccount = useMemo(() => {
     const map = new Map<string, CliUsageInfo>()
@@ -521,37 +509,7 @@ export function AiAccountsPanel(): React.JSX.Element {
   const closeForm = (): void => setFormAccount(undefined)
 
   const openLoginCli = async (kind: CliUsageKind, account?: AiAccount): Promise<void> => {
-    if (installedByKind[kind] === false) {
-      setError(`${AI_ACCOUNT_LABELS[kind]} is not installed on this computer`)
-      return
-    }
-    const accountId =
-      account?.id ??
-      addAccount({
-        kind,
-        name: `New ${AI_ACCOUNT_LABELS[kind]} account`,
-        email: '',
-        plan: '',
-        note: ''
-      })
-    if (kind === 'cursor') {
-      invalidateAccountUsage(accountId)
-      markAccountLoggedOut(accountId)
-      removeUsageAccount(accountId)
-    }
-    if (kind === 'antigravity') {
-      closeOtherAccountCliPanels(kind, accountId)
-    } else {
-      removePanelsForAccount(kind, accountId)
-    }
-    addPanel(
-      kind,
-      'center',
-      undefined,
-      'login',
-      accountId,
-      `${AI_ACCOUNT_LABELS[kind]} · Sign in`
-    )
+    await openCliSignIn(kind, account)
   }
 
   const handleRemove = async (account: AiAccount): Promise<void> => {
@@ -592,47 +550,9 @@ export function AiAccountsPanel(): React.JSX.Element {
   }
 
   const openAccountCli = async (account: AiAccount): Promise<void> => {
-    if (!account.profileReady) {
-      await openLoginCli(account.kind, account)
-      return
-    }
     setError(null)
     try {
-      const activated = await window.api.authProfiles.activate({
-        kind: account.kind,
-        accountId: account.id,
-        ...(account.email ? { email: account.email } : {})
-      })
-      if (!activated.ok) {
-        setError(activated.error ?? `Could not activate ${account.name}`)
-        return
-      }
-      if (!activated.ready) {
-        await openLoginCli(account.kind, account)
-        return
-      }
-      if (account.kind === 'antigravity') {
-        closeOtherAccountCliPanels(account.kind, account.id)
-      }
-      setActiveAccount(account.kind, account.id)
-      if (account.kind === 'cursor') {
-        const existing = useWorkspaceStore.getState().getActiveWorkspace()?.panels.find(
-          (panel) => panel.type === 'cursor' && panel.accountId === account.id && panel.launchMode !== 'login' &&
-            ['starting', 'running', 'waiting', 'busy'].includes(useTerminalStore.getState().getStatus(panel.id) ?? '')
-        )
-        if (existing) {
-          window.dispatchEvent(new CustomEvent('bikorch:focus-panel', { detail: existing.id }))
-          return
-        }
-      }
-      addPanel(
-        account.kind,
-        'center',
-        undefined,
-        'normal',
-        account.id,
-        `${AI_ACCOUNT_LABELS[account.kind]} · ${account.name}`
-      )
+      await openSavedCliAccount(account)
     } catch (activateError) {
       setError(
         activateError instanceof Error ? activateError.message : `Could not activate ${account.name}`
@@ -641,33 +561,12 @@ export function AiAccountsPanel(): React.JSX.Element {
   }
 
   const addCliKind = async (kind: CliUsageKind): Promise<void> => {
-    if (addingKind) return
+    if (addingKind || installingKind !== null) return
     setPickerOpen(false)
     setError(null)
     setAddingKind(kind)
 
     try {
-      let installed = installedByKind[kind]
-      if (installed === undefined) {
-        try {
-          const result = await window.api.cli.detect(kind)
-          installed = result.installed
-          setInstalledByKind((current) => ({ ...current, [kind]: installed }))
-        } catch {
-          installed = true
-        }
-      }
-      if (installed === false) {
-        setError(`${AI_ACCOUNT_LABELS[kind]} is not installed on this computer`)
-        return
-      }
-
-      const alreadyAdded = accounts.some((account) => account.kind === kind)
-      if (!alreadyAdded) {
-        const importedAccount = await importSystemAccountForKind(kind)
-        if (importedAccount) return
-      }
-
       await openLoginCli(kind)
     } catch (addError) {
       setError(
@@ -709,6 +608,15 @@ export function AiAccountsPanel(): React.JSX.Element {
         <div className="flex items-center gap-2">
           <h2 className="min-w-0 flex-1 truncate text-xs font-medium text-text-primary">Accounts</h2>
           <div className="flex shrink-0 items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => void useCliStore.getState().refresh()}
+              className={buttonStyles({ variant: 'ghost', size: 'icon-sm' })}
+              title="Check CLI installations"
+              aria-label="Check CLI installations"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </button>
             {accounts.length > 0 && (
               <button
                 type="button"
@@ -747,6 +655,8 @@ export function AiAccountsPanel(): React.JSX.Element {
             <CliKindPicker
               accounts={accounts}
               installedByKind={installedByKind}
+              errorsByKind={errorsByKind}
+              installingKind={installingKind}
               addingKind={addingKind}
               onPick={(kind) => void addCliKind(kind)}
             />
@@ -767,14 +677,16 @@ export function AiAccountsPanel(): React.JSX.Element {
                     <button
                       type="button"
                       onClick={() => void addCliKind(kind)}
-                      disabled={installedByKind[kind] === false || addingKind !== null}
+                      disabled={installedByKind[kind] !== true || addingKind !== null || installingKind !== null}
                       className="account-provider-add"
                       title="Add account"
                       aria-label={`Add ${AI_ACCOUNT_LABELS[kind]} account`}
                     >
                       <Plus className="h-3 w-3" />
                     </button>
+                    {installedByKind[kind] === false && <CliInstallButton kind={kind} />}
                   </div>
+                  {errorsByKind[kind] && <p className="cli-kind-error" role="alert">{errorsByKind[kind]}</p>}
                   <div className="account-provider-cards">
                     {providerAccounts.map((account) => (
                       <AccountCard
@@ -785,6 +697,7 @@ export function AiAccountsPanel(): React.JSX.Element {
                         isActive={activeAccountByKind[account.kind] === account.id}
                         isRemoving={removingAccountIds.has(account.id)}
                         isChecking={checkingAccountIds.has(account.id)}
+                        cliAvailable={installedByKind[kind] === true && installingKind === null}
                         onCheck={() => void checkUsage(account)}
                         onLogout={() => void logoutAccount(account)}
                         onOpen={() => void openAccountCli(account)}
@@ -819,6 +732,8 @@ export function AiAccountsPanel(): React.JSX.Element {
             <CliKindPicker
               accounts={accounts}
               installedByKind={installedByKind}
+              errorsByKind={errorsByKind}
+              installingKind={installingKind}
               addingKind={addingKind}
               onPick={(kind) => void addCliKind(kind)}
             />

@@ -420,6 +420,7 @@ function parsePanels(raw: unknown): PanelDefinition[] {
         title: panel.title,
         zone: panel.zone,
         ...(panel.launchMode === 'login' ? { launchMode: 'login' as const } : {}),
+        ...(panel.launchMode === 'login' && panel.loginStarted === true ? { loginStarted: true } : {}),
         ...(typeof panel.accountId === 'string' && panel.accountId.length <= 200
           ? { accountId: panel.accountId }
           : {}),

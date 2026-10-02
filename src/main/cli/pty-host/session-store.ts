@@ -1,5 +1,13 @@
 export const OUTPUT_BUFFER_LIMIT = 120_000
 
+type SessionOwner = { projectId?: string; kind: string; accountId?: string; cliModel?: string; cwd: string; worktreePath?: string }
+
+export function hostSessionMatchesRequest(existing: SessionOwner, request: SessionOwner): boolean {
+  return existing.projectId === request.projectId && existing.kind === request.kind &&
+    existing.accountId === request.accountId && existing.cliModel === request.cliModel &&
+    existing.cwd === request.cwd && existing.worktreePath === request.worktreePath
+}
+
 export function appendOutputBuffer(
   buffer: string,
   chunk: string,

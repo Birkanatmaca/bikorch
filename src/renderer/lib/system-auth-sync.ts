@@ -55,8 +55,9 @@ async function importDiscovery(discovery: SystemAuthDiscovery): Promise<AiAccoun
     }
 
     store.markAccountAuthenticated(accountId, result.identity)
+    const observedAt = Date.now()
     const profiles = await window.api.authProfiles.list()
-    store.syncAuthProfiles(profiles)
+    store.syncAuthProfiles(profiles, observedAt)
 
     const imported = useAiAccountsStore
       .getState()

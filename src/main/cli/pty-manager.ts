@@ -6,6 +6,7 @@ import {
   type PtyCreateResponse,
   type PtyEvent,
   type PtySessionStatus,
+  type PtySessionSnapshot,
   PTY_IPC
 } from '@shared/contracts/pty'
 import { resolveSpawnConfigCandidates, getKindLabel, spawnEnv, terminalUserEnv, cliLaunchArgs, windowsPtySpawnOptions } from './adapters'
@@ -24,6 +25,7 @@ import {
 import { recordLog } from '../logs'
 import { ptyHostClient } from './pty-host/client'
 import { appendOutputBuffer } from './pty-host/session-store'
+import { appendCliArgs } from './spawn-args'
 
 interface PtySession {
   id: string
@@ -47,15 +49,7 @@ interface PtySession {
   outputBuffer?: string
 }
 
-export interface PtySessionSnapshot {
-  sessionId: string
-  projectId: string
-  kind: PtyCreateRequest['kind']
-  accountId?: string
-  cwd: string
-  worktreePath?: string
-  status: PtySessionStatus
-}
+export type { PtySessionSnapshot } from '@shared/contracts/pty'
 
 const OUTPUT_BUFFER_LIMIT = 120_000
 // The durable host owns the full replay buffer. Main only needs a short tail
@@ -88,10 +82,19 @@ class PtyManager {
       projectId: session.projectId,
       kind: session.kind,
       ...(session.accountId ? { accountId: session.accountId } : {}),
+      ...(session.cliModel ? { cliModel: session.cliModel } : {}),
       cwd: session.cwd,
       ...(session.worktreePath ? { worktreePath: session.worktreePath } : {}),
       status: session.status
     }
+  }
+
+  async inspectSessionSnapshot(sessionId: string): Promise<PtySessionSnapshot | null> {
+    const local = this.getSessionSnapshot(sessionId)
+    if (local) return local
+    try {
+      return await ptyHostClient.ensureConnected() ? await ptyHostClient.snapshot(sessionId) : null
+    } catch { return null }
   }
 
   observe(listener: (event: PtyEvent) => void): () => void {
@@ -188,10 +191,26 @@ class PtyManager {
 
     const cwd = resolveSafeCwd(request.cwd)
     const worktreePath = request.worktreePath?.trim() ? cwd : undefined
+    // Rebuild the main-process binding after app restart before preparing account credentials.
+    if (!this.sessions.has(sessionId)) {
+      const hosted = await this.inspectSessionSnapshot(sessionId)
+      if (hosted && hosted.status !== 'stopped' && hosted.status !== 'error') {
+        if (hosted.projectId !== request.projectId || hosted.kind !== kind || hosted.accountId !== request.accountId ||
+          hosted.cliModel !== request.cliModel || resolveSafeCwd(hosted.cwd) !== cwd || hosted.worktreePath !== worktreePath) {
+          return { sessionId, status: 'error', error: 'This saved CLI session belongs to a different project, account or workspace.' }
+        }
+        this.sessions.set(sessionId, { id: sessionId, projectId: hosted.projectId, kind,
+          ...(hosted.accountId ? { accountId: hosted.accountId } : {}),
+          ...(hosted.cliModel ? { cliModel: hosted.cliModel } : {}),
+          cwd, ...(worktreePath ? { worktreePath } : {}), process: null, durable: true, webContents,
+          status: hosted.status, cols, rows, outputBuffer: '' })
+      }
+    }
     const existing = this.sessions.get(sessionId)
 
     if (
       existing?.kind === kind &&
+      existing.status !== 'stopped' && existing.status !== 'error' &&
       existing.accountId === request.accountId &&
       existing.cliModel === request.cliModel
     ) {
@@ -314,7 +333,7 @@ class PtyManager {
     if (request.accountId && kind !== 'terminal') {
       const accountId = request.accountId
       const prepareLaunch = (): Promise<Awaited<ReturnType<typeof prepareAuthProfileLaunch>>> =>
-        prepareAuthProfileLaunch({ kind, accountId }, request.launchMode ?? 'normal')
+        prepareAuthProfileLaunch({ kind, accountId }, request.launchMode ?? 'normal', request.resumeLogin === true)
       const prepared =
         kind === 'antigravity'
           ? await withAntigravityCredentialLock(prepareLaunch)
@@ -337,9 +356,10 @@ class PtyManager {
           sessionId,
           status: 'error',
           error: message,
+          code: 'ACCOUNT_REQUIRED',
           kind
         })
-        return { sessionId, status: 'error', error: message, kind }
+        return { sessionId, status: 'error', error: message, code: 'ACCOUNT_REQUIRED', kind }
       }
       profileEnv = getAuthProfileEnv(kind, request.accountId)
       if (kind === 'antigravity' && request.launchMode === 'login') {
@@ -353,10 +373,9 @@ class PtyManager {
 
     for (const spawnConfig of candidates) {
       const command = resolveWindowsSpawnPath(spawnConfig.command)
-      const args = [
-        ...spawnConfig.args.map((arg) => (arg.includes('\\') || arg.includes('/') ? resolveWindowsSpawnPath(arg) : arg)),
-        ...launchArgs
-      ]
+      const args = appendCliArgs({ ...spawnConfig,
+        args: spawnConfig.args.map((arg) => (arg.includes('\\') || arg.includes('/') ? resolveWindowsSpawnPath(arg) : arg))
+      }, launchArgs)
       const env = kind === 'terminal'
         ? { ...terminalUserEnv(), ...(spawnConfig.env ?? {}) }
         : { ...spawnEnv(), ...profileEnv, ...(spawnConfig.env ?? {}) }
@@ -367,9 +386,13 @@ class PtyManager {
             sessionId,
             kind,
             ...(request.accountId ? { accountId: request.accountId } : {}),
+            projectId: request.projectId,
+            ...(request.cliModel ? { cliModel: request.cliModel } : {}),
+            ...(worktreePath ? { worktreePath } : {}),
             command,
             args,
             cwd: spawnCwd,
+            workspaceCwd: cwd,
             cols: safeCols,
             rows: safeRows,
             env

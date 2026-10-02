@@ -35,7 +35,7 @@ it('loads the workspace without waiting for account verification and applies pro
   expect(states.accounts.syncAuthProfiles).not.toHaveBeenCalled()
   const profiles: AuthProfileSummary[] = [{ kind: 'cursor', accountId: 'a', ready: true, email: 'a@example.com', name: 'a' }]
   resolveProfiles(profiles)
-  await vi.waitFor(() => expect(states.accounts.syncAuthProfiles).toHaveBeenCalledWith(profiles))
+  await vi.waitFor(() => expect(states.accounts.syncAuthProfiles).toHaveBeenCalledWith(profiles, expect.any(Number)))
   expect(dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'bikorch:refresh-ai-accounts' }))
 })
 
