@@ -1274,7 +1274,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           <button type="button" className={cn('manager-watch-toggle', projectWatch.enabled && settings.configured && 'is-active')}
             onClick={() => projectWatch.setEnabled(!projectWatch.enabled)}
             aria-label={projectWatch.enabled ? 'Pause project watch' : 'Enable project watch'} aria-pressed={projectWatch.enabled}
-            title={!settings.configured ? 'Connect Manager to inspect this project' : 'Checks project changes every five minutes and diagnoses terminal failures'}>
+            title={!settings.configured ? 'Connect Manager to inspect this project' : 'Diagnoses terminal failures. Project review runs only when you ask.'}>
             <Activity className="h-3.5 w-3.5" />
             <span>{!settings.configured ? 'Setup needed' : !project.folderPath ? 'Attach a folder' : inspectionKind === 'error-diagnosis' ? 'Analyzing error' : inspectionKind ? 'Reviewing project' : projectWatch.enabled ? 'Watching project' : 'Watch paused'}</span>
           </button>
@@ -1293,8 +1293,8 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           <div className="manager-capabilities">
             <strong>Developer workspace</strong>
             <p>Inspect code and errors, coordinate agents, implement changes, and review results.</p>
-            <span>Project inspection is automatic. Agent work starts when you approve a plan.</span>
-            <small>{settings.provider.source === 'cli' ? `${settings.provider.cli.kind ? AI_ACCOUNT_LABELS[settings.provider.cli.kind] : 'CLI'} Manager` : settings.model}{projectWatch.lastReviewedAt ? ` · Reviewed ${new Date(projectWatch.lastReviewedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}</small>
+            <span>Review runs only when you ask. Agent work starts when you approve a plan.</span>
+            <small>{settings.provider.source === 'cli' ? `${settings.provider.cli.kind ? AI_ACCOUNT_LABELS[settings.provider.cli.kind] : 'CLI'} Manager` : settings.model}</small>
           </div>
           {cacheAnalysis && ((cacheAnalysis.pressured && !cacheAnalysis.dismissed) || cacheAnalysis.releasedBytes) ? (
             <div className="secretary-cache" aria-label="Cache care">

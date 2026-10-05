@@ -48,6 +48,8 @@ describe('cliLaunchArgs', () => {
     expect(cliLaunchArgs('cursor', 'normal', 'cursor-grok-4.6-high'))
       .toEqual(['--trust', '--model', 'cursor-grok-4.6-high'])
     expect(cliLaunchArgs('cursor', 'login')).toEqual(['login'])
+    expect(cliLaunchArgs('codex')).toEqual(['--no-daemon'])
+    expect(cliLaunchArgs('codex', 'login')).toEqual(['--no-daemon', 'login'])
     expect(cliLaunchArgs('gemini')).toEqual(['--skip-trust'])
     expect(cliLaunchArgs('claude')).toEqual([])
   })

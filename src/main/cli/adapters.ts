@@ -366,7 +366,10 @@ export function cliLaunchArgs(
   launchMode: 'normal' | 'login' = 'normal',
   cliModel?: string
 ): string[] {
-  if (launchMode === 'login' && (kind === 'codex' || kind === 'cursor')) return ['login']
+  // This Codex build starts a background app-server that exits when the local
+  // package is incomplete. --no-daemon keeps the interactive CLI in-process.
+  if (kind === 'codex') return launchMode === 'login' ? ['--no-daemon', 'login'] : ['--no-daemon']
+  if (launchMode === 'login' && kind === 'cursor') return ['login']
   if (kind === 'cursor') return cliModel ? ['--trust', '--model', cliModel] : ['--trust']
   if (kind === 'gemini') return ['--skip-trust']
   return []

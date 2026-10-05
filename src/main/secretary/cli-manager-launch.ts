@@ -40,7 +40,7 @@ export function managerCliPrintCommand(input: {
     args.push('--approval-mode', 'plan', '--output-format', 'json')
     if (model) args.push('--model', model)
   } else if (input.kind === 'codex') {
-    args.push('exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '-C', input.workspace)
+    args.push('--no-daemon', 'exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '-C', input.workspace)
     if (model) args.push('--model', model)
   } else {
     args.push('--print', '--output-format', 'json', '--mode', 'plan', '--sandbox')
