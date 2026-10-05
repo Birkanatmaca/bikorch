@@ -2,7 +2,12 @@ import type { PtyEvent } from '@shared/contracts/pty'
 import type { GitSessionSnapshot } from '@shared/contracts/git'
 import type { SecretaryAssignment, SecretaryCompletionEvidence, SecretaryRun, SecretaryRunAnswerRequest } from '@shared/contracts/secretary'
 import { formatCliPaste } from '@shared/cli-prompt'
-import { readSecretaryCliResult, wrapSecretaryCliInstruction, type SecretaryCliOutcome } from '@shared/secretary-result-protocol'
+import {
+  readSecretaryCliResult,
+  secretaryCliResultReminder,
+  wrapSecretaryCliInstruction,
+  type SecretaryCliOutcome
+} from '@shared/secretary-result-protocol'
 import { cliPermissionResponse, looksWorkspaceTrustPrompt } from '@shared/cli-permission'
 import { ptyManager } from '../cli/pty-manager'
 import { checkAgentGitPatch, snapshotAgentGit } from '../git/session-snapshot'
@@ -12,9 +17,15 @@ import { getSecretaryStore } from './store'
 import { releaseSecretaryRunLock } from './run-lock'
 import { buildSecretaryRunEvidence } from './evidence'
 import { cleanManagerTerminalOutput } from './inspection-evidence'
+import { secretaryCliDeveloperContext } from './cli-developer-context'
 
 const OUTPUT_LIMIT = 8_000
-const RUN_TIMEOUT_MS = 8 * 60_000
+/** A run fails only after its working CLIs go quiet this long; long builds that keep printing survive. */
+const IDLE_TIMEOUT_MS = 10 * 60_000
+const RUN_HARD_LIMIT_MS = 2 * 60 * 60_000
+/** After the result reminder, a CLI that stays silent this long is treated as finished. */
+const REMINDER_GRACE_MS = 45_000
+const WATCH_INTERVAL_MS = 15_000
 
 interface Target {
   assignment: SecretaryAssignment
@@ -29,10 +40,13 @@ interface Target {
   cwd: string
   gitStart: GitSessionSnapshot
   reportedChangedFiles: string[]
+  verification: string[]
   permissionKey: string | null
   permissionKeyReplies: number
   permissionReplies: number
   lastPermissionAt: number
+  remindedAt: number | null
+  lastDataAt: number
 }
 
 interface TrackedRun {
@@ -40,7 +54,9 @@ interface TrackedRun {
   targets: Map<string, Target>
   pending: Array<{ assignment: SecretaryAssignment; sessionId: string; cwd: string; gitStart: GitSessionSnapshot | null }>
   skipped: SecretarySkippedAssignment[]
-  timer: ReturnType<typeof setTimeout>
+  timer: ReturnType<typeof setInterval>
+  startedAt: number
+  lastActivityAt: number
   finalizing: boolean
   waitingSessionIds: Set<string>
 }
@@ -87,6 +103,7 @@ async function toResult(target: Target): Promise<SecretaryCliResult> {
     output: target.output,
     outcome: target.outcome ?? 'failed',
     completionEvidence: target.completionEvidence ?? 'terminal-idle-inferred',
+    reportedVerification: target.verification,
     git: {
       available: Boolean(target.gitStart.headSha || gitEnd.headSha || changedFiles.length || gitEnd.commits.length),
       changedFiles,
@@ -102,7 +119,7 @@ async function toResult(target: Target): Promise<SecretaryCliResult> {
 function dropTrackedRun(runId: string): TrackedRun | null {
   const tracked = trackedRuns.get(runId) ?? null
   if (!tracked) return null
-  clearTimeout(tracked.timer)
+  clearInterval(tracked.timer)
   trackedRuns.delete(runId)
   for (const target of tracked.targets.values()) trackedSessions.delete(target.sessionId)
   return tracked
@@ -122,10 +139,13 @@ function toTarget(binding: { assignment: SecretaryAssignment; sessionId: string;
     cwd: binding.cwd,
     gitStart: binding.gitStart,
     reportedChangedFiles: [],
+    verification: [],
     permissionKey: null,
     permissionKeyReplies: 0,
     permissionReplies: 0,
-    lastPermissionAt: 0
+    lastPermissionAt: 0,
+    remindedAt: null,
+    lastDataAt: Date.now()
   }
 }
 
@@ -159,12 +179,14 @@ async function dispatchNextStep(
   }
   tracked.targets.set(readyBinding.sessionId, toTarget(readyBinding))
   trackedSessions.set(readyBinding.sessionId, tracked.run.id)
+  tracked.lastActivityAt = Date.now()
   await ptyManager.writeForSecretary(
     readyBinding.sessionId,
     formatCliPaste(wrapSecretaryCliInstruction(readyBinding.assignment.instruction, {
       mode: readyBinding.assignment.mode,
       expectedResult: readyBinding.assignment.expectedResult,
-      dependencyContext: dependencyContext(tracked, readyBinding.assignment)
+      dependencyContext: dependencyContext(tracked, readyBinding.assignment),
+      developerContext: secretaryCliDeveloperContext(tracked.run.projectId, readyBinding.assignment)
     }))
   )
   await waitForPasteCommit()
@@ -186,7 +208,7 @@ function failTrackedRun(runId: string, message: string): void {
   const activeSessionIds = [...tracked.targets.values()]
     .filter((target) => !target.outcome)
     .map((target) => target.sessionId)
-  clearTimeout(tracked.timer)
+  clearInterval(tracked.timer)
   for (const target of tracked.targets.values()) {
     if (target.outcome) continue
     target.outcome = 'failed'
@@ -280,6 +302,7 @@ async function finishTrackedRun(runId: string): Promise<void> {
         projectId: result.completedRun.projectId,
         threadId: result.completedRun.threadId,
         completedRunId: result.completedRun.id,
+        completedStatus: result.completedRun.status === 'failed' ? 'failed' : 'completed',
         runId: result.followUpRun.id,
         reply: result.completedRun.reply ?? 'A follow-up plan is ready for review.',
         plan: result.followUpRun.plan,
@@ -329,7 +352,8 @@ function completeTarget(
   outcome: SecretaryCliOutcome,
   reportedChangedFiles: string[] = [],
   summary = '',
-  completionEvidence: SecretaryCompletionEvidence = 'terminal-idle-inferred'
+  completionEvidence: SecretaryCompletionEvidence = 'terminal-idle-inferred',
+  verification: string[] = []
 ): void {
   const tracked = trackedRuns.get(runId)
   const target = tracked?.targets.get(sessionId)
@@ -339,7 +363,42 @@ function completeTarget(
   target.completionEvidence = completionEvidence
   target.summary = summary.trim() || target.summary
   target.reportedChangedFiles = unique(reportedChangedFiles, 30)
+  target.verification = unique(verification, 10)
   void finishTrackedRun(runId)
+}
+
+/** The CLI looks idle but never printed its result. Ask once before guessing. */
+async function remindForResult(runId: string, target: Target): Promise<void> {
+  target.remindedAt = Date.now()
+  target.sawBusy = false
+  try {
+    await ptyManager.writeForSecretary(target.sessionId, formatCliPaste(secretaryCliResultReminder()))
+    await waitForPasteCommit()
+    if (!trackedRuns.has(runId) || target.outcome) return
+    await ptyManager.writeForSecretary(target.sessionId, '\r')
+  } catch {
+    completeTarget(runId, target.sessionId, 'completed')
+  }
+}
+
+function watchTrackedRun(runId: string): void {
+  const tracked = trackedRuns.get(runId)
+  if (!tracked || tracked.finalizing) return
+  const now = Date.now()
+  if (now - tracked.startedAt >= RUN_HARD_LIMIT_MS) {
+    failTrackedRun(runId, 'The CLI work passed the two-hour Manager limit without a final result.')
+    return
+  }
+  for (const target of tracked.targets.values()) {
+    if (target.outcome || target.remindedAt === null || tracked.waitingSessionIds.has(target.sessionId)) continue
+    if (now - Math.max(target.remindedAt, target.lastDataAt) >= REMINDER_GRACE_MS) {
+      completeTarget(runId, target.sessionId, 'completed')
+    }
+  }
+  if (tracked.waitingSessionIds.size > 0) return
+  if (now - tracked.lastActivityAt >= IDLE_TIMEOUT_MS) {
+    failTrackedRun(runId, 'The CLI stopped producing output for 10 minutes without returning a result.')
+  }
 }
 
 function resumeRunIfPaused(runId: string, sessionId: string): void {
@@ -461,6 +520,9 @@ function handlePtyEvent(event: PtyEvent): void {
   if (!tracked || !target) return
 
   if (event.type === 'data') {
+    const now = Date.now()
+    target.lastDataAt = now
+    tracked.lastActivityAt = now
     target.output = `${target.output}${event.data}`.slice(-OUTPUT_LIMIT)
     const clean = stripAnsi(target.output)
     const permission = cliPermissionResponse(clean, {
@@ -487,7 +549,7 @@ function handlePtyEvent(event: PtyEvent): void {
         return
       }
       resumeRunIfPaused(runId, event.sessionId)
-      completeTarget(runId, event.sessionId, structured.outcome, structured.changedFiles, structured.summary, 'cli-reported')
+      completeTarget(runId, event.sessionId, structured.outcome, structured.changedFiles, structured.summary, 'cli-reported', structured.verification)
       return
     }
     const activity = inferActivity(clean)
@@ -498,6 +560,10 @@ function handlePtyEvent(event: PtyEvent): void {
     if (activity === 'waiting' && target.sawBusy) {
       if (tracked.waitingSessionIds.has(event.sessionId)) return
       resumeRunIfPaused(runId, event.sessionId)
+      if (target.remindedAt === null) {
+        void remindForResult(runId, target)
+        return
+      }
       completeTarget(runId, event.sessionId, 'completed')
     }
     return
@@ -532,8 +598,9 @@ export function trackSecretaryRun(
     targets.set(binding.sessionId, toTarget({ ...binding, gitStart }))
     trackedSessions.set(binding.sessionId, run.id)
   }
-  const timer = setTimeout(() => {
-    failTrackedRun(run.id, 'The CLI did not return a result before the Secretary timeout.')
-  }, RUN_TIMEOUT_MS)
-  trackedRuns.set(run.id, { run, targets, pending, skipped: [], timer, finalizing: false, waitingSessionIds: new Set() })
+  const timer = setInterval(() => watchTrackedRun(run.id), WATCH_INTERVAL_MS)
+  const now = Date.now()
+  trackedRuns.set(run.id, {
+    run, targets, pending, skipped: [], timer, startedAt: now, lastActivityAt: now, finalizing: false, waitingSessionIds: new Set()
+  })
 }

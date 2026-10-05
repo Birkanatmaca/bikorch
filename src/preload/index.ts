@@ -406,7 +406,7 @@ export interface SecretaryApi {
   saveKey: (key: string) => Promise<SecretarySettings>
   clearKey: () => Promise<SecretarySettings>
   resetUsage: () => Promise<SecretarySettings>
-  updateSettings: (settings: { model?: string; provider?: ManagerProviderPatch }) => Promise<SecretarySettings>
+  updateSettings: (settings: { model?: string; name?: string; provider?: ManagerProviderPatch }) => Promise<SecretarySettings>
   testConnection: (request: { source: ManagerProviderSource }) => Promise<ManagerConnectionTest>
   createPlan: (request: SecretaryPlanRequest) => Promise<SecretaryPlan>
   chat: (request: SecretaryChatRequest) => Promise<SecretaryChatResponse>

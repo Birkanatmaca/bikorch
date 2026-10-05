@@ -3,6 +3,7 @@ import {
   DEFAULT_CUSTOM_VIEWPORT_WIDTH,
   type BrowserViewportId
 } from '@shared/contracts/browser'
+import type { MobilePlatform } from '@shared/mobile-devices'
 
 const STORAGE_KEY = 'bikorch.browser'
 const MAX_RECENTS = 12
@@ -11,6 +12,8 @@ export interface BrowserPanelState {
   url: string
   viewport: BrowserViewportId
   customWidth: number
+  /** Chosen phone model per platform for mobile preview panels. */
+  deviceModels?: Partial<Record<MobilePlatform, string>>
 }
 
 interface StoredBrowser {
@@ -59,6 +62,7 @@ interface BrowserStore {
   rememberUrl: (panelId: string, url: string) => void
   setViewport: (panelId: string, viewport: BrowserViewportId) => void
   setCustomWidth: (panelId: string, width: number) => void
+  setDeviceModel: (panelId: string, platform: MobilePlatform, modelId: string) => void
 }
 
 export const useBrowserStore = create<BrowserStore>((set, get) => ({
@@ -84,6 +88,16 @@ export const useBrowserStore = create<BrowserStore>((set, get) => ({
   setViewport: (panelId, viewport) => {
     const current = get().panels[panelId] ?? defaultPanel()
     const panels = { ...get().panels, [panelId]: { ...current, viewport } }
+    set({ panels })
+    persist({ recents: get().recents, panels })
+  },
+
+  setDeviceModel: (panelId, platform, modelId) => {
+    const current = get().panels[panelId] ?? defaultPanel()
+    const panels: Record<string, BrowserPanelState> = {
+      ...get().panels,
+      [panelId]: { ...current, deviceModels: { ...current.deviceModels, [platform]: modelId } }
+    }
     set({ panels })
     persist({ recents: get().recents, panels })
   },

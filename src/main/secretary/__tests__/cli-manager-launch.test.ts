@@ -27,9 +27,26 @@ describe('dedicated Manager CLI session', () => {
       prompt: 'Reply with JSON'
     })
     expect(command.args).toEqual(expect.arrayContaining(['-p', '--output-format', 'json', '--mode', 'ask', '--workspace', workspace, '--resume', '11111111-1111-4111-8111-111111111111']))
+    expect(command.args).not.toContain('Reply with JSON')
+    expect(command.stdin).toBe('Reply with JSON')
     expect(command.args).not.toContain('--force')
     expect(command.args).not.toContain('--yolo')
     expect(command.args.join(' ')).not.toContain(project)
+  })
+
+  it('keeps a large project prompt off the command line', () => {
+    const prompt = `project context ${'x'.repeat(40_000)}`
+    const command = managerCliPrintCommand({
+      kind: 'cursor',
+      command: 'agent',
+      baseArgs: [],
+      workspace,
+      model: null,
+      chatId: null,
+      prompt
+    })
+    expect(command.stdin).toBe(prompt)
+    expect(command.args.join('\n')).not.toContain(prompt)
   })
 
   it('normalizes CLI stdout into the Manager response contract', () => {

@@ -33,6 +33,7 @@ type GuestWebview = HTMLElement & {
   reload?: () => void
   stop?: () => void
   loadURL?: (url: string) => void
+  setZoomFactor?: (factor: number) => void
 }
 
 function readGuestUrl(guest: GuestWebview | null): string {
@@ -56,12 +57,13 @@ export function BrowserPanel({ panelId }: { panelId: string }): React.JSX.Elemen
   const stageRef = useRef<HTMLDivElement>(null)
   const frameRef = useRef<HTMLDivElement>(null)
   const guestRef = useRef<GuestWebview | null>(null)
+  const scaleRef = useRef(1)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [canBack, setCanBack] = useState(false)
   const [canForward, setCanForward] = useState(false)
-  const [stageWidth, setStageWidth] = useState(0)
+  const [stageSize, setStageSize] = useState({ width: 0, height: 0 })
 
   useEffect(() => {
     ensure(panelId)
@@ -74,7 +76,7 @@ export function BrowserPanel({ panelId }: { panelId: string }): React.JSX.Elemen
   useLayoutEffect(() => {
     const stage = stageRef.current
     if (!stage) return
-    const update = (): void => setStageWidth(stage.clientWidth)
+    const update = (): void => setStageSize({ width: stage.clientWidth, height: stage.clientHeight })
     update()
     const observer = new ResizeObserver(update)
     observer.observe(stage)
@@ -85,7 +87,8 @@ export function BrowserPanel({ panelId }: { panelId: string }): React.JSX.Elemen
   const viewport = panel?.viewport ?? 'fluid'
   const customWidth = panel?.customWidth ?? 390
   const frameWidth = viewportWidth(viewport, customWidth)
-  const scale = fitViewportScale(Math.max(0, stageWidth - 24), frameWidth)
+  const scale = fitViewportScale(stageSize.width, frameWidth)
+  scaleRef.current = scale
 
   const syncChrome = (guest: GuestWebview): void => {
     const nextUrl = readGuestUrl(guest)
@@ -154,11 +157,19 @@ export function BrowserPanel({ panelId }: { panelId: string }): React.JSX.Elemen
       setLoading(false)
       setError(detail.errorDescription || 'This page failed to load')
     }
+    const onReady = (): void => {
+      try {
+        guest.setZoomFactor?.(scaleRef.current)
+      } catch {
+        // Applied again once the viewport is measured.
+      }
+    }
     const onNavigate = (): void => syncChrome(guest)
 
     guest.addEventListener('did-start-loading', onStart)
     guest.addEventListener('did-stop-loading', onStop)
     guest.addEventListener('did-fail-load', onFail)
+    guest.addEventListener('dom-ready', onReady)
     guest.addEventListener('did-navigate', onNavigate)
     guest.addEventListener('did-navigate-in-page', onNavigate)
     guest.addEventListener('page-title-updated', onNavigate)
@@ -194,6 +205,7 @@ export function BrowserPanel({ panelId }: { panelId: string }): React.JSX.Elemen
       guest.removeEventListener('did-start-loading', onStart)
       guest.removeEventListener('did-stop-loading', onStop)
       guest.removeEventListener('did-fail-load', onFail)
+      guest.removeEventListener('dom-ready', onReady)
       guest.removeEventListener('did-navigate', onNavigate)
       guest.removeEventListener('did-navigate-in-page', onNavigate)
       guest.removeEventListener('page-title-updated', onNavigate)
@@ -201,6 +213,14 @@ export function BrowserPanel({ panelId }: { panelId: string }): React.JSX.Elemen
       if (guestRef.current === guest) guestRef.current = null
     }
   }, [panelId, hasUrl, guestGeneration])
+
+  useEffect(() => {
+    try {
+      guestRef.current?.setZoomFactor?.(scale)
+    } catch {
+      // The page still fills the window when zoom is unavailable.
+    }
+  }, [scale, guestGeneration])
 
   const idle = !currentUrl
 
@@ -280,7 +300,7 @@ export function BrowserPanel({ panelId }: { panelId: string }): React.JSX.Elemen
           </label>
         )}
         <span className="browser-size">
-          {frameWidth ? `${frameWidth}px` : stageWidth > 0 ? `${stageWidth}px` : 'Fluid'}
+          {frameWidth ? `${frameWidth}px` : stageSize.width > 0 ? `${stageSize.width}px` : 'Fluid'}
           {scale < 1 ? ` · ${Math.round(scale * 100)}%` : ''}
         </span>
       </div>
@@ -311,17 +331,8 @@ export function BrowserPanel({ panelId }: { panelId: string }): React.JSX.Elemen
           </div>
         )}
         <div
-          className={cn('browser-frame', viewport !== 'fluid' && 'is-device')}
-          style={
-            frameWidth
-              ? {
-                  width: frameWidth,
-                  height: `${100 / scale}%`,
-                  transform: `scale(${scale})`,
-                  transformOrigin: 'top center'
-                }
-              : undefined
-          }
+          className={cn('browser-frame', frameWidth && 'is-device')}
+          style={frameWidth ? { width: Math.max(1, Math.round(frameWidth * scale)) } : undefined}
         >
           <div ref={frameRef} className="browser-guest-host" />
         </div>

@@ -3,6 +3,7 @@ import { defaultManagerProviderView, type ManagerProviderPatch, type SecretarySe
 
 const EMPTY_SETTINGS: SecretarySettings = {
   configured: false,
+  name: 'Bikorch Manager',
   model: 'gpt-5',
   usage: {
     requests: 0,
@@ -25,6 +26,7 @@ interface SecretaryStore {
   saveKey: (key: string) => Promise<boolean>
   clearKey: () => Promise<boolean>
   updateModel: (model: string) => Promise<boolean>
+  updateName: (name: string) => Promise<boolean>
   updateProvider: (provider: ManagerProviderPatch) => Promise<boolean>
   resetUsage: () => Promise<boolean>
 }
@@ -81,6 +83,18 @@ export const useSecretaryStore = create<SecretaryStore>((set) => ({
       return true
     } catch (cause) {
       set({ loading: false, error: messageFor(cause, 'Could not update the model') })
+      return false
+    }
+  },
+
+  updateName: async (name) => {
+    set({ loading: true, error: null })
+    try {
+      const settings = await window.api.secretary.updateSettings({ name })
+      set({ settings, loaded: true, loading: false })
+      return true
+    } catch (cause) {
+      set({ loading: false, error: messageFor(cause, 'Could not update the manager name') })
       return false
     }
   },

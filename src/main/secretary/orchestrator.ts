@@ -15,6 +15,7 @@ import { flushPersistenceToDisk, loadSnapshot } from '../persistence/database'
 import { getSecretaryStore } from './store'
 import { cancelTrackedSecretaryRun, trackSecretaryRun } from './result-collector'
 import { releaseSecretaryRunLock, reserveSecretaryRunLock } from './run-lock'
+import { secretaryCliDeveloperContext } from './cli-developer-context'
 
 const SUBMIT_DELAY_MS = 120
 
@@ -49,6 +50,26 @@ function samePath(left: string, right: string): boolean {
   return isSameFilePath(left, right)
 }
 
+/**
+ * A plan may name a panel the user already had open. That id is only a lock
+ * when it is itself a dedicated Manager worktree. Personal and shared CLI
+ * panels are hints; approval opens a separate isolated session for the task.
+ */
+function recordedPanelLocksAssignment(
+  run: SecretaryRun,
+  assignment: NonNullable<SecretaryRun['plan']>['assignments'][number]
+): boolean {
+  if (!assignment.panelId) return false
+  const panel = loadSnapshot().workspaces[run.projectId]?.panels.find((item) => item.id === assignment.panelId)
+  return Boolean(
+    panel &&
+    panel.type === assignment.kind &&
+    panel.panelRole === 'secretary' &&
+    panel.workspaceIsolation === 'isolated' &&
+    !panel.cwdOverride
+  )
+}
+
 async function assertSessionOwnership(
   run: SecretaryRun,
   assignment: NonNullable<SecretaryRun['plan']>['assignments'][number],
@@ -61,7 +82,7 @@ async function assertSessionOwnership(
   if (session.projectId !== run.projectId) {
     throw new Error('The selected CLI session belongs to a different project')
   }
-  if (assignment.panelId && assignment.panelId !== sessionId) {
+  if (assignment.panelId && assignment.panelId !== sessionId && recordedPanelLocksAssignment(run, assignment)) {
     throw new Error('The approved assignment is bound to a different CLI panel')
   }
   const snapshot = loadSnapshot()
@@ -73,17 +94,19 @@ async function assertSessionOwnership(
   if (panel.accountId !== session.accountId) {
     throw new Error('The selected CLI session is using a different account than its project panel')
   }
+  if (panel.panelRole !== 'secretary' || panel.cwdOverride) {
+    throw new Error('Secretary tasks need a Manager CLI session in this project folder')
+  }
+  // A project folder is enough. Git worktrees stay optional for repos that already have one.
+  if (samePath(session.cwd, project.folderPath)) return session
   if (
-    panel.panelRole !== 'secretary' ||
     panel.workspaceIsolation !== 'isolated' ||
-    panel.cwdOverride ||
     !panel.worktreePath ||
     !session.worktreePath ||
     !samePath(session.cwd, panel.worktreePath) ||
-    !samePath(session.worktreePath, panel.worktreePath) ||
-    samePath(session.cwd, project.folderPath)
+    !samePath(session.worktreePath, panel.worktreePath)
   ) {
-    throw new Error('Secretary tasks require a dedicated isolated worktree; the project folder or a shared CLI session cannot be used')
+    throw new Error('Secretary tasks need a Manager CLI session in this project folder')
   }
   if (!(await isRegisteredAgentWorktree({
     projectRoot: project.folderPath,
@@ -96,8 +119,9 @@ async function assertSessionOwnership(
   return session
 }
 
-function assertDistinctWorktrees(cwds: string[]): void {
-  if (cwds.some((cwd, index) => cwds.slice(0, index).some((other) =>
+function assertDistinctWorktrees(cwds: string[], projectFolder: string): void {
+  const isolated = cwds.filter((cwd) => !samePath(cwd, projectFolder))
+  if (isolated.some((cwd, index) => isolated.slice(0, index).some((other) =>
     samePath(canonicalRepoRoot(cwd), canonicalRepoRoot(other))
   ))) {
     throw new Error('Each Secretary assignment requires a different isolated worktree')
@@ -137,7 +161,8 @@ export async function prepareSecretaryRun(payload: unknown): Promise<SecretaryRu
   if (new Set(request.assignments.map((binding) => binding.sessionId)).size !== request.assignments.length) {
     throw new Error('Each assignment must use a different CLI session')
   }
-  assertDistinctWorktrees(preparedCwds)
+  const projectFolderPath = loadSnapshot().projects.find((item) => item.id === run.projectId)?.folderPath ?? ''
+  assertDistinctWorktrees(preparedCwds, projectFolderPath)
   return {
     runId: run.id,
     projectId: run.projectId,
@@ -185,7 +210,8 @@ export async function dispatchSecretaryRun(payload: unknown): Promise<SecretaryR
   if (new Set(steps.map((step) => step.sessionId)).size !== steps.length) {
     throw new Error('Each approved assignment must use a different CLI session')
   }
-  assertDistinctWorktrees(steps.map((step) => step.cwd))
+  const projectFolderPath = loadSnapshot().projects.find((item) => item.id === run.projectId)?.folderPath ?? ''
+  assertDistinctWorktrees(steps.map((step) => step.cwd), projectFolderPath)
 
   reserveSecretaryRunLock(run, steps.map((step) => step.sessionId))
   const running = store.updateRun(run.id, {
@@ -221,7 +247,8 @@ export async function dispatchSecretaryRun(payload: unknown): Promise<SecretaryR
         step.sessionId,
         formatCliPaste(wrapSecretaryCliInstruction(step.assignment.instruction, {
           mode: step.assignment.mode,
-          expectedResult: step.assignment.expectedResult
+          expectedResult: step.assignment.expectedResult,
+          developerContext: secretaryCliDeveloperContext(updated.projectId, step.assignment)
         }))
       )
       await waitForPasteCommit()

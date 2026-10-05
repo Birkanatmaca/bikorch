@@ -16,6 +16,8 @@ import { useUsageStore } from '@renderer/stores/usage-store'
 import { useSubscriptionStore } from '@renderer/stores/subscription-store'
 import { Info, X, GripVertical, PanelLeftClose, Pencil, UserRound } from 'lucide-react'
 import { PanelContent } from './PanelContent'
+import { SecretaryAvatar } from '@renderer/components/workspace/SecretaryAvatar'
+import { useSecretaryStore } from '@renderer/stores/secretary-store'
 import { Button } from '@renderer/components/ui/Button'
 import { StatusChip } from '@renderer/components/ui/StatusChip'
 
@@ -325,7 +327,13 @@ export function PanelShell({
     }
     return 'agent'
   })
+  const managerOwned = panelRole === 'secretary'
+  const managerName = useSecretaryStore((state) => state.settings.name || 'Bikorch Manager')
+  const settingsLoaded = useSecretaryStore((state) => state.loaded)
+  const loadManagerSettings = useSecretaryStore((state) => state.load)
   const canIsolate = (AGENT_WORKTREE_KINDS as readonly string[]).includes(type) && panelRole === 'agent'
+  const [managerNoteVisible, setManagerNoteVisible] = useState(false)
+  const managerBodyRef = useRef<HTMLDivElement>(null)
   const terminalRunning = Boolean(status && status !== 'stopped' && status !== 'error')
   const account = accountKind
     ? accountId
@@ -342,8 +350,16 @@ export function PanelShell({
     setTitleDraft(title)
   }, [title])
 
+  useEffect(() => {
+    if (managerOwned && !settingsLoaded) void loadManagerSettings()
+  }, [loadManagerSettings, managerOwned, settingsLoaded])
+
+  useEffect(() => {
+    if (managerBodyRef.current) managerBodyRef.current.inert = managerOwned
+  }, [managerOwned])
+
   const beginRename = (): void => {
-    if (!isTerminalPanel) return
+    if (!isTerminalPanel || managerOwned) return
     setTitleDraft(title)
     setEditingTitle(true)
     setAccountInfoOpen(false)
@@ -373,6 +389,7 @@ export function PanelShell({
         )}
         data-active={windowActive}
         data-panel-kind={type}
+        {...(managerOwned ? { 'data-manager-cli': 'true' } : {})}
       >
         {phase === 'busy' && (
           <>
@@ -397,7 +414,7 @@ export function PanelShell({
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
         >
-          {showMacWindowControls && onClose && (
+          {showMacWindowControls && onClose && !managerOwned && (
             <MacTrafficLightControls title={title} onClose={onClose} inactive={!windowActive} />
           )}
           {showDragHandle && !showMacWindowControls && (
@@ -442,7 +459,7 @@ export function PanelShell({
               >
                 {title}
               </span>
-              {isTerminalPanel && (
+              {isTerminalPanel && !managerOwned && (
                 <Button
                   type="button"
                   variant="ghost"
@@ -465,8 +482,8 @@ export function PanelShell({
               </span>
             )}
             {panelRole === 'secretary' && (
-              <span className="iso-mode-chip is-isolated" title="Manager tasks always use a separate workspace">
-                Separate
+              <span className="iso-mode-chip is-manager" title={`${managerName} is running this CLI`}>
+                {managerName}
               </span>
             )}
             {canIsolate && (
@@ -525,7 +542,7 @@ export function PanelShell({
                 <PanelLeftClose className="h-3.5 w-3.5" />
               </Button>
             )}
-            {!onHide && onClose && !showMacWindowControls && (
+            {!onHide && onClose && !showMacWindowControls && !managerOwned && (
               <Button
                 type="button"
                 variant="danger"
@@ -539,14 +556,33 @@ export function PanelShell({
           </div>
         </header>
         )}
-        <div className={cn('min-h-0 flex-1', isDevice ? 'overflow-visible' : 'overflow-hidden', !showHeader && !isDevice && 'rounded-md')}>
-          <PanelContent
-            panelId={id}
-            type={type}
-            launchMode={launchMode}
-            accountId={accountId}
-            cliModel={cliModel}
-          />
+        <div className={cn('relative min-h-0 flex-1', isDevice ? 'overflow-visible' : 'overflow-hidden', !showHeader && !isDevice && 'rounded-md')}>
+          <div ref={managerBodyRef} className="h-full min-h-0">
+            <PanelContent
+              panelId={id}
+              type={type}
+              launchMode={launchMode}
+              accountId={accountId}
+              cliModel={cliModel}
+            />
+          </div>
+          {managerOwned && (
+            <div
+              className="manager-cli-shield"
+              onMouseEnter={() => setManagerNoteVisible(true)}
+              onMouseLeave={() => setManagerNoteVisible(false)}
+            >
+              {managerNoteVisible && (
+                <div className="manager-cli-note" role="status">
+                  <SecretaryAvatar mood="working" variant="card" />
+                  <div>
+                    <strong>{managerName}</strong>
+                    <p>{managerName} is working. This CLI is managed, so typing here is turned off. You can still watch the output.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
       {accountKind ? (

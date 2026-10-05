@@ -27,7 +27,28 @@ describe('Secretary CLI result protocol', () => {
       outcome: 'completed',
       summary: 'Implemented the review.',
       changedFiles: ['src/app.ts'],
-      needsUser: null
+      needsUser: null,
+      verification: []
     })
+  })
+
+  it('adds done criteria and developer preferences for the task mode', () => {
+    const prompt = wrapSecretaryCliInstruction('Add the endpoint.', {
+      mode: 'implement',
+      developerContext: '- [Tooling] Uses pnpm'
+    })
+    expect(prompt).toContain('Done means:')
+    expect(prompt).toContain('How this developer works')
+    expect(prompt).toContain('Uses pnpm')
+    expect(prompt).toContain('verification')
+  })
+
+  it('keeps reported verification lines short and bounded', () => {
+    const lines = Array.from({ length: 14 }, (_, index) => `check ${index}: passed`)
+    const result = readSecretaryCliResult(`<BIKORCH_RESULT>${JSON.stringify({
+      status: 'completed', summary: 'Done', changedFiles: [], needsUser: null, verification: [...lines, 7, '']
+    })}</BIKORCH_RESULT>`)
+    expect(result?.verification).toHaveLength(10)
+    expect(result?.verification[0]).toBe('check 0: passed')
   })
 })

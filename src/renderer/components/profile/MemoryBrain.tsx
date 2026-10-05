@@ -200,11 +200,14 @@ export function MemoryBrain({
   memories,
   selectedId,
   learning = false,
+  focusCategory = null,
   onSelectMemory
 }: {
   memories: DeveloperMemory[]
   selectedId: string | null
   learning?: boolean
+  /** Dims memories outside this category so the filter and the map agree. */
+  focusCategory?: string | null
   onSelectMemory: (id: string) => void
 }): React.JSX.Element {
   const { points } = useMemo(() => layoutMemorySphere(memories), [memories])
@@ -231,6 +234,13 @@ export function MemoryBrain({
       <div className="memory-chart-frame" role="group" aria-label="Memory">
         <svg className="memory-chart" viewBox={viewBox} preserveAspectRatio="xMidYMid meet">
           {points.length > 0 && (
+            <g className="memory-orbits" aria-hidden="true">
+              {[0.34, 0.64, 0.94].map((ratio) => (
+                <ellipse key={ratio} rx={maxDistance * ratio} ry={maxDistance * ratio * 0.82} />
+              ))}
+            </g>
+          )}
+          {points.length > 0 && (
             <g className={cn('memory-core', learning && 'is-learning')} aria-hidden="true">
               <circle className="memory-core-glow" r="42" />
               <circle className="memory-core-haze" r="18" />
@@ -243,7 +253,7 @@ export function MemoryBrain({
             return (
               <line
                 key={`core-${link.a}`}
-                className="memory-spoke"
+                className={cn('memory-spoke', focusCategory && points[link.a]?.memory.category !== focusCategory && 'is-dim')}
                 x1={line.x1}
                 y1={line.y1}
                 x2={line.x2}
@@ -256,10 +266,12 @@ export function MemoryBrain({
             const to = placed[link.b]
             if (!from || !to) return null
             const line = shorten(from.x, from.y, to.x, to.y, 6, 6)
+            const category = points[link.a]?.memory.category
             return (
               <line
                 key={`kin-${link.a}-${link.b}`}
-                className="memory-kin"
+                className={cn('memory-kin', focusCategory && (category === focusCategory ? 'is-focus' : 'is-dim'))}
+                style={focusCategory && category === focusCategory ? { stroke: points[link.a]?.color } : undefined}
                 x1={line.x1}
                 y1={line.y1}
                 x2={line.x2}
@@ -271,6 +283,7 @@ export function MemoryBrain({
             const place = placed[index]
             if (!place) return null
             const selected = selectedId === point.memory.id
+            const dimmed = Boolean(focusCategory) && point.memory.category !== focusCategory && !selected
             const nearness = 1 - Math.hypot(place.x, place.y) / maxDistance
             const radius = 1.05 + nearness * 2.5
             const fill = colorAtDistance(point.color, nearness)
@@ -281,7 +294,7 @@ export function MemoryBrain({
                 tabIndex={0}
                 className={cn('memory-node', !point.memory.enabled && 'is-disabled', selected && 'is-selected')}
                 transform={`translate(${place.x} ${place.y})`}
-                opacity={selected ? 1 : 0.34 + nearness * 0.66}
+                opacity={selected ? 1 : dimmed ? 0.1 : 0.34 + nearness * 0.66}
                 onClick={() => onSelectMemory(point.memory.id)}
                 onKeyDown={(event) => {
                   if (event.key !== 'Enter' && event.key !== ' ') return
@@ -293,6 +306,7 @@ export function MemoryBrain({
               >
                 <title>{point.memory.content}</title>
                 <circle className="memory-hit" r="8" />
+                {selected ? <circle className="memory-node-pulse" r={radius + 4} style={{ stroke: point.color }} /> : null}
                 {nearness > 0.55 ? <circle className="memory-node-glow" r={radius * 2.4} fill={point.color} /> : null}
                 <circle
                   className="memory-node-speck"

@@ -13,6 +13,7 @@ import {
   readCursorChatId
 } from './cli-manager-launch'
 import { normalizeManagerCliOutput } from './cli-manager-output'
+import { readManagerDisplayName } from './manager-name'
 import type { SecretaryResponseFormat } from './response-schema'
 
 const TURN_TIMEOUT_MS = 90_000
@@ -30,6 +31,7 @@ export type ManagerCliProcess = (input: {
   cwd: string
   env: Record<string, string>
   timeoutMs: number
+  stdin?: string
 }) => Promise<ManagerCliProcessResult>
 
 function workspaceFor(kind: CliUsageKind, accountId: string): string {
@@ -58,30 +60,41 @@ export function runManagerCliProcess(input: {
   cwd: string
   env: Record<string, string>
   timeoutMs: number
+  stdin?: string
 }): Promise<ManagerCliProcessResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(input.command, input.args, {
       cwd: input.cwd,
       env: input.env,
       shell: false,
-      stdio: ['ignore', 'pipe', 'pipe']
+      windowsHide: true,
+      stdio: [input.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe']
     })
+    if (input.stdin !== undefined && child.stdin) {
+      child.stdin.on('error', () => undefined)
+      child.stdin.end(input.stdin)
+    }
     let stdout = ''
     let stderr = ''
     const timer = setTimeout(() => {
       child.kill('SIGTERM')
       reject(new Error('The Manager CLI did not answer in time.'))
     }, input.timeoutMs)
-    child.stdout.setEncoding('utf8')
-    child.stderr.setEncoding('utf8')
-    child.stdout.on('data', (chunk: string) => {
+    child.stdout?.setEncoding('utf8')
+    child.stderr?.setEncoding('utf8')
+    child.stdout?.on('data', (chunk: string) => {
       if (stdout.length < 1_000_000) stdout += chunk
     })
-    child.stderr.on('data', (chunk: string) => {
+    child.stderr?.on('data', (chunk: string) => {
       if (stderr.length < 200_000) stderr += chunk
     })
     child.on('error', (cause) => {
       clearTimeout(timer)
+      const code = cause && typeof cause === 'object' && 'code' in cause ? cause.code : undefined
+      if (code === 'ENAMETOOLONG') {
+        reject(new Error('The Manager CLI could not start because the command was too long for this system.'))
+        return
+      }
       reject(cause)
     })
     child.on('close', (code) => {
@@ -97,7 +110,7 @@ function promptFor(input: ManagerModelMessage[], format: SecretaryResponseFormat
     return `${message.role}:\n${text}`
   }).join('\n\n')
   return [
-    'You are Bikorch Manager. Think, chat, and plan only.',
+    `You are ${readManagerDisplayName()}. Think, chat, and plan only.`,
     'Do not edit files, run commands, or change the workspace. Coding work is dispatched later, after the user approves.',
     'Reply with one JSON object and no markdown. It must match this schema:',
     JSON.stringify(format.schema),
@@ -193,6 +206,7 @@ export function createManagerCliRunner(processRun: ManagerCliProcess = runManage
         args: command.args,
         cwd: ready.workspace,
         env: ready.env,
+        stdin: command.stdin,
         timeoutMs: TURN_TIMEOUT_MS
       })
       if (result.code !== 0 && !result.stdout.trim()) throw new Error(failureMessage(result))

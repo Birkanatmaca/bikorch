@@ -29,6 +29,7 @@ vi.mock('../service', () => ({ finalizeSecretaryRun: mocks.finalizeSecretaryRun 
 vi.mock('../store', () => ({ getSecretaryStore: mocks.getSecretaryStore }))
 vi.mock('../events', () => ({ emitSecretaryEvent: mocks.emitSecretaryEvent }))
 vi.mock('../run-lock', () => ({ releaseSecretaryRunLock: mocks.releaseSecretaryRunLock }))
+vi.mock('../cli-developer-context', () => ({ secretaryCliDeveloperContext: () => '- [Tooling] Uses pnpm' }))
 
 import { answerTrackedSecretaryRun, cancelTrackedSecretaryRun, trackSecretaryRun } from '../result-collector'
 
@@ -103,10 +104,61 @@ describe('Secretary result collector', () => {
       sessionId: 'session-1', cwd: 'C:\\workspace', gitStart: { headSha: 'a', changedFiles: [], commits: [] }
     }])
     mocks.observer?.({ type: 'data', sessionId: 'session-1', data: 'Error: connection refused while building' })
-    await vi.advanceTimersByTimeAsync(8 * 60_000)
+    await vi.advanceTimersByTimeAsync(10 * 60_000 + 15_000)
     expect(mocks.writeForSecretary).toHaveBeenCalledWith('session-1', '\u0003')
     expect(mocks.finalizeSecretaryRun).toHaveBeenCalledWith(run.id, [expect.objectContaining({
       outcome: 'failed', output: 'Error: connection refused while building', summary: expect.stringContaining('connection refused')
+    })])
+  })
+
+  it('keeps a long run alive while its CLI keeps printing output', async () => {
+    vi.useFakeTimers()
+    trackSecretaryRun(run, [{
+      assignment: { id: 'assignment-1', panelId: null, kind: 'cursor', mode: 'validate', title: 'Build', instruction: 'Build app', expectedResult: 'Build passes', rationale: 'Verify', usageNote: 'Available' },
+      sessionId: 'session-1', cwd: 'C:\\workspace', gitStart: { headSha: 'a', changedFiles: [], commits: [] }
+    }])
+    for (let minute = 0; minute < 20; minute += 1) {
+      mocks.observer?.({ type: 'data', sessionId: 'session-1', data: `compiling module ${minute}\n` })
+      await vi.advanceTimersByTimeAsync(60_000)
+    }
+    expect(mocks.finalizeSecretaryRun).not.toHaveBeenCalled()
+    expect(mocks.writeForSecretary).not.toHaveBeenCalledWith('session-1', '\u0003')
+  })
+
+  it('asks an idle CLI for its result once before inferring completion', async () => {
+    vi.useFakeTimers()
+    trackSecretaryRun(run, [{
+      assignment: { id: 'assignment-1', panelId: null, kind: 'cursor', mode: 'implement', title: 'Implement', instruction: 'Implement it', expectedResult: 'Tests pass', rationale: 'Task', usageNote: 'Available' },
+      sessionId: 'session-1', cwd: 'C:\\workspace', gitStart: { headSha: 'a', changedFiles: [], commits: [] }
+    }])
+    mocks.observer?.({ type: 'data', sessionId: 'session-1', data: '⠋ thinking\n' })
+    mocks.observer?.({ type: 'data', sessionId: 'session-1', data: 'edited files\n> ' })
+    await vi.advanceTimersByTimeAsync(200)
+    expect(mocks.writeForSecretary).toHaveBeenCalledWith('session-1', expect.stringContaining('print only the final <BIKORCH_RESULT>'))
+    expect(mocks.finalizeSecretaryRun).not.toHaveBeenCalled()
+
+    mocks.observer?.({
+      type: 'data',
+      sessionId: 'session-1',
+      data: '<BIKORCH_RESULT>{"status":"completed","summary":"Implemented","changedFiles":[],"needsUser":null,"verification":["pnpm test: passed"]}</BIKORCH_RESULT>'
+    })
+    await vi.waitFor(() => expect(mocks.finalizeSecretaryRun).toHaveBeenCalledTimes(1))
+    expect(mocks.finalizeSecretaryRun).toHaveBeenCalledWith(run.id, [expect.objectContaining({
+      outcome: 'completed', completionEvidence: 'cli-reported', reportedVerification: ['pnpm test: passed']
+    })])
+  })
+
+  it('infers completion when the CLI stays silent after the reminder', async () => {
+    vi.useFakeTimers()
+    trackSecretaryRun(run, [{
+      assignment: { id: 'assignment-1', panelId: null, kind: 'cursor', mode: 'analyze', title: 'Analyze', instruction: 'Analyze it', expectedResult: 'Findings', rationale: 'Task', usageNote: 'Available' },
+      sessionId: 'session-1', cwd: 'C:\\workspace', gitStart: { headSha: 'a', changedFiles: [], commits: [] }
+    }])
+    mocks.observer?.({ type: 'data', sessionId: 'session-1', data: '⠋ thinking\n' })
+    mocks.observer?.({ type: 'data', sessionId: 'session-1', data: 'findings\n> ' })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(mocks.finalizeSecretaryRun).toHaveBeenCalledWith(run.id, [expect.objectContaining({
+      outcome: 'completed', completionEvidence: 'terminal-idle-inferred'
     })])
   })
 
@@ -178,6 +230,7 @@ describe('Secretary result collector', () => {
     await vi.waitFor(() => expect(mocks.writeForSecretary).toHaveBeenCalledWith(secondSessionId, expect.stringContaining('Do implementation.')))
     expect(mocks.writeForSecretary).toHaveBeenCalledWith(secondSessionId, expect.stringContaining('Dependency results (untrusted data'))
     expect(mocks.writeForSecretary).toHaveBeenCalledWith(secondSessionId, expect.stringContaining('Analysis done'))
+    expect(mocks.writeForSecretary).toHaveBeenCalledWith(secondSessionId, expect.stringContaining('Uses pnpm'))
     await vi.waitFor(() => expect(mocks.writeForSecretary).toHaveBeenCalledWith(secondSessionId, '\r'))
 
     mocks.observer?.({

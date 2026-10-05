@@ -1,9 +1,18 @@
-import { useContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Camera, Loader2, RefreshCw, Search, Smartphone, Square, Video, X } from 'lucide-react'
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { Camera, Check, ChevronDown, Loader2, RefreshCw, Search, Smartphone, Square, Video, X } from 'lucide-react'
 import {
   LOCAL_BROWSER_PRESETS,
   resolveBrowserNavigation
 } from '@shared/contracts/browser'
+import {
+  mobileDeviceAspect,
+  mobileDeviceGeometry,
+  mobileModelsFor,
+  resolveMobileModel,
+  type MobileDeviceGeometry,
+  type MobileDeviceModel,
+  type MobilePlatform
+} from '@shared/mobile-devices'
 import { useBrowserStore } from '@renderer/stores/browser-store'
 import { Button } from '@renderer/components/ui/Button'
 import { cn } from '@renderer/lib/utils'
@@ -16,34 +25,11 @@ type GuestWebview = HTMLElement & {
   capturePage?: () => Promise<{ toDataURL: () => string }>
 }
 
-interface DeviceSpec {
-  id: 'ios' | 'android'
-  name: string
-  subtitle: string
-  viewport: string
-  zoom: number
-}
-
-type DeviceCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
-
-const DEVICES: readonly DeviceSpec[] = [
-  {
-    id: 'ios',
-    name: 'iPhone 15 Pro',
-    subtitle: 'iOS · 393 × 852',
-    viewport: '393 × 852',
-    zoom: 0.6
-  },
-  {
-    id: 'android',
-    name: 'Pixel 8',
-    subtitle: 'Android · 412 × 915',
-    viewport: '412 × 915',
-    zoom: 0.568
-  }
-]
-
-const CAPTURE_SCALE = 2
+const CAPTURE_SCALE = 1.5
+/** Side buttons stick out of the frame; keep room so they are not clipped. */
+const BUTTON_ROOM = 4
+/** Size of a device in the two-device panel before the user resizes it. */
+const PANEL_DEVICE_HEIGHT = 560
 
 function roundedRect(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number): void {
   const r = Math.min(radius, width / 2, height / 2)
@@ -65,56 +51,82 @@ function imageFromDataUrl(dataUrl: string): Promise<HTMLImageElement> {
   })
 }
 
-async function renderFramedDevice(guest: GuestWebview, device: DeviceSpec): Promise<HTMLCanvasElement> {
+function drawCutout(context: CanvasRenderingContext2D, model: MobileDeviceModel, geometry: MobileDeviceGeometry): void {
+  const { cutout } = geometry
+  context.fillStyle = '#030405'
+  if (model.cutout === 'notch') {
+    const { x, y, w, h, r } = cutout
+    context.beginPath()
+    context.moveTo(x - 6, y)
+    context.quadraticCurveTo(x, y, x, y + 6)
+    context.lineTo(x, y + h - r)
+    context.quadraticCurveTo(x, y + h, x + r, y + h)
+    context.lineTo(x + w - r, y + h)
+    context.quadraticCurveTo(x + w, y + h, x + w, y + h - r)
+    context.lineTo(x + w, y + 6)
+    context.quadraticCurveTo(x + w, y, x + w + 6, y)
+    context.closePath()
+    context.fill()
+    return
+  }
+  if (model.cutout === 'home-button') {
+    roundedRect(context, cutout.x, cutout.y, cutout.w, cutout.h, cutout.r)
+    context.fill()
+    if (geometry.homeButton) {
+      const { cx, cy, r } = geometry.homeButton
+      context.beginPath()
+      context.arc(cx, cy, r, 0, Math.PI * 2)
+      context.strokeStyle = 'rgba(0,0,0,0.22)'
+      context.lineWidth = 2.5
+      context.stroke()
+    }
+    return
+  }
+  roundedRect(context, cutout.x, cutout.y, cutout.w, cutout.h, cutout.r)
+  context.fill()
+}
+
+async function renderFramedDevice(guest: GuestWebview, model: MobileDeviceModel): Promise<HTMLCanvasElement> {
   if (!guest.capturePage) throw new Error('Screen capture is not available yet')
   const nativeImage = await guest.capturePage()
-  const screen = await imageFromDataUrl(nativeImage.toDataURL())
-  const android = device.id === 'android'
-  const width = android ? 258 : 262
-  const height = android ? 544 : 537
+  const screenImage = await imageFromDataUrl(nativeImage.toDataURL())
+  const geometry = mobileDeviceGeometry(model)
+  const { frame, screen } = geometry
   const canvas = document.createElement('canvas')
-  canvas.width = width * CAPTURE_SCALE
-  canvas.height = height * CAPTURE_SCALE
+  canvas.width = Math.round(frame.w * CAPTURE_SCALE)
+  canvas.height = Math.round(frame.h * CAPTURE_SCALE)
   const context = canvas.getContext('2d')
   if (!context) throw new Error('Could not create recording canvas')
   context.scale(CAPTURE_SCALE, CAPTURE_SCALE)
 
-  const inset = android ? 12 : 13
-  const screenRadius = android ? 22 : 29
-  const frameRadius = android ? 31 : 39
-  roundedRect(context, 1, 1, width - 2, height - 2, frameRadius)
-  const shell = context.createLinearGradient(0, 0, width, height)
-  shell.addColorStop(0, android ? '#333841' : '#30343d')
-  shell.addColorStop(0.52, '#090b0f')
-  shell.addColorStop(1, android ? '#292e36' : '#393e48')
+  roundedRect(context, 1, 1, frame.w - 2, frame.h - 2, frame.r)
+  const shell = context.createLinearGradient(0, 0, frame.w, frame.h)
+  shell.addColorStop(0, model.finish.shine)
+  shell.addColorStop(0.08, model.finish.edge)
+  shell.addColorStop(0.5, model.finish.body)
+  shell.addColorStop(0.92, model.finish.edge)
+  shell.addColorStop(1, model.finish.shine)
   context.fillStyle = shell
   context.fill()
-  context.strokeStyle = 'rgba(255,255,255,0.22)'
-  context.lineWidth = 2
-  context.stroke()
+  roundedRect(context, 4, 4, frame.w - 8, frame.h - 8, Math.max(0, frame.r - 3))
+  context.fillStyle = model.cutout === 'home-button' ? model.finish.body : '#050608'
+  context.fill()
 
-  const screenX = inset
-  const screenY = inset
-  const screenWidth = width - inset * 2
-  const screenHeight = height - inset * 2
   context.save()
-  roundedRect(context, screenX, screenY, screenWidth, screenHeight, screenRadius)
+  roundedRect(context, screen.x, screen.y, screen.w, screen.h, screen.r)
   context.clip()
-  context.drawImage(screen, screenX, screenY, screenWidth, screenHeight)
+  context.fillStyle = '#ffffff'
+  context.fillRect(screen.x, screen.y, screen.w, screen.h)
+  context.drawImage(screenImage, screen.x, screen.y, screen.w, screen.h)
   context.restore()
 
-  context.fillStyle = '#050608'
-  if (android) {
-    context.beginPath()
-    context.arc(width / 2, 22, 5, 0, Math.PI * 2)
-    context.fill()
-  } else {
-    roundedRect(context, width / 2 - 37, 17, 74, 20, 10)
+  drawCutout(context, model, geometry)
+  if (geometry.indicator) {
+    const { x, y, w, h, r } = geometry.indicator
+    context.fillStyle = 'rgba(20,20,22,0.85)'
+    roundedRect(context, x, y, w, h, r)
     context.fill()
   }
-  context.fillStyle = 'rgba(255,255,255,0.9)'
-  roundedRect(context, width / 2 - (android ? 21 : 41), height - 19, android ? 42 : 82, 4, 2)
-  context.fill()
   return canvas
 }
 
@@ -129,50 +141,173 @@ function downloadBlob(blob: Blob, fileName: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 1_000)
 }
 
-function captureFileName(device: DeviceSpec, extension: 'png' | 'webm'): string {
+function captureFileName(model: MobileDeviceModel, extension: 'png' | 'webm'): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)
-  return `bikorch-${device.id}-preview-${stamp}.${extension}`
+  return `bikorch-${model.id}-${stamp}.${extension}`
+}
+
+function viewportLabel(model: MobileDeviceModel): string {
+  return `${model.viewport.w} × ${model.viewport.h} · @${model.dpr}x`
+}
+
+function ModelPicker({
+  platform,
+  model,
+  onChange,
+  compact = false
+}: {
+  platform: MobilePlatform
+  model: MobileDeviceModel
+  onChange: (id: string) => void
+  compact?: boolean
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onPointer = (event: PointerEvent): void => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('pointerdown', onPointer)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('pointerdown', onPointer)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div ref={rootRef} className={cn('device-model-picker', compact && 'is-compact')}>
+      <button
+        type="button"
+        className="device-model-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        title="Choose device model"
+      >
+        <Smartphone className="h-3.5 w-3.5" aria-hidden />
+        <span>
+          <strong>{model.name}</strong>
+          {!compact ? <small>{viewportLabel(model)}</small> : null}
+        </span>
+        <ChevronDown className="h-3 w-3" aria-hidden />
+      </button>
+      {open ? (
+        <ul className="device-model-menu" role="listbox" aria-label={`${platform === 'ios' ? 'iOS' : 'Android'} models`}>
+          {mobileModelsFor(platform).map((item) => {
+            const aspect = mobileDeviceAspect(item)
+            return (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={item.id === model.id}
+                  className={cn(item.id === model.id && 'is-selected')}
+                  onClick={() => {
+                    onChange(item.id)
+                    setOpen(false)
+                  }}
+                >
+                  <i
+                    className={cn('device-model-glyph', `is-${item.cutout}`)}
+                    style={{ width: `${Math.round(22 * aspect)}px` }}
+                    aria-hidden
+                  />
+                  <span>
+                    <strong>{item.name}</strong>
+                    <small>{viewportLabel(item)}</small>
+                  </span>
+                  {item.id === model.id ? <Check className="h-3.5 w-3.5" aria-hidden /> : null}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      ) : null}
+    </div>
+  )
+}
+
+function px(value: number, scale: number): string {
+  return `${value * scale}px`
 }
 
 function MobileDevice({
-  device,
+  model,
   url,
   reloadVersion,
   canvas = false,
-  empty
+  empty,
+  onModelChange,
+  onAspectChange
 }: {
-  device: DeviceSpec
+  model: MobileDeviceModel
   url: string
   reloadVersion: number
   canvas?: boolean
   empty?: ReactNode
+  onModelChange: (id: string) => void
+  onAspectChange?: (aspect: number) => void
 }): React.JSX.Element {
+  const boxRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const guestRef = useRef<GuestWebview | null>(null)
+  const aspectRef = useRef(onAspectChange)
+  const [box, setBox] = useState({ w: 0, h: 0 })
   const [loading, setLoading] = useState(false)
   const [failed, setFailed] = useState(false)
   const [capturing, setCapturing] = useState(false)
   const [recording, setRecording] = useState(false)
-  const [scale, setScale] = useState(1)
-  const recordingRef = useRef<{
-    recorder: MediaRecorder
-    interval: number
-  } | null>(null)
+  const [panelScale, setPanelScale] = useState(1)
+  const recordingRef = useRef<{ recorder: MediaRecorder; interval: number } | null>(null)
   const resizeCleanupRef = useRef<(() => void) | null>(null)
+  const geometry = mobileDeviceGeometry(model)
+  const { frame, screen } = geometry
+  const aspect = frame.w / frame.h
 
-  const beginResize = (event: React.PointerEvent<HTMLButtonElement>, corner: DeviceCorner): void => {
+  aspectRef.current = onAspectChange
+
+  useLayoutEffect(() => {
+    const element = boxRef.current
+    if (!element) return
+    const measure = (): void => {
+      const rect = element.getBoundingClientRect()
+      setBox((current) => (current.w === rect.width && current.h === rect.height ? current : { w: rect.width, h: rect.height }))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (!canvas || box.w <= 0 || box.h <= 0) return
+    if (Math.abs(box.w / box.h - aspect) / aspect > 0.015) aspectRef.current?.(aspect)
+  }, [aspect, box.h, box.w, canvas])
+
+  const buttonRoom = canvas ? 0 : BUTTON_ROOM * 2
+  const scale = box.w > 0 && box.h > 0
+    ? Math.max(0.05, Math.min((box.w - buttonRoom) / frame.w, box.h / frame.h))
+    : 0
+  /** The screen host only exists once the box is measured; the guest must wait for it. */
+  const measured = scale > 0
+
+  const beginPanelResize = (event: React.PointerEvent<HTMLButtonElement>, xDirection: 1 | -1): void => {
     event.preventDefault()
     event.stopPropagation()
-    const startX = event.clientX
     const startY = event.clientY
-    const startScale = scale
-    const xDirection = corner.endsWith('right') ? 1 : -1
-    const yDirection = corner.startsWith('bottom') ? 1 : -1
+    const startX = event.clientX
+    const startScale = panelScale
     const onMove = (moveEvent: PointerEvent): void => {
-      const horizontal = (moveEvent.clientX - startX) * xDirection
-      const vertical = (moveEvent.clientY - startY) * yDirection
-      const delta = (horizontal + vertical) / 2
-      setScale(Math.min(1.65, Math.max(0.55, startScale + delta / 274)))
+      const vertical = moveEvent.clientY - startY
+      const horizontal = ((moveEvent.clientX - startX) * xDirection) / aspect
+      const delta = (vertical + horizontal) / 2
+      setPanelScale(Math.min(1.8, Math.max(0.5, startScale + delta / PANEL_DEVICE_HEIGHT)))
     }
     const onEnd = (): void => {
       window.removeEventListener('pointermove', onMove)
@@ -194,6 +329,7 @@ function MobileDevice({
     const guest = document.createElement('webview') as GuestWebview
     guest.setAttribute('partition', 'persist:workspace-browser')
     guest.setAttribute('allowpopups', '')
+    guest.setAttribute('useragent', model.userAgent)
     guest.setAttribute('webpreferences', 'contextIsolation=yes, nodeIntegration=no, sandbox=yes')
     guest.className = 'mobile-preview-guest'
     guest.setAttribute('src', url)
@@ -206,12 +342,16 @@ function MobileDevice({
     const onStop = (): void => setLoading(false)
     const onReady = (): void => {
       try {
-        guest.setZoomFactor?.(device.zoom)
+        // The guest is laid out at the exact CSS viewport and scaled visually, so it must not zoom.
+        guest.setZoomFactor?.(1)
       } catch {
-        // The page can still render at its visible device size if zoom is unavailable.
+        // Older guests ignore zoom; layout already uses the device viewport.
       }
     }
-    const onFail = (): void => {
+    const onFail = (event: Event): void => {
+      const detail = event as Event & { isMainFrame?: boolean; errorCode?: number }
+      // -3 is an aborted load, which redirects and fast reloads produce.
+      if (detail.isMainFrame === false || detail.errorCode === -3) return
       setLoading(false)
       setFailed(true)
     }
@@ -235,7 +375,7 @@ function MobileDevice({
       guest.remove()
       if (guestRef.current === guest) guestRef.current = null
     }
-  }, [device.zoom, url])
+  }, [measured, model.userAgent, url])
 
   useEffect(() => {
     if (reloadVersion > 0) guestRef.current?.reload?.()
@@ -255,10 +395,10 @@ function MobileDevice({
     if (!guest || capturing) return
     setCapturing(true)
     try {
-      const canvas = await renderFramedDevice(guest, device)
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+      const output = await renderFramedDevice(guest, model)
+      const blob = await new Promise<Blob | null>((resolve) => output.toBlob(resolve, 'image/png'))
       if (!blob) throw new Error('Could not encode screenshot')
-      downloadBlob(blob, captureFileName(device, 'png'))
+      downloadBlob(blob, captureFileName(model, 'png'))
     } catch {
       setFailed(true)
     } finally {
@@ -279,8 +419,8 @@ function MobileDevice({
     const guest = guestRef.current
     if (!guest || recording) return
     try {
-      const canvas = await renderFramedDevice(guest, device)
-      const stream = canvas.captureStream(8)
+      const output = await renderFramedDevice(guest, model)
+      const stream = output.captureStream(8)
       const chunks: BlobPart[] = []
       const recorder = new MediaRecorder(stream, MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
         ? { mimeType: 'video/webm;codecs=vp9' }
@@ -290,14 +430,14 @@ function MobileDevice({
       }
       recorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop())
-        if (chunks.length > 0) downloadBlob(new Blob(chunks, { type: recorder.mimeType || 'video/webm' }), captureFileName(device, 'webm'))
+        if (chunks.length > 0) downloadBlob(new Blob(chunks, { type: recorder.mimeType || 'video/webm' }), captureFileName(model, 'webm'))
       }
       const paint = async (): Promise<void> => {
         if (!recordingRef.current) return
         try {
-          const next = await renderFramedDevice(guest, device)
-          const context = canvas.getContext('2d')
-          context?.clearRect(0, 0, canvas.width, canvas.height)
+          const next = await renderFramedDevice(guest, model)
+          const context = output.getContext('2d')
+          context?.clearRect(0, 0, output.width, output.height)
           context?.drawImage(next, 0, 0)
         } catch {
           stopRecording()
@@ -311,72 +451,142 @@ function MobileDevice({
     }
   }
 
+  const captureActions = (
+    <>
+      {loading || capturing ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-label="Loading" /> : null}
+      <button type="button" onClick={() => void takeScreenshot()} disabled={!url || capturing || recording} title="Save framed screenshot" aria-label={`Save ${model.name} screenshot`}>
+        <Camera className="h-3.5 w-3.5" />
+      </button>
+      <button type="button" onClick={() => (recording ? stopRecording() : void startRecording())} disabled={!url || capturing} title={recording ? 'Stop recording' : 'Record framed video'} aria-label={recording ? `Stop ${model.name} recording` : `Record ${model.name} video`} className={cn(recording && 'is-recording')}>
+        {recording ? <Square className="h-3 w-3" /> : <Video className="h-3.5 w-3.5" />}
+      </button>
+    </>
+  )
+
+  const panelHeight = PANEL_DEVICE_HEIGHT * panelScale
+  const homeButton = geometry.homeButton
+
   return (
     <section
-      className={cn('mobile-device', `mobile-device-${device.id}`, canvas && 'is-canvas-device')}
-      style={canvas ? undefined : ({ '--mobile-device-scale': scale } as React.CSSProperties)}
-      aria-label={`${device.name} preview`}
+      className={cn('mobile-device', `mobile-device-${model.platform}`, canvas && 'is-canvas-device')}
+      aria-label={`${model.name} preview`}
     >
-      <div className="mobile-device-content">
-        {!canvas ? (
-          <div className="mobile-device-meta">
-            <div>
-              <strong>{device.name}</strong>
-              <span>{device.subtitle}</span>
+      {!canvas ? (
+        <div className="mobile-device-meta">
+          <ModelPicker platform={model.platform} model={model} onChange={onModelChange} />
+          <div className="mobile-device-actions">{captureActions}</div>
+        </div>
+      ) : null}
+      <div
+        ref={boxRef}
+        className="mobile-device-box"
+        style={canvas ? undefined : { width: `${panelHeight * aspect + BUTTON_ROOM * 2}px`, height: `${panelHeight}px` }}
+      >
+        {scale > 0 ? (
+          <div
+            className={cn('device-frame', `is-${model.cutout}`)}
+            style={{
+              width: px(frame.w, scale),
+              height: px(frame.h, scale),
+              borderRadius: px(frame.r, scale),
+              '--device-edge': model.finish.edge,
+              '--device-body': model.finish.body,
+              '--device-shine': model.finish.shine
+            } as React.CSSProperties}
+          >
+            {geometry.buttons.map((button, index) => (
+              <span
+                key={index}
+                className={cn('device-side-button', `is-${button.side}`)}
+                style={{ top: px(button.y, scale), height: px(button.h, scale) }}
+                aria-hidden
+              />
+            ))}
+            <div className="device-bezel" style={{ borderRadius: px(Math.max(0, frame.r - 3), scale) }} />
+            <div
+              className="mobile-device-screen"
+              style={{
+                left: px(screen.x, scale),
+                top: px(screen.y, scale),
+                width: px(screen.w, scale),
+                height: px(screen.h, scale),
+                borderRadius: px(screen.r, scale)
+              }}
+            >
+              <div
+                ref={hostRef}
+                className="mobile-device-viewport-host"
+                style={{ width: `${screen.w}px`, height: `${screen.h}px`, transform: `scale(${scale})` }}
+              />
+              {empty ? <div className="mobile-device-empty">{empty}</div> : null}
             </div>
-            <div className="mobile-device-actions">
-              {loading || capturing ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-label="Loading" /> : null}
-              <button type="button" onClick={() => void takeScreenshot()} disabled={!url || capturing || recording} title="Save framed screenshot" aria-label={`Save ${device.name} screenshot`}>
-                <Camera className="h-3.5 w-3.5" />
-              </button>
-              <button type="button" onClick={() => (recording ? stopRecording() : void startRecording())} disabled={!url || capturing} title={recording ? 'Stop recording' : 'Record framed video'} aria-label={recording ? `Stop ${device.name} recording` : `Record ${device.name} video`} className={cn(recording && 'is-recording')}>
-                {recording ? <Square className="h-3 w-3" /> : <Video className="h-3.5 w-3.5" />}
-              </button>
-            </div>
+            <span
+              className={cn('device-cutout', `is-${model.cutout}`)}
+              style={{
+                left: px(geometry.cutout.x, scale),
+                top: px(geometry.cutout.y, scale),
+                width: px(geometry.cutout.w, scale),
+                height: px(geometry.cutout.h, scale),
+                borderRadius: model.cutout === 'notch'
+                  ? `0 0 ${px(geometry.cutout.r, scale)} ${px(geometry.cutout.r, scale)}`
+                  : px(geometry.cutout.r, scale)
+              }}
+              aria-hidden
+            />
+            {homeButton ? (
+              <span
+                className="device-home-button"
+                style={{
+                  left: px(homeButton.cx - homeButton.r, scale),
+                  top: px(homeButton.cy - homeButton.r, scale),
+                  width: px(homeButton.r * 2, scale),
+                  height: px(homeButton.r * 2, scale)
+                }}
+                aria-hidden
+              />
+            ) : null}
+            {geometry.indicator ? (
+              <span
+                className="device-home-indicator"
+                style={{
+                  left: px(geometry.indicator.x, scale),
+                  top: px(geometry.indicator.y, scale),
+                  width: px(geometry.indicator.w, scale),
+                  height: px(Math.max(geometry.indicator.h, 3 / scale), scale)
+                }}
+                aria-hidden
+              />
+            ) : null}
+            {failed ? <span className="mobile-device-failed">Could not load</span> : null}
+            {canvas ? (
+              <div className="mobile-device-actions is-overlay">{captureActions}</div>
+            ) : null}
           </div>
         ) : null}
-        <div className="mobile-device-frame">
-          {device.id === 'ios' ? <span className="mobile-ios-island" aria-hidden /> : <span className="mobile-android-camera" aria-hidden />}
-          <div ref={hostRef} className="mobile-device-screen">
-            {empty}
-          </div>
-          <span className="mobile-device-home" aria-hidden />
-          {failed ? <span className="mobile-device-failed">Could not load</span> : null}
-          {canvas ? (
-            <div className="mobile-device-actions is-overlay">
-              {loading || capturing ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-label="Loading" /> : null}
-              <button type="button" onClick={() => void takeScreenshot()} disabled={!url || capturing || recording} title="Save framed screenshot" aria-label={`Save ${device.name} screenshot`}>
-                <Camera className="h-3.5 w-3.5" />
-              </button>
-              <button type="button" onClick={() => (recording ? stopRecording() : void startRecording())} disabled={!url || capturing} title={recording ? 'Stop recording' : 'Record framed video'} aria-label={recording ? `Stop ${device.name} recording` : `Record ${device.name} video`} className={cn(recording && 'is-recording')}>
-                {recording ? <Square className="h-3 w-3" /> : <Video className="h-3.5 w-3.5" />}
-              </button>
-            </div>
-          ) : null}
-        </div>
-        {!canvas ? <span className="mobile-device-viewport">CSS viewport {device.viewport}</span> : null}
+        {!canvas
+          ? ([-1, 1] as const).map((direction) => (
+              <button
+                key={direction}
+                type="button"
+                className={cn('mobile-device-resize-handle', direction === 1 ? 'is-bottom-right' : 'is-bottom-left')}
+                onPointerDown={(event) => beginPanelResize(event, direction)}
+                aria-label={`Resize ${model.name}`}
+                title="Drag to resize. The device keeps its real proportions."
+              />
+            ))
+          : null}
       </div>
-      {canvas
-        ? null
-        : (['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const).map((corner) => (
-            <button
-              key={corner}
-              type="button"
-              className={cn('mobile-device-resize-handle', `is-${corner}`)}
-              onPointerDown={(event) => beginResize(event, corner)}
-              aria-label={`Resize ${device.name} from ${corner.replace('-', ' ')}`}
-              title="Resize proportionally"
-            />
-          ))}
+      {!canvas ? <span className="mobile-device-viewport">CSS viewport {viewportLabel(model)}</span> : null}
     </section>
   )
 }
 
-export function MobilePreviewPanel({ panelId, deviceId }: { panelId: string; deviceId?: DeviceSpec['id'] }): React.JSX.Element {
+export function MobilePreviewPanel({ panelId, deviceId }: { panelId: string; deviceId?: MobilePlatform }): React.JSX.Element {
   const canvas = useContext(CanvasDeviceInteractionContext)
   const panel = useBrowserStore((state) => state.panels[panelId])
   const ensure = useBrowserStore((state) => state.ensure)
   const rememberUrl = useBrowserStore((state) => state.rememberUrl)
+  const setDeviceModel = useBrowserStore((state) => state.setDeviceModel)
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [reloadVersion, setReloadVersion] = useState(0)
@@ -401,16 +611,21 @@ export function MobilePreviewPanel({ panelId, deviceId }: { panelId: string; dev
   }
 
   const url = panel?.url ?? ''
-
-  const devices = deviceId ? DEVICES.filter((device) => device.id === deviceId) : DEVICES
+  const platforms: MobilePlatform[] = deviceId ? [deviceId] : ['ios', 'android']
+  const models = platforms.map((platform) => resolveMobileModel(platform, panel?.deviceModels?.[platform]))
   const direct = Boolean(deviceId)
   const canvasDevice = direct
+  const primary = models[0]
 
   const startCopy = (
     <div className={cn('mobile-preview-start', canvasDevice && 'is-on-device')}>
       <Smartphone className="h-7 w-7 text-primary" aria-hidden />
-      <h3>{direct ? `Preview your app on ${deviceId === 'ios' ? 'iOS' : 'Android'}` : 'Preview your app on two devices'}</h3>
-      <p>{direct ? 'Enter a URL to open it on this device.' : 'Both frames load the same URL with iPhone and Android viewport sizes.'}</p>
+      <h3>{direct ? `Preview on ${primary.name}` : 'Preview your app on two devices'}</h3>
+      <p>
+        {direct
+          ? `The page renders at the real ${primary.viewport.w} × ${primary.viewport.h} CSS viewport with a mobile user agent.`
+          : 'Both frames load the same URL at real iPhone and Android viewport sizes.'}
+      </p>
       <div className="browser-presets">
         {LOCAL_BROWSER_PRESETS.map((preset) => (
           <Button key={preset.url} variant="secondary" onClick={() => navigate(preset.url)}>
@@ -431,7 +646,7 @@ export function MobilePreviewPanel({ panelId, deviceId }: { panelId: string; dev
         {!canvasDevice ? (
           <div className="mobile-preview-heading">
             <Smartphone className="h-3.5 w-3.5 text-primary" aria-hidden />
-            <span>{deviceId === 'ios' ? 'iOS device' : deviceId === 'android' ? 'Android device' : 'Mobile preview'}</span>
+            <span>Mobile preview</span>
           </div>
         ) : null}
         <form
@@ -466,27 +681,44 @@ export function MobilePreviewPanel({ panelId, deviceId }: { panelId: string; dev
             <X className="h-3.5 w-3.5" />
           </button>
         ) : null}
+        {canvasDevice ? (
+          <div className="mobile-canvas-model-row">
+            <ModelPicker
+              platform={primary.platform}
+              model={primary}
+              compact
+              onChange={(id) => setDeviceModel(panelId, primary.platform, id)}
+            />
+            <span>{viewportLabel(primary)}</span>
+          </div>
+        ) : null}
       </div>
       {error ? <p className="browser-error">{error}</p> : null}
       {canvasDevice ? (
         <div className="mobile-preview-stage">
-          {devices.map((device) => (
-            <MobileDevice
-              key={device.id}
-              device={device}
-              url={url}
-              reloadVersion={reloadVersion}
-              canvas
-              empty={url ? null : startCopy}
-            />
-          ))}
+          <MobileDevice
+            key={primary.id}
+            model={primary}
+            url={url}
+            reloadVersion={reloadVersion}
+            canvas
+            empty={url ? null : startCopy}
+            onModelChange={(id) => setDeviceModel(panelId, primary.platform, id)}
+            onAspectChange={canvas?.onAspectChange}
+          />
         </div>
       ) : !url ? (
         startCopy
       ) : (
         <div className="mobile-preview-stage">
-          {devices.map((device) => (
-            <MobileDevice key={device.id} device={device} url={url} reloadVersion={reloadVersion} />
+          {models.map((model) => (
+            <MobileDevice
+              key={model.platform}
+              model={model}
+              url={url}
+              reloadVersion={reloadVersion}
+              onModelChange={(id) => setDeviceModel(panelId, model.platform, id)}
+            />
           ))}
         </div>
       )}

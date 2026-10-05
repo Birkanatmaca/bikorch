@@ -306,6 +306,22 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     status: terminalSessions[panel.id] ?? 'stopped'
   })), [panels, terminalSessions])
 
+  // Planning may only name a panel that approval can actually dispatch into.
+  // A personal or shared CLI stays visible in the sidebar, but it is not a
+  // Manager assignment target.
+  const routingPanels = useMemo(() => panels.filter((panel) => (
+    CLI_TYPES.has(panel.type as typeof AI_ACCOUNT_KINDS[number]) &&
+    panel.panelRole === 'secretary' &&
+    panel.workspaceIsolation === 'isolated' &&
+    !panel.cwdOverride
+  )).map((panel) => ({
+    id: panel.id,
+    kind: panel.type as typeof AI_ACCOUNT_KINDS[number],
+    accountId: panel.accountId,
+    title: panel.title,
+    status: terminalSessions[panel.id] ?? 'stopped'
+  })), [panels, terminalSessions])
+
   useEffect(() => {
     if (!settingsLoaded) void loadSettings()
   }, [loadSettings, settingsLoaded])
@@ -460,16 +476,19 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     }
     if (event.type === 'run-followup') {
       setSidebarOpen(true)
+      const completedStatus = event.completedStatus ?? 'completed'
       setMessages((current) => [
         ...current.map((item) => item.runId === event.completedRunId
-          ? { ...item, planStatus: 'completed' as const, awaitingAnswer: false,
-              ...(item.run ? { run: { ...item.run, status: 'completed' as const, evidence: event.completedEvidence } } : {}) }
+          ? { ...item, planStatus: completedStatus, awaitingAnswer: false,
+              ...(item.run ? { run: { ...item.run, status: completedStatus, evidence: event.completedEvidence } } : {}) }
           : item),
         { id: newId(), role: 'assistant', content: event.reply, runId: event.completedRunId, report: event.completedEvidence },
         {
           id: newId(),
           role: 'assistant',
-          content: 'A follow-up plan is ready for review.',
+          content: completedStatus === 'failed'
+            ? 'A repair plan is ready for review.'
+            : 'A follow-up plan is ready for review.',
           plan: event.plan,
           followUp: true,
           runId: event.runId,
@@ -583,7 +602,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
         return score
       }
       const candidates = livePanels.filter(usable).filter((panel) => (
-        !preferFreshSession || sessionStatus(panel.id) === 'waiting'
+        panel.id === preferredPanelId || !preferFreshSession || sessionStatus(panel.id) === 'waiting'
       ))
       const existing = (candidates.some(healthy) ? candidates.filter(healthy) : candidates)
         .sort((left, right) => rank(right) - rank(left) || left.id.localeCompare(right.id))[0]
@@ -862,7 +881,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           title: assignment.title,
           instruction: assignment.instruction
         })),
-        panels: cliPanels,
+        panels: routingPanels,
         usage
       })
       setMessages((current) => current.map((item) => (
@@ -899,11 +918,16 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     if (!persistedRunId || sending || cancellingRunId) return
     setCancellingRunId(persistedRunId)
     try {
-      await window.api.secretary.cancelRun({ runId: persistedRunId, projectId: project.id })
+      const cancelled = await window.api.secretary.cancelRun({ runId: persistedRunId, projectId: project.id })
+      const workspace = useWorkspaceStore.getState()
+      for (const binding of cancelled.sessionBindings) {
+        const panel = workspace.getActiveWorkspace()?.panels.find((item) => item.id === binding.sessionId)
+        if (panel?.panelRole === 'secretary') workspace.removePanel(binding.sessionId)
+      }
       setMessages((current) => current.map((item) => (
         item.id === messageId ? { ...item, planStatus: 'cancelled' as const } : item
       )))
-      setFeedback('Manager run cancelled. The CLI was interrupted if it was still active.')
+      setFeedback('Stopped. The manager closed the CLIs it opened.')
       window.setTimeout(() => setFeedback(null), 4200)
     } catch (cause) {
       setMessages((current) => [
@@ -1041,7 +1065,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
         message: text,
         history,
         ...(threadId ? { threadId } : {}),
-        panels: cliPanels,
+        panels: routingPanels,
         usage
       })
       if (run !== runRef.current) return
@@ -1113,7 +1137,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       const response = await window.api.secretary.chat({
         project, purpose, message: text,
         history: messages.filter((item) => !item.error).map((item) => ({ role: item.role, content: item.content })),
-        ...(threadId ? { threadId } : {}), panels: cliPanels, usage
+        ...(threadId ? { threadId } : {}), panels: routingPanels, usage
       })
       if (generation !== runRef.current) return false
       if (response.threadId) setThreadId(response.threadId)

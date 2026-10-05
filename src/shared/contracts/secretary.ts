@@ -166,6 +166,8 @@ export function defaultManagerProviderView(model = 'gpt-5'): ManagerProviderView
 
 export interface SecretarySettings {
   configured: boolean
+  /** Name the manager uses for itself. Editable from Manager settings. */
+  name: string
   model: string
   usage: SecretaryUsageStats
   provider: ManagerProviderView
@@ -468,6 +470,8 @@ export type SecretaryEvent =
       projectId: string
       threadId: string
       completedRunId: string
+      /** A repair follow-up can come after failed work. */
+      completedStatus?: 'completed' | 'failed'
       runId: string
       reply: string
       plan: SecretaryPlan

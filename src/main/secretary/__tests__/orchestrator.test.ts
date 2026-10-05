@@ -24,6 +24,7 @@ vi.mock('../result-collector', () => ({
 }))
 vi.mock('../../persistence/database', () => ({ loadSnapshot: mocks.loadSnapshot, flushPersistenceToDisk: mocks.flushPersistenceToDisk }))
 vi.mock('../../git/worktrees', () => ({ isRegisteredAgentWorktree: mocks.isRegisteredAgentWorktree }))
+vi.mock('../cli-developer-context', () => ({ secretaryCliDeveloperContext: () => '' }))
 
 import { dispatchSecretaryRun, prepareSecretaryRun } from '../orchestrator'
 
@@ -120,6 +121,111 @@ describe('Secretary orchestrator', () => {
     expect(mocks.flushPersistenceToDisk.mock.invocationCallOrder[0]).toBeLessThan(mocks.writeForSecretary.mock.invocationCallOrder[0]!)
   })
 
+  it('prepares a dedicated session when the plan named a personal CLI panel', async () => {
+    const personalPanelId = '77777777-7777-4777-8777-777777777777'
+    const run = { ...approvedRun(), status: 'awaiting-approval' as const }
+    run.plan = {
+      ...run.plan,
+      assignments: [{ ...run.plan.assignments[0], panelId: personalPanelId }] as unknown as typeof run.plan.assignments
+    }
+    mocks.getSecretaryStore.mockReturnValue({ getRun: vi.fn().mockReturnValue(run) })
+    mocks.loadSnapshot.mockReturnValue({
+      projects: [{ id: run.projectId, name: 'Secretary project', folderPath: projectPath }],
+      workspaces: {
+        [run.projectId]: {
+          panels: [
+            {
+              id: personalPanelId,
+              type: 'cursor',
+              title: 'Personal Cursor',
+              zone: 'center',
+              panelRole: 'agent',
+              workspaceIsolation: 'isolated'
+            },
+            {
+              id: sessionId,
+              type: 'cursor',
+              title: 'Manager Cursor',
+              zone: 'center',
+              panelRole: 'secretary',
+              workspaceIsolation: 'isolated',
+              worktreePath
+            }
+          ]
+        }
+      }
+    })
+    mocks.getSessionSnapshot.mockReturnValue({
+      sessionId,
+      projectId: run.projectId,
+      kind: 'cursor',
+      cwd: worktreePath,
+      worktreePath,
+      status: 'waiting'
+    })
+
+    await expect(prepareSecretaryRun({
+      runId,
+      projectId: run.projectId,
+      assignments: [{ assignmentId, sessionId }]
+    })).resolves.toEqual({
+      runId,
+      projectId: run.projectId,
+      preparedAssignmentIds: [assignmentId]
+    })
+  })
+
+  it('does not move a task off the dedicated Manager panel named by the plan', async () => {
+    const plannedPanelId = '77777777-7777-4777-8777-777777777777'
+    const run = { ...approvedRun(), status: 'awaiting-approval' as const }
+    run.plan = {
+      ...run.plan,
+      assignments: [{ ...run.plan.assignments[0], panelId: plannedPanelId }] as unknown as typeof run.plan.assignments
+    }
+    mocks.getSecretaryStore.mockReturnValue({ getRun: vi.fn().mockReturnValue(run) })
+    mocks.loadSnapshot.mockReturnValue({
+      projects: [{ id: run.projectId, name: 'Secretary project', folderPath: projectPath }],
+      workspaces: {
+        [run.projectId]: {
+          panels: [
+            {
+              id: plannedPanelId,
+              type: 'cursor',
+              title: 'Planned Manager',
+              zone: 'center',
+              panelRole: 'secretary',
+              workspaceIsolation: 'isolated',
+              worktreePath
+            },
+            {
+              id: sessionId,
+              type: 'cursor',
+              title: 'Other Manager',
+              zone: 'center',
+              panelRole: 'secretary',
+              workspaceIsolation: 'isolated',
+              worktreePath
+            }
+          ]
+        }
+      }
+    })
+    mocks.getSessionSnapshot.mockReturnValue({
+      sessionId,
+      projectId: run.projectId,
+      kind: 'cursor',
+      cwd: worktreePath,
+      worktreePath,
+      status: 'waiting'
+    })
+
+    await expect(prepareSecretaryRun({
+      runId,
+      projectId: run.projectId,
+      assignments: [{ assignmentId, sessionId }]
+    })).rejects.toThrow(/different CLI panel/i)
+  })
+
   it('requires a valid project/session handshake before approval', async () => {
     const run = { ...approvedRun(), status: 'awaiting-approval' as const }
     mocks.getSecretaryStore.mockReturnValue({ getRun: vi.fn().mockReturnValue(run) })
@@ -173,7 +279,7 @@ describe('Secretary orchestrator', () => {
     expect(mocks.writeForSecretary).not.toHaveBeenCalled()
   })
 
-  it('rejects a session in the project folder even if the panel claims to have a worktree', async () => {
+  it('prepares a prompt in the project folder without a Git worktree', async () => {
     const run = { ...approvedRun(), status: 'awaiting-approval' as const }
     mocks.getSecretaryStore.mockReturnValue({ getRun: vi.fn().mockReturnValue(run) })
     mocks.loadSnapshot.mockReturnValue({
@@ -186,8 +292,7 @@ describe('Secretary orchestrator', () => {
             title: 'Cursor',
             zone: 'center',
             panelRole: 'secretary',
-            workspaceIsolation: 'isolated',
-            worktreePath
+            workspaceIsolation: 'isolated'
           }]
         }
       }
@@ -204,7 +309,11 @@ describe('Secretary orchestrator', () => {
       runId,
       projectId: run.projectId,
       assignments: [{ assignmentId, sessionId }]
-    })).rejects.toThrow(/isolated worktree/i)
+    })).resolves.toEqual({
+      runId,
+      projectId: run.projectId,
+      preparedAssignmentIds: [assignmentId]
+    })
     expect(mocks.isRegisteredAgentWorktree).not.toHaveBeenCalled()
   })
 
@@ -225,7 +334,7 @@ describe('Secretary orchestrator', () => {
       runId,
       projectId: run.projectId,
       assignments: [{ assignmentId, sessionId }]
-    })).rejects.toThrow(/isolated worktree/i)
+    })).rejects.toThrow(/project folder/i)
   })
 
   it('does not dispatch when the claimed worktree is not registered with Git', async () => {

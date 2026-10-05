@@ -14,6 +14,8 @@ export function managerCliSessionId(kind: CliUsageKind, accountId: string): stri
 export interface ManagerCliCommand {
   command: string
   args: string[]
+  /** Present when the prompt must not be an argument. Windows rejects spawn past 32767 characters. */
+  stdin?: string
 }
 
 export function managerCliPrintCommand(input: {
@@ -37,8 +39,6 @@ export function managerCliPrintCommand(input: {
   } else if (input.kind === 'gemini') {
     args.push('--approval-mode', 'plan', '--output-format', 'json')
     if (model) args.push('--model', model)
-    args.push('-p', input.prompt)
-    return { command: input.command, args }
   } else if (input.kind === 'codex') {
     args.push('exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '-C', input.workspace)
     if (model) args.push('--model', model)
@@ -46,8 +46,9 @@ export function managerCliPrintCommand(input: {
     args.push('--print', '--output-format', 'json', '--mode', 'plan', '--sandbox')
     if (model) args.push('--model', model)
   }
-  args.push(input.prompt)
-  return { command: input.command, args }
+  // Print modes read the prompt from stdin. Keeping it out of argv avoids
+  // Windows CreateProcess ENAMETOOLONG on a large project context.
+  return { command: input.command, args, stdin: input.prompt }
 }
 
 export function managerCliOpenCommand(input: {

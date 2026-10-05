@@ -149,9 +149,9 @@ function ManagerRunCard({ item, props }: { item: ManagerChatItem; props: Manager
   const live = item.planStatus === 'dispatching' || item.planStatus === 'sent'
   const needsInput = item.run?.status === 'needs-user'
   const failed = item.planStatus === 'failed'
-  const state = item.planStatus === 'dispatching' ? 'Starting work'
+  const state = item.planStatus === 'dispatching' ? 'Starting CLI'
     : needsInput ? 'Waiting for your input'
-    : item.planStatus === 'sent' ? 'Working on your project'
+    : item.planStatus === 'sent' ? 'Running CLI'
     : item.planStatus === 'completed' ? 'Agent work finished'
     : item.planStatus === 'interrupted' ? 'Work interrupted'
     : item.planStatus === 'cancelled' ? 'Work cancelled' : 'Work failed'
@@ -168,6 +168,7 @@ function ManagerRunCard({ item, props }: { item: ManagerChatItem; props: Manager
           {item.plan.assignments.length} task{item.plan.assignments.length === 1 ? '' : 's'}
         </span>
       </div>
+      {live && !needsInput ? <p className="manager-chat-inline-note">Running CLI. The output stays visible, and the manager reports back from it.</p> : null}
       {failed && failureMessage && failureMessage !== item.content ? <ManagerMarkdown content={failureMessage} /> : null}
       {item.planStatus === 'interrupted' ? <p className="manager-chat-inline-note">Observation stopped after restart. Open an agent to check its current state.</p> : null}
       <details className="manager-chat-details">
@@ -182,8 +183,8 @@ function ManagerRunCard({ item, props }: { item: ManagerChatItem; props: Manager
               : outcome === 'needs-user' || needsInput ? 'Needs input'
               : !live ? outcome === 'completed' ? 'Finished' : 'Ended'
               : panelStatus === 'waiting' ? 'Waiting'
-              : panelStatus === 'starting' || item.planStatus === 'dispatching' ? 'Starting'
-              : panelStatus === 'stopped' ? 'Stopped' : 'Working'
+              : panelStatus === 'starting' || item.planStatus === 'dispatching' ? 'Starting CLI'
+              : panelStatus === 'stopped' ? 'Stopped' : 'Running CLI'
             return (
               <div key={assignment.id}>
                 <strong>{assignment.title}</strong>
@@ -196,7 +197,7 @@ function ManagerRunCard({ item, props }: { item: ManagerChatItem; props: Manager
         </div>
       </details>
       {(failed || item.planStatus === 'interrupted') && terminalId ? <button type="button" className="secretary-review-changes" onClick={() => props.onOpenAgent(terminalId)}>Inspect terminal</button> : null}
-      {live && item.runId ? <button type="button" className="secretary-review-changes" disabled={Boolean(props.cancellingRunId)} onClick={() => props.onCancelRun(item.id, item.runId)}><Square className="h-3 w-3" />{props.cancellingRunId === item.runId ? 'Stopping…' : 'Stop work'}</button> : null}
+      {live && item.runId ? <button type="button" className="secretary-review-changes" disabled={Boolean(props.cancellingRunId)} onClick={() => props.onCancelRun(item.id, item.runId)}><Square className="h-3 w-3" />{props.cancellingRunId === item.runId ? 'Stopping…' : 'Stop and close CLIs'}</button> : null}
     </div>
   )
 }

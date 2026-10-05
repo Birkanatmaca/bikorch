@@ -586,29 +586,22 @@ export function TerminalView({
         .flatMap((workspace) => workspace.panels)
         .find((panel) => panel.id === sessionId)
       const secretaryPanel = panelAtLaunch?.panelRole === 'secretary'
-      const stopUnisolatedSecretary = (reason: string): void => {
-        const message = `Manager needs a separate Git worktree: ${reason}`
-        term.writeln(`\x1b[31m[Bikorch] ${message}\x1b[0m`)
-        setStatus(sessionId, 'error', message)
-      }
-      const resolverCwd = panelAtLaunch?.panelRole === 'resolver' ? panelAtLaunch.cwdOverride : panelAtLaunch?.cwdOverride
+      const resolverCwd = !secretaryPanel && (panelAtLaunch?.panelRole === 'resolver' ? panelAtLaunch.cwdOverride : panelAtLaunch?.cwdOverride)
       if (resolverCwd) {
         cwd = resolverCwd
         worktreePath = resolverCwd
       }
-      if (secretaryPanel && (
-        panelAtLaunch?.workspaceIsolation !== 'isolated' ||
-        resolverCwd ||
-        nextLaunchMode === 'login' ||
-        !cwd ||
-        !(AGENT_WORKTREE_KINDS as readonly string[]).includes(kind) ||
-        !window.api.git?.ensureWorktree
-      )) {
-        stopUnisolatedSecretary('open this task from a Git project with worktree support; sign in from Accounts first.')
+      if (secretaryPanel && (nextLaunchMode === 'login' || !cwd || !(AGENT_WORKTREE_KINDS as readonly string[]).includes(kind))) {
+        const message = !cwd
+          ? 'Manager needs a project folder before it can send a prompt.'
+          : 'Open this Manager task from a signed-in CLI panel.'
+        term.writeln(`\x1b[31m[Bikorch] ${message}\x1b[0m`)
+        setStatus(sessionId, 'error', message)
         return
       }
       const sharedTree = panelAtLaunch?.workspaceIsolation === 'shared' && panelAtLaunch?.panelRole !== 'resolver'
       const isolate =
+        !secretaryPanel &&
         !liveSession &&
         !resolverCwd &&
         !sharedTree &&
@@ -650,12 +643,8 @@ export function TerminalView({
               term.writeln(`\x1b[90m${line}\x1b[0m`)
             }
           }
-        } else {
-          const reason = isolated.ok ? 'this project is not a Git repository.' : isolated.error || 'worktree creation failed.'
-          if (secretaryPanel) {
-            stopUnisolatedSecretary(reason)
-            return
-          }
+        } else if (!isolated.ok) {
+          const reason = isolated.error || 'worktree creation failed.'
           term.writeln(`\x1b[33m[Bikorch] Could not open a separate workspace: ${reason}\x1b[0m`)
           term.writeln('\x1b[33m[Bikorch] Falling back to the project folder.\x1b[0m')
         }

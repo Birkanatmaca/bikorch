@@ -60,10 +60,12 @@ export function SecretarySettings(): React.JSX.Element {
   const saveKey = useSecretaryStore((state) => state.saveKey)
   const clearKey = useSecretaryStore((state) => state.clearKey)
   const updateModel = useSecretaryStore((state) => state.updateModel)
+  const updateName = useSecretaryStore((state) => state.updateName)
   const updateProvider = useSecretaryStore((state) => state.updateProvider)
   const resetUsage = useSecretaryStore((state) => state.resetUsage)
   const accounts = useAiAccountsStore((state) => state.accounts)
   const [apiKey, setApiKey] = useState('')
+  const [managerName, setManagerName] = useState(settings.name)
   const [model, setModel] = useState(settings.model)
   const [cliModel, setCliModel] = useState(settings.provider.cli.model ?? '')
   const [saved, setSaved] = useState(false)
@@ -77,6 +79,7 @@ export function SecretarySettings(): React.JSX.Element {
   }, [load, loaded])
 
   useEffect(() => setModel(settings.model), [settings.model])
+  useEffect(() => setManagerName(settings.name), [settings.name])
   useEffect(() => setCliModel(settings.provider.cli.model ?? ''), [settings.provider.cli.model])
 
   useEffect(() => {
@@ -135,7 +138,7 @@ export function SecretarySettings(): React.JSX.Element {
       <section className="secretary-profile-hero">
         <div className="secretary-profile-copy">
           <span className="secretary-profile-eyebrow">Workspace manager</span>
-          <h3>Manager</h3>
+          <h3>{settings.name || 'Manager'}</h3>
           <p>Knows you from memory and runs the CLI work from brief to result.</p>
         </div>
         <SecretaryAvatar mood="working" variant="profile" />
@@ -143,6 +146,24 @@ export function SecretarySettings(): React.JSX.Element {
           <i />{settings.configured ? 'Connected' : 'Not connected'}
         </span>
       </section>
+
+      <SectionCard title="Name" description="The manager uses this name for itself and on the CLIs it opens." className="mt-2.5">
+        <form className="flex items-center gap-2" onSubmit={(event) => {
+          event.preventDefault()
+          void updateName(managerName)
+        }}>
+          <input
+            value={managerName}
+            maxLength={40}
+            aria-label="Manager name"
+            className="min-w-0 flex-1 rounded-md border border-border bg-app-bg px-2 py-1.5 text-sm text-text-primary outline-none"
+            onChange={(event) => setManagerName(event.target.value)}
+          />
+          <button type="submit" className="ui-control ui-control-ghost ui-control-sm" disabled={loading || managerName.trim() === settings.name}>
+            <Save className="h-3 w-3" /> Save name
+          </button>
+        </form>
+      </SectionCard>
 
       <div className="secretary-usage-grid">
         <article><Activity /><span>Requests</span><strong>{formatCount(usage.requests)}</strong></article>

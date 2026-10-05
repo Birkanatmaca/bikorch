@@ -16,6 +16,9 @@ import {
   type WorkspaceLayout
 } from '@shared/types'
 import { isTiledWorkspace, syncGridWithPanelIds, tiledCenterPanelIds } from '@shared/workspace-grid'
+import { fitDeviceRectToAspect, resizeDeviceRect, sameRect, type DeviceCorner } from '@shared/device-rect'
+import { mobileDeviceAspect, resolveMobileModel } from '@shared/mobile-devices'
+import { useBrowserStore } from '@renderer/stores/browser-store'
 import { PanelShell } from '@renderer/components/panels/PanelShell'
 import { WorkspacePlayerPanel } from '@renderer/components/music/WorkspacePlayerPanel'
 import { WorkspaceTimerWidget } from '@renderer/components/timer/WorkspaceTimerWidget'
@@ -141,10 +144,23 @@ const EDGE_CURSOR: Record<ResizeEdge, string> = {
   sw: 'nesw-resize'
 }
 
+function isCorner(edge: ResizeEdge): edge is DeviceCorner {
+  return edge.length === 2
+}
+
+function canvasDeviceAspect(panelId: string, type: PanelType | undefined): number {
+  const platform = type === 'android-preview' ? 'android' : 'ios'
+  const chosen = useBrowserStore.getState().panels[panelId]?.deviceModels?.[platform]
+  return mobileDeviceAspect(resolveMobileModel(platform, chosen))
+}
+
 function ResizeHandles({
-  onStart
+  onStart,
+  cornersOnly = false
 }: {
   onStart: (edge: ResizeEdge, e: React.PointerEvent) => void
+  /** Devices keep their real proportions, so only corners resize them. */
+  cornersOnly?: boolean
 }): React.JSX.Element {
   const handle = (edge: ResizeEdge, className: string): React.JSX.Element => (
     <div
@@ -154,6 +170,23 @@ function ResizeHandles({
       onPointerDown={(e) => onStart(edge, e)}
     />
   )
+
+  if (cornersOnly) {
+    return (
+      <>
+        {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
+          <div
+            key={corner}
+            className={cn('device-corner-handle', `is-${corner}`)}
+            data-resize-handle=""
+            style={{ cursor: EDGE_CURSOR[corner] }}
+            onPointerDown={(e) => onStart(corner, e)}
+            title="Drag to resize. The device keeps its real proportions."
+          />
+        ))}
+      </>
+    )
+  }
 
   return (
     <>
@@ -177,6 +210,7 @@ function OrchestratorWindow({
   onClose,
   onMoveStart,
   onResizeStart,
+  onAspectChange,
   onContextMenu,
   live,
   active
@@ -188,6 +222,7 @@ function OrchestratorWindow({
   onClose: () => void
   onMoveStart: (e: React.PointerEvent) => void
   onResizeStart: (edge: ResizeEdge, e: React.PointerEvent) => void
+  onAspectChange: (aspect: number) => void
   onContextMenu: (e: React.MouseEvent) => void
   live: boolean
   active: boolean
@@ -245,7 +280,7 @@ function OrchestratorWindow({
           {panel.type === 'timer' ? <ResizeHandles onStart={onResizeStart} /> : null}
         </div>
       ) : isDevice ? (
-        <CanvasDeviceInteractionContext.Provider value={{ onMoveStart, onClose }}>
+        <CanvasDeviceInteractionContext.Provider value={{ onMoveStart, onClose, onAspectChange }}>
           <div
             className="canvas-device-host relative h-full w-full overflow-visible"
             onPointerDown={(event) => {
@@ -267,7 +302,7 @@ function OrchestratorWindow({
               showHeader={false}
               windowActive={active}
             />
-            <ResizeHandles onStart={onResizeStart} />
+            <ResizeHandles onStart={onResizeStart} cornersOnly />
           </div>
         </CanvasDeviceInteractionContext.Provider>
       ) : (
@@ -474,8 +509,19 @@ export function OrchestratorZone({
       const { dx, dy } = toDeltaPercent(e.clientX, e.clientY)
       const canvas = canvasSize()
       const limits = panelMinLimits(drag.panelType, canvas)
-      const next =
-        drag.mode === 'move'
+      const deviceCorner = isCanvasDevicePanel(drag.panelType) && drag.mode !== 'move' && isCorner(drag.mode)
+        ? drag.mode
+        : null
+      const next = deviceCorner
+        ? resizeDeviceRect(
+            drag.start,
+            deviceCorner,
+            e.clientX - drag.pointerX,
+            e.clientY - drag.pointerY,
+            canvas,
+            canvasDeviceAspect(drag.panelId, drag.panelType)
+          )
+        : drag.mode === 'move'
           ? clampOrchestratorRect(
               {
                 ...drag.start,
@@ -510,7 +556,11 @@ export function OrchestratorZone({
       const { w, h } = canvasSize()
       if (live) {
         const limits = panelMinLimits(drag.panelType, { w, h })
-        updateCenterPanelRect(drag.panelId, snapRectToGrid(live, w, h, limits))
+        // Grid snapping would bend a device's real proportions.
+        updateCenterPanelRect(
+          drag.panelId,
+          isCanvasDevicePanel(drag.panelType) ? live : snapRectToGrid(live, w, h, limits)
+        )
       }
       previewRectsRef.current = {}
       setPreviewRects({})
@@ -529,6 +579,14 @@ export function OrchestratorZone({
       if (drag) unlockTerminalLayout(drag.panelId)
     }
   }, [canvasSize, toDeltaPercent, updateCenterPanelRect])
+
+  const fitDeviceToAspect = useCallback((panelId: string, aspect: number) => {
+    if (dragRef.current?.panelId === panelId) return
+    const canvas = canvasSize()
+    const current = getRect(panelId)
+    const next = fitDeviceRectToAspect(current, canvas, aspect)
+    if (!sameRect(current, next)) updateCenterPanelRect(panelId, next)
+  }, [canvasSize, getRect, updateCenterPanelRect])
 
   const activePanelId = panels.some((panel) => panel.id === focusedId)
     ? focusedId
@@ -586,6 +644,7 @@ export function OrchestratorZone({
           onClose={() => onClose(panel.id)}
           onMoveStart={(e) => beginInteraction(panel.id, 'move', e)}
           onResizeStart={(edge, e) => beginInteraction(panel.id, edge, e)}
+          onAspectChange={(aspect) => fitDeviceToAspect(panel.id, aspect)}
           onContextMenu={(e) => openAt(e, panel.id)}
           live={previewRects[panel.id] !== undefined}
           active={activePanelId === panel.id}
