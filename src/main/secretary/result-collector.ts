@@ -7,10 +7,11 @@ import { cliPermissionResponse, looksWorkspaceTrustPrompt } from '@shared/cli-pe
 import { ptyManager } from '../cli/pty-manager'
 import { checkAgentGitPatch, snapshotAgentGit } from '../git/session-snapshot'
 import { emitSecretaryEvent } from './events'
-import { finalizeSecretaryRun, type SecretaryCliResult } from './service'
+import { finalizeSecretaryRun, type SecretaryCliResult, type SecretarySkippedAssignment } from './service'
 import { getSecretaryStore } from './store'
 import { releaseSecretaryRunLock } from './run-lock'
 import { buildSecretaryRunEvidence } from './evidence'
+import { cleanManagerTerminalOutput } from './inspection-evidence'
 
 const OUTPUT_LIMIT = 8_000
 const RUN_TIMEOUT_MS = 8 * 60_000
@@ -38,6 +39,7 @@ interface TrackedRun {
   run: SecretaryRun
   targets: Map<string, Target>
   pending: Array<{ assignment: SecretaryAssignment; sessionId: string; cwd: string; gitStart: GitSessionSnapshot | null }>
+  skipped: SecretarySkippedAssignment[]
   timer: ReturnType<typeof setTimeout>
   finalizing: boolean
   waitingSessionIds: Set<string>
@@ -48,7 +50,7 @@ const trackedSessions = new Map<string, string>()
 let unsubscribe: (() => void) | null = null
 
 function stripAnsi(value: string): string {
-  return value.replace(/\u001b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '')
+  return cleanManagerTerminalOutput(value)
 }
 
 function inferActivity(buffer: string): 'waiting' | 'busy' | null {
@@ -180,20 +182,31 @@ export function cancelTrackedSecretaryRun(runId: string): string[] {
 
 function failTrackedRun(runId: string, message: string): void {
   const tracked = trackedRuns.get(runId)
-  if (!tracked) return
+  if (!tracked || tracked.finalizing) return
   const activeSessionIds = [...tracked.targets.values()]
     .filter((target) => !target.outcome)
     .map((target) => target.sessionId)
-  dropTrackedRun(runId)
-  void Promise.all(activeSessionIds.map((sessionId) => ptyManager.writeForSecretary(sessionId, '\u0003').catch(() => undefined)))
-  releaseSecretaryRunLock(runId)
+  clearTimeout(tracked.timer)
+  for (const target of tracked.targets.values()) {
+    if (target.outcome) continue
+    target.outcome = 'failed'
+    target.completionEvidence = 'terminal-idle-inferred'
+    target.summary = `${message}\n${stripAnsi(target.output).trim().slice(-1_600)}`.trim()
+  }
+  tracked.skipped.push(...tracked.pending.map((binding) => ({
+    id: binding.assignment.id,
+    title: binding.assignment.title,
+    failedDependencies: binding.assignment.dependsOn ?? []
+  })))
+  tracked.pending = []
+  tracked.waitingSessionIds.clear()
   const store = getSecretaryStore()
   const current = store?.getRun(runId)
-  if (store && (current?.status === 'running' || current?.status === 'needs-user')) {
-    store.updateRun(runId, { status: 'failed', errorCode: 'CLI_RESULT_COLLECTION_FAILED', errorMessage: message })
-    store.appendMessage({ threadId: current.threadId, runId, role: 'assistant', type: 'error', content: message })
+  if (store && current?.status === 'needs-user') {
+    store.updateRun(runId, { status: 'running' })
   }
-  emitSecretaryEvent({ type: 'run-failed', projectId: tracked.run.projectId, threadId: tracked.run.threadId, runId, message })
+  void Promise.all(activeSessionIds.map((sessionId) => ptyManager.writeForSecretary(sessionId, '\u0003').catch(() => undefined)))
+    .then(() => finishTrackedRun(runId))
 }
 
 async function finishTrackedRun(runId: string): Promise<void> {
@@ -204,9 +217,19 @@ async function finishTrackedRun(runId: string): Promise<void> {
       .filter((target) => target.outcome === 'failed')
       .map((target) => target.assignment.id)
   )
-  if (failedIds.size > 0) {
-    failTrackedRun(runId, 'A dependency assignment failed; dependent CLI tasks were not started.')
-    return
+  // A failed branch must not discard its diagnostic output or stop independent
+  // branches. Remove descendants transitively and report exactly what was skipped.
+  let skippedBranch = true
+  while (skippedBranch) {
+    skippedBranch = false
+    tracked.pending = tracked.pending.filter((binding) => {
+      const failedDependencies = (binding.assignment.dependsOn ?? []).filter((dependency) => failedIds.has(dependency))
+      if (failedDependencies.length === 0) return true
+      tracked.skipped.push({ id: binding.assignment.id, title: binding.assignment.title, failedDependencies })
+      failedIds.add(binding.assignment.id)
+      skippedBranch = true
+      return false
+    })
   }
   const completedIds = new Set(
     [...tracked.targets.values()]
@@ -216,13 +239,6 @@ async function finishTrackedRun(runId: string): Promise<void> {
   const ready = tracked.pending.filter((binding) =>
     (binding.assignment.dependsOn ?? []).every((dependency) => completedIds.has(dependency))
   )
-  const blocked = tracked.pending.some((binding) =>
-    (binding.assignment.dependsOn ?? []).some((dependency) => failedIds.has(dependency))
-  )
-  if (blocked) {
-    failTrackedRun(runId, 'A dependency assignment failed; dependent CLI tasks were not started.')
-    return
-  }
   if (ready.length > 0) {
     const readyIds = new Set(ready.map((binding) => binding.assignment.id))
     tracked.pending = tracked.pending.filter((binding) => !readyIds.has(binding.assignment.id))
@@ -255,7 +271,9 @@ async function finishTrackedRun(runId: string): Promise<void> {
       terminalIdleInferred: results.filter((result) => result.completionEvidence === 'terminal-idle-inferred').length
     }
     const panelIds = unique([...completed.targets.values()].map((target) => target.sessionId), 8)
-    const result = await finalizeSecretaryRun(runId, results)
+    const result = completed.skipped.length > 0
+      ? await finalizeSecretaryRun(runId, results, completed.skipped)
+      : await finalizeSecretaryRun(runId, results)
     if (result.followUpRun?.plan) {
       emitSecretaryEvent({
         type: 'run-followup',
@@ -517,5 +535,5 @@ export function trackSecretaryRun(
   const timer = setTimeout(() => {
     failTrackedRun(run.id, 'The CLI did not return a result before the Secretary timeout.')
   }, RUN_TIMEOUT_MS)
-  trackedRuns.set(run.id, { run, targets, pending, timer, finalizing: false, waitingSessionIds: new Set() })
+  trackedRuns.set(run.id, { run, targets, pending, skipped: [], timer, finalizing: false, waitingSessionIds: new Set() })
 }

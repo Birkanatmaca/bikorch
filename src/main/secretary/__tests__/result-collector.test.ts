@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { PtyEvent } from '@shared/contracts/pty'
 import type { SecretaryRun } from '@shared/contracts/secretary'
 
 const mocks = vi.hoisted(() => ({
-  observer: null as ((event: { type: 'data'; sessionId: string; data: string }) => void) | null,
+  observer: null as ((event: PtyEvent) => void) | null,
   observe: vi.fn(),
   writeForSecretary: vi.fn(),
   snapshotAgentGit: vi.fn(),
@@ -29,7 +30,7 @@ vi.mock('../store', () => ({ getSecretaryStore: mocks.getSecretaryStore }))
 vi.mock('../events', () => ({ emitSecretaryEvent: mocks.emitSecretaryEvent }))
 vi.mock('../run-lock', () => ({ releaseSecretaryRunLock: mocks.releaseSecretaryRunLock }))
 
-import { answerTrackedSecretaryRun, trackSecretaryRun } from '../result-collector'
+import { answerTrackedSecretaryRun, cancelTrackedSecretaryRun, trackSecretaryRun } from '../result-collector'
 
 const run: SecretaryRun = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -64,7 +65,51 @@ beforeEach(() => {
   mocks.writeForSecretary.mockResolvedValue(undefined)
 })
 
+afterEach(() => {
+  cancelTrackedSecretaryRun(run.id)
+  vi.useRealTimers()
+})
+
 describe('Secretary result collector', () => {
+  it('reports failed branch evidence and skips descendants while independent work finishes', async () => {
+    const assignment = (id: string, title: string, dependsOn?: string[]) => ({
+      id, title, panelId: null, kind: 'cursor' as const, mode: 'analyze' as const,
+      instruction: `Analyze ${title}`, expectedResult: 'Return concrete findings', rationale: 'Task', usageNote: 'Available', dependsOn
+    })
+    trackSecretaryRun(run, [
+      { assignment: assignment('root-1', 'API'), sessionId: 'session-1', cwd: 'C:\\workspace', gitStart: { headSha: 'a', changedFiles: [], commits: [] } },
+      { assignment: assignment('root-2', 'UI'), sessionId: 'session-2', cwd: 'C:\\workspace', gitStart: { headSha: 'a', changedFiles: [], commits: [] } },
+      { assignment: assignment('child-1', 'Implement API', ['root-1']), sessionId: 'session-3', cwd: 'C:\\workspace', gitStart: null },
+      { assignment: assignment('child-2', 'Validate API', ['child-1']), sessionId: 'session-4', cwd: 'C:\\workspace', gitStart: null }
+    ])
+    mocks.observer?.({ type: 'data', sessionId: 'session-1', data: '<BIKORCH_RESULT>{"status":"failed","summary":"TypeError: missing API state","changedFiles":[],"needsUser":null}</BIKORCH_RESULT>' })
+    expect(mocks.finalizeSecretaryRun).not.toHaveBeenCalled()
+    expect(mocks.writeForSecretary).not.toHaveBeenCalled()
+    mocks.observer?.({ type: 'data', sessionId: 'session-2', data: '<BIKORCH_RESULT>{"status":"completed","summary":"UI reviewed","changedFiles":[],"needsUser":null}</BIKORCH_RESULT>' })
+    await vi.waitFor(() => expect(mocks.finalizeSecretaryRun).toHaveBeenCalledTimes(1))
+    expect(mocks.finalizeSecretaryRun).toHaveBeenCalledWith(run.id, [
+      expect.objectContaining({ outcome: 'failed', summary: 'TypeError: missing API state', output: expect.stringContaining('missing API state') }),
+      expect.objectContaining({ outcome: 'completed', summary: 'UI reviewed' })
+    ], [
+      { id: 'child-1', title: 'Implement API', failedDependencies: ['root-1'] },
+      { id: 'child-2', title: 'Validate API', failedDependencies: ['child-1'] }
+    ])
+  })
+
+  it('sends timeout output to Manager for diagnosis instead of discarding it', async () => {
+    vi.useFakeTimers()
+    trackSecretaryRun(run, [{
+      assignment: { id: 'assignment-1', panelId: null, kind: 'cursor', mode: 'validate', title: 'Build', instruction: 'Build app', expectedResult: 'Build passes', rationale: 'Verify', usageNote: 'Available' },
+      sessionId: 'session-1', cwd: 'C:\\workspace', gitStart: { headSha: 'a', changedFiles: [], commits: [] }
+    }])
+    mocks.observer?.({ type: 'data', sessionId: 'session-1', data: 'Error: connection refused while building' })
+    await vi.advanceTimersByTimeAsync(8 * 60_000)
+    expect(mocks.writeForSecretary).toHaveBeenCalledWith('session-1', '\u0003')
+    expect(mocks.finalizeSecretaryRun).toHaveBeenCalledWith(run.id, [expect.objectContaining({
+      outcome: 'failed', output: 'Error: connection refused while building', summary: expect.stringContaining('connection refused')
+    })])
+  })
+
   it('uses Git snapshots as the source of truth for changed-file reporting', async () => {
     trackSecretaryRun(run, [{
       assignment: {

@@ -1,10 +1,19 @@
 import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const mocks = vi.hoisted(() => ({ loadSnapshot: vi.fn(), getSessionSnapshot: vi.fn(), getOutputTail: vi.fn() }))
+vi.mock('../../persistence/database', () => ({ loadSnapshot: mocks.loadSnapshot }))
+vi.mock('../../cli/pty-manager', () => ({ ptyManager: { getSessionSnapshot: mocks.getSessionSnapshot, getOutputTail: mocks.getOutputTail } }))
 import { buildSecretaryProjectContext } from '../context-service'
 
 const workspaces: string[] = []
+beforeEach(() => {
+  vi.resetAllMocks()
+  mocks.loadSnapshot.mockReturnValue(null)
+  mocks.getSessionSnapshot.mockReturnValue(null)
+})
 
 afterEach(async () => {
   await Promise.all(workspaces.splice(0).map((path) => rm(path, { recursive: true, force: true })))
@@ -36,6 +45,31 @@ describe('Secretary project context', () => {
     expect(context.tree).toContainEqual({ path: 'src/app.ts', kind: 'file' })
     expect(context.tree.some((entry) => entry.path.includes('.env') || entry.path.includes('node_modules'))).toBe(false)
     expect(context.instructions[0]?.content).toContain('[REDACTED]')
+    expect(context.sourceExcerpts).toContainEqual(expect.objectContaining({ path: 'src/app.ts', content: 'export const ready = true' }))
+    expect(JSON.stringify(context)).not.toContain(root)
+  })
+
+  it('includes terminal failure evidence only from sessions owned by the inspected project', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'bikorch-secretary-errors-'))
+    workspaces.push(root)
+    await writeFile(join(root, 'app.ts'), 'export const app = true')
+    mocks.loadSnapshot.mockReturnValue({
+      tasksByProject: {},
+      workspaces: { 'project-1234': { panels: [
+        { id: 'terminal-owned', type: 'terminal', title: 'Build' },
+        { id: 'cli-other-project', type: 'cursor', title: 'Other agent' }
+      ] } }
+    })
+    mocks.getSessionSnapshot.mockImplementation((id: string) => ({
+      sessionId: id, projectId: id === 'terminal-owned' ? 'project-1234' : 'other-project',
+      kind: id === 'terminal-owned' ? 'terminal' : 'cursor', status: 'error', cwd: root
+    }))
+    mocks.getOutputTail.mockReturnValue(`ReferenceError: app is not defined\n at ${root}/app.ts:1\nTOKEN=private-token-value`)
+    const context = await buildSecretaryProjectContext({ id: 'project-1234', name: 'Project', folderPath: root })
+    expect(context.terminalFailures).toEqual([expect.objectContaining({ sessionId: 'terminal-owned', kind: 'terminal', excerpt: expect.stringContaining('ReferenceError') })])
+    expect(mocks.getOutputTail).not.toHaveBeenCalledWith('cli-other-project', expect.anything())
+    expect(context.activeAgents).toEqual([])
+    expect(JSON.stringify(context)).not.toContain('private-token-value')
     expect(JSON.stringify(context)).not.toContain(root)
   })
 

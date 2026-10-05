@@ -403,9 +403,9 @@ export function TerminalView({
     }
 
     const noteOutput = (chunk: string): void => {
-      if (!cli) return
       outputTail = (outputTail + chunk).slice(-8000)
       useTerminalStore.getState().setOutputTail(sessionId, outputTail)
+      if (!cli) return
       maybeStartAntigravityLogin()
       const inferred = inferCliActivity(outputTail)
       if (inferred === 'busy') {

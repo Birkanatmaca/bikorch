@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Check, Loader2, PanelRightClose, SlidersHorizontal } from 'lucide-react'
+import { Activity, ArrowUp, Check, ChevronDown, Code2, Loader2, PanelRightClose, Plus, ScanSearch, SlidersHorizontal } from 'lucide-react'
 import type { PanelDefinition, Project } from '@shared/types'
 import type { ManagerAppAction, SecretaryMessageCursor, SecretaryPlan, SecretaryRun, SecretaryRunStatus, SecretarySessionSummary, SecretarySessionWork, SecretaryThreadDetail } from '@shared/contracts/secretary'
 import type { CacheAnalysis } from '@shared/contracts/resources'
@@ -25,6 +25,8 @@ import { inferCliActivity, stripAnsi } from '@renderer/lib/cli-activity'
 import { submitCliPrompt } from '@renderer/lib/submit-cli-prompt'
 import { flushPersistence } from '@renderer/lib/persistence-sync'
 import { cn } from '@renderer/lib/utils'
+import { useManagerProjectWatch } from '@renderer/hooks/use-manager-project-watch'
+import { managerFailureSignals } from '@renderer/lib/manager-watch'
 
 const CLI_TYPES = new Set(AI_ACCOUNT_KINDS)
 
@@ -265,6 +267,10 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false)
   const [open, setOpen] = useState(readSecretaryOpen)
   const [loading, setLoading] = useState(false)
+  const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [inspectionKind, setInspectionKind] = useState<'project-review' | 'error-diagnosis' | null>(null)
+  const [watchError, setWatchError] = useState<string | null>(null)
+  const [toolsOpen, setToolsOpen] = useState(false)
   const [answering, setAnswering] = useState(false)
   const [sending, setSending] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
@@ -290,6 +296,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   const preservedScrollRef = useRef<{ height: number; top: number } | null>(null)
   const runRef = useRef(0)
   const approvingPlanIdsRef = useRef(new Set<string>())
+  const chatFlightRef = useRef(false)
 
   const cliPanels = useMemo(() => panels.filter((panel) => CLI_TYPES.has(panel.type as typeof AI_ACCOUNT_KINDS[number])).map((panel) => ({
     id: panel.id,
@@ -333,6 +340,11 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     preservedScrollRef.current = null
     setBrief('')
     setLoading(false)
+    setHistoryLoaded(false)
+    setInspectionKind(null)
+    setWatchError(null)
+    setToolsOpen(false)
+    chatFlightRef.current = false
     setSending(false)
     setAnswering(false)
     setFeedback(null)
@@ -406,6 +418,8 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
         setHasOlderMessages(detail.hasOlderMessages)
       } catch {
         // Secretary remains usable without local conversation history.
+      } finally {
+        if (run === runRef.current) setHistoryLoaded(true)
       }
     }
     void restoreMostRecentThread()
@@ -426,11 +440,12 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     setSessionsTick((value) => value + 1)
     if (event.threadId !== threadId) return
     if (event.type === 'run-report') {
+      const failed = event.evidence.assignments.some((assignment) => assignment.outcome === 'failed')
       setSidebarOpen(true)
       setMessages((current) => [
         ...current.map((item) => item.runId === event.runId
-          ? { ...item, planStatus: 'completed' as const, awaitingAnswer: false,
-              ...(item.run ? { run: { ...item.run, status: 'completed' as const, evidence: event.evidence } } : {}) }
+          ? { ...item, planStatus: failed ? 'failed' as const : 'completed' as const, awaitingAnswer: false,
+              ...(item.run ? { run: { ...item.run, status: failed ? 'failed' as const : 'completed' as const, evidence: event.evidence } } : {}) }
           : item),
         {
           id: newId(),
@@ -482,6 +497,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       setFeedback('The agent needs input. Use its answer card when you are ready.')
       return
     }
+    setSidebarOpen(true)
     setMessages((current) => [
       ...current.map((item) => item.runId === event.runId
         ? { ...item, planStatus: 'failed' as const, awaitingAnswer: false }
@@ -636,6 +652,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   }
 
   const startNewSession = (): void => {
+    if (chatFlightRef.current) return
     runRef.current += 1
     setThreadId(null)
     setMessages([])
@@ -649,9 +666,13 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     setRenamingSessionId(null)
     setPendingDeleteId(null)
     setSessionError(null)
+    setToolsOpen(false)
+    setWatchError(null)
+    setInspectionKind(null)
   }
 
   const openSession = async (id: string): Promise<void> => {
+    if (chatFlightRef.current) return
     const run = runRef.current
     try {
       const detail = await window.api.secretary.getThread(id)
@@ -671,6 +692,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       setRenamingSessionId(null)
       setPendingDeleteId(null)
       setSessionError(null)
+      setToolsOpen(false)
     } catch (cause) {
       if (run === runRef.current) setSessionError(cause instanceof Error ? cause.message : 'Could not open that session')
     }
@@ -999,9 +1021,10 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     }
   }
 
-  const sendMessage = async (): Promise<void> => {
-    const text = brief.trim()
-    if (!text || !settings.configured || loading) return
+  const sendMessage = async (inputText?: string): Promise<void> => {
+    const text = (inputText ?? brief).trim()
+    if (!text || !settings.configured || loading || chatFlightRef.current) return
+    chatFlightRef.current = true
     const run = runRef.current
     const history = messages
       .filter((item) => !item.error && item.content.trim())
@@ -1063,9 +1086,62 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
         }
       ])
     } finally {
-      if (run === runRef.current) setLoading(false)
+      if (run === runRef.current) {
+        chatFlightRef.current = false
+        setLoading(false)
+      }
     }
   }
+
+  const inspectProject = async (purpose: 'project-review' | 'error-diagnosis', automatic = false): Promise<boolean> => {
+    if (!settings.configured || !project.folderPath || chatFlightRef.current || loading || sending || answering || revisingPlan) return false
+    chatFlightRef.current = true
+    const generation = runRef.current
+    const terminal = useTerminalStore.getState()
+    const failures = managerFailureSignals(panels, terminal.sessions, terminal.errors, terminal.outputTails)
+    const details = panels.filter((panel) => failures.some((signal) => signal.title === panel.title))
+      .map((panel) => `${panel.title}: ${terminal.errors[panel.id] ?? 'A failure was detected in terminal output.'}`).slice(0, 5).join('\n')
+    const text = purpose === 'error-diagnosis'
+      ? `Project watch detected a failure. Analyze the current project's terminal failure evidence and relevant source files. Explain what failed, the likely cause with supporting evidence, and the smallest fix with a verification command. Separate facts from hypotheses. Report in the developer's language.\n${details}`
+      : `${automatic ? 'Project watch' : 'Project review'}: inspect this project's current code, changes, instructions and terminal health. Report concrete bugs, development risks and the most useful next step, with file references. Be concise; say when the available evidence is insufficient. Do not claim to have run tests. Report in the developer's language.`
+    setLoading(true)
+    setInspectionKind(purpose)
+    setWatchError(null)
+    if (!automatic || purpose === 'error-diagnosis') setSidebarOpen(true)
+    if (!automatic) setMessages((current) => [...current, { id: newId(), role: 'user', content: purpose === 'error-diagnosis' ? 'Analyze the latest error.' : 'Review this project.' }])
+    try {
+      const response = await window.api.secretary.chat({
+        project, purpose, message: text,
+        history: messages.filter((item) => !item.error).map((item) => ({ role: item.role, content: item.content })),
+        ...(threadId ? { threadId } : {}), panels: cliPanels, usage
+      })
+      if (generation !== runRef.current) return false
+      if (response.threadId) setThreadId(response.threadId)
+      setMessages((current) => [...current, { id: newId(), role: 'assistant', content: response.reply, createdAt: Date.now() }])
+      setSessionsTick((value) => value + 1)
+      void loadSettings()
+      return true
+    } catch (cause) {
+      if (generation !== runRef.current) return false
+      const message = cause instanceof Error ? cause.message : 'Project inspection could not finish.'
+      setWatchError(message)
+      if (!automatic) setMessages((current) => [...current, { id: newId(), role: 'assistant', content: message, error: true }])
+      return false
+    } finally {
+      if (generation === runRef.current) {
+        chatFlightRef.current = false
+        setLoading(false)
+        setInspectionKind(null)
+      }
+    }
+  }
+
+  const projectWatch = useManagerProjectWatch({
+    project, panels,
+    ready: historyLoaded && settingsLoaded && settings.configured,
+    busy: loading || sending || answering || revisingPlan || messages.some((item) => item.planStatus === 'sent' || item.planStatus === 'dispatching'),
+    inspect: inspectProject
+  })
 
   const waitingForUser = messages.some((item) => item.awaitingAnswer)
   const activeRuns = messages.some((item) => item.planStatus === 'sent' || item.planStatus === 'dispatching')
@@ -1081,7 +1157,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       : 'idle'
   const placeholder = !settings.configured
     ? 'Manager is not connected'
-    : `Ask Manager about ${project.name} or request work…`
+    : 'Ask anything, share an error, or describe what to build…'
 
   const revealCli = (panelId: string): void => {
     if (!panels.some((panel) => panel.id === panelId)) {
@@ -1105,12 +1181,13 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   ) : (
     <div className="secretary-composer">
       <textarea
+        aria-label="Message Manager"
         value={brief}
         onChange={(event) => setBrief(event.target.value)}
         placeholder={placeholder}
         rows={2}
         onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.shiftKey) {
+          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
             event.preventDefault()
             void sendMessage()
           }
@@ -1120,7 +1197,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
         type="button"
         className="secretary-send"
         onClick={() => void sendMessage()}
-        disabled={loading || !brief.trim()}
+        disabled={loading || !brief.trim() || !historyLoaded}
         aria-label="Send message"
         title="Send message"
       >
@@ -1138,7 +1215,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           onClick={() => setSidebarOpen(true)}
           aria-expanded={false}
           aria-label="Open Manager sidebar"
-          title="Manager · Let Bikorch coordinate your agents for you"
+          title="Manager · Your developer workspace"
         >
           <span className="secretary-rail-mark"><AppLogo size="xs" /></span>
           {railAttention ? <i className="secretary-rail-pulse" aria-hidden /> : null}
@@ -1159,7 +1236,9 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
               <small>{project.name}</small>
             </span>
           </span>
-          <span className="secretary-chat-meta" title={settings.model}>{settings.model}</span>
+          <button type="button" className="secretary-dismiss" onClick={startNewSession} disabled={loading || sending || answering} aria-label="New conversation" title="New conversation">
+            <Plus className="h-4 w-4" />
+          </button>
           <button type="button" className="secretary-dismiss" onClick={openSettings} aria-label="Open Manager settings" title="Manager settings">
             <SlidersHorizontal className="h-3.5 w-3.5" />
           </button>
@@ -1167,7 +1246,32 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
             <PanelRightClose className="h-3.5 w-3.5" />
           </button>
         </header>
-        <div className="secretary-ops">
+        <div className="manager-project-bar">
+          <button type="button" className={cn('manager-watch-toggle', projectWatch.enabled && settings.configured && 'is-active')}
+            onClick={() => projectWatch.setEnabled(!projectWatch.enabled)}
+            aria-label={projectWatch.enabled ? 'Pause project watch' : 'Enable project watch'} aria-pressed={projectWatch.enabled}
+            title={!settings.configured ? 'Connect Manager to inspect this project' : 'Checks project changes every five minutes and diagnoses terminal failures'}>
+            <Activity className="h-3.5 w-3.5" />
+            <span>{!settings.configured ? 'Setup needed' : !project.folderPath ? 'Attach a folder' : inspectionKind === 'error-diagnosis' ? 'Analyzing error' : inspectionKind ? 'Reviewing project' : projectWatch.enabled ? 'Watching project' : 'Watch paused'}</span>
+          </button>
+          <button type="button" className="manager-review-button" disabled={!settings.configured || !project.folderPath || loading || !historyLoaded || sending || activeRuns}
+            onClick={() => void inspectProject('project-review')} aria-label="Review project" title="Review project now">
+            <ScanSearch className="h-3.5 w-3.5" /><span>Review</span>
+          </button>
+          <button type="button" className={cn('manager-tools-toggle', toolsOpen && 'is-open')} onClick={() => setToolsOpen(!toolsOpen)}
+            aria-label="Manager tools" aria-expanded={toolsOpen} aria-controls="manager-tools">
+            <SlidersHorizontal className="h-3.5 w-3.5" /><ChevronDown className="h-3 w-3" />
+          </button>
+        </div>
+        {watchError ? <div className="manager-watch-error" role="status"><span>Inspection unavailable: {watchError}</span><button type="button" onClick={() => void inspectProject('project-review')} disabled={loading}>Retry</button></div> : null}
+        {recoveryRuns.length > 0 && !toolsOpen ? <button type="button" className="manager-attention-note" onClick={() => setToolsOpen(true)}>{recoveryRuns.length} interrupted task{recoveryRuns.length === 1 ? '' : 's'} to review <ChevronDown className="h-3 w-3" /></button> : null}
+        {toolsOpen ? <div className="secretary-ops manager-tools" id="manager-tools">
+          <div className="manager-capabilities">
+            <strong>Developer workspace</strong>
+            <p>Inspect code and errors, coordinate agents, implement changes, and review results.</p>
+            <span>Project inspection is automatic. Agent work starts when you approve a plan.</span>
+            <small>{settings.provider.source === 'cli' ? `${settings.provider.cli.kind ? AI_ACCOUNT_LABELS[settings.provider.cli.kind] : 'CLI'} Manager` : settings.model}{projectWatch.lastReviewedAt ? ` · Reviewed ${new Date(projectWatch.lastReviewedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}</small>
+          </div>
           {cacheAnalysis && ((cacheAnalysis.pressured && !cacheAnalysis.dismissed) || cacheAnalysis.releasedBytes) ? (
             <div className="secretary-cache" aria-label="Cache care">
               <div className="secretary-ops-heading"><span>Cache</span></div>
@@ -1209,11 +1313,11 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           </div>
           <div className="secretary-sessions">
             <div className="secretary-ops-heading">
-              <span>Old sessions</span>
-              <button type="button" className="secretary-memory-open" onClick={startNewSession}>New</button>
+              <span>Conversations</span>
+              <button type="button" className="secretary-memory-open" onClick={startNewSession} disabled={loading}>New</button>
             </div>
             {managerSessions.filter((session) => session.id !== threadId).length === 0 ? (
-              <p className="secretary-ops-empty">Yesterday's conversations show up here.</p>
+              <p className="secretary-ops-empty">Your saved conversations will appear here.</p>
             ) : (
               <ul className="secretary-session-list">
                 {managerSessions.filter((session) => session.id !== threadId).map((session) => (
@@ -1324,8 +1428,8 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
               ))}
             </div>
           ) : null}
-        </div>
-        <div className="secretary-chat-log" ref={logRef}>
+        </div> : null}
+        <div className="secretary-chat-log" ref={logRef} role="log" aria-label="Manager conversation" aria-live="polite">
           {hasOlderMessages ? (
             <button
               type="button"
@@ -1337,15 +1441,15 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
             </button>
           ) : null}
           {messages.length === 0 && !loading ? (
-            <div className="secretary-empty">
-              <div className="secretary-empty-stage">
-                <SecretaryAvatar mood="idle" variant="hero" />
-                <div className="secretary-empty-intro">
-                  <span>Developer supervisor</span>
-                  <strong>One conversation for your project.</strong>
-                  <p>Ask a question, request work, approve a plan, and review agent evidence here.</p>
-                </div>
-                <span className="secretary-empty-status"><i /> Online</span>
+            <div className="manager-welcome">
+              <span className="manager-welcome-mark"><Code2 className="h-6 w-6" /></span>
+              <span className="manager-welcome-eyebrow">YOUR DEVELOPER SPACE</span>
+              <h2>Let's build something good.</h2>
+              <p>One conversation to understand your code, solve errors, and move {project.name} forward.</p>
+              <div className="manager-starters">
+                <button type="button" onClick={() => void inspectProject('project-review')} disabled={!settings.configured || !project.folderPath || !historyLoaded}><ScanSearch className="h-4 w-4" /><span>Find what needs attention</span><ArrowUp className="h-3.5 w-3.5" /></button>
+                <button type="button" onClick={() => void inspectProject('error-diagnosis')} disabled={!settings.configured || !project.folderPath || !historyLoaded}><Activity className="h-4 w-4" /><span>Help me understand an error</span><ArrowUp className="h-3.5 w-3.5" /></button>
+                <button type="button" onClick={() => void sendMessage('Help me plan the next useful improvement for this project.')} disabled={!settings.configured || !historyLoaded}><Code2 className="h-4 w-4" /><span>Plan the next improvement</span><ArrowUp className="h-3.5 w-3.5" /></button>
               </div>
             </div>
           ) : null}
@@ -1374,8 +1478,8 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
               <div className="secretary-bubble is-assistant is-pending">
                 <SecretaryAvatar mood={answering ? 'working' : 'thinking'} variant="mini" decorative />
                 <span>
-                  <strong>{answering ? 'Forwarding answer' : 'Thinking'}</strong>
-                  <small>{answering ? 'Sending your response to the correct CLI task…' : 'Reading your memory and preparing the next step…'}</small>
+                  <strong>{inspectionKind === 'error-diagnosis' ? 'Analyzing the failure' : inspectionKind ? 'Reviewing your project' : answering ? 'Forwarding answer' : 'Thinking'}</strong>
+                  <small>{inspectionKind ? 'Reading code, changes, and terminal evidence…' : answering ? 'Sending your response to the correct CLI task…' : 'Working through your request…'}</small>
                 </span>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               </div>
@@ -1388,6 +1492,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
         </div>
         <div className="secretary-compose">
           {composer}
+          {settings.configured ? <div className="manager-composer-note"><span>Code · agents · errors · reviews</span><span>↵ Send <span aria-hidden>·</span> ⇧↵ New line</span></div> : null}
         </div>
       </aside>
     </section>

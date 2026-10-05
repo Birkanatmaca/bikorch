@@ -229,6 +229,8 @@ export interface SecretaryChatTurn {
 
 export interface SecretaryChatRequest {
   project: SecretaryProjectRef
+  /** Inspection turns can report findings but cannot open tools or dispatch work. */
+  purpose?: 'project-review' | 'error-diagnosis'
   /** Omitting this starts a new persisted project thread when storage is available. */
   threadId?: string
   message: string

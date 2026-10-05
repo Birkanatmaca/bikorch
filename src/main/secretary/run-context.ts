@@ -26,7 +26,7 @@ export function managerRunContext(runs: SecretaryRun[]): unknown[] {
       assignmentId: binding.assignmentId,
       sessionId: binding.sessionId
     })),
-    managerReport: run.status === 'completed' ? run.reply?.slice(0, 2_500) : null,
+    managerReport: run.status === 'completed' || run.status === 'failed' ? run.reply?.slice(0, 2_500) : null,
     error: run.errorMessage,
     evidence: run.evidence ? {
       verificationLevel: run.evidence.verificationLevel,

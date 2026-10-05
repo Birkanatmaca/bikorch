@@ -3,12 +3,13 @@ import { basename, join, relative } from 'path'
 import type { SecretaryProjectRef } from '@shared/contracts/secretary'
 import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
-import type { PtySessionStatus } from '@shared/contracts/pty'
+import type { PtyKind, PtySessionStatus } from '@shared/contracts/pty'
 import { scanProjectLanguages } from '../developer-intelligence/project-scan'
 import { redactSecrets } from '../developer-intelligence/redaction'
 import { getGitStatus } from '../git'
 import { loadSnapshot } from '../persistence/database'
 import { ptyManager } from '../cli/pty-manager'
+import { managerTerminalFailureExcerpt, readManagerSourceExcerpts, sanitizeInspectionText, type ManagerSourceExcerpt } from './inspection-evidence'
 
 const SKIPPED_DIRECTORIES = new Set([
   '.git',
@@ -33,6 +34,7 @@ const MAX_TREE_ENTRIES = 250
 const MAX_TREE_DEPTH = 4
 const MAX_INSTRUCTION_CHARS = 4_000
 const MAX_ACTIVE_AGENTS = 8
+const MAX_TERMINAL_FAILURES = 4
 const CLI_KINDS = new Set<string>(AI_ACCOUNT_KINDS)
 
 export interface SecretaryProjectContext {
@@ -67,6 +69,14 @@ export interface SecretaryProjectContext {
     status: 'starting' | 'running' | 'waiting' | 'busy'
     isolation: 'isolated' | 'shared'
     hasWorktree: boolean
+  }>
+  sourceExcerpts: ManagerSourceExcerpt[]
+  terminalFailures: Array<{
+    sessionId: string
+    kind: PtyKind
+    title: string
+    status: PtySessionStatus
+    excerpt: string
   }>
   warnings: string[]
 }
@@ -166,6 +176,8 @@ function emptyContext(project: SecretaryProjectRef, warning: string): SecretaryP
     tree: [],
     tasks: [],
     activeAgents: [],
+    sourceExcerpts: [],
+    terminalFailures: [],
     warnings: [warning]
   }
 }
@@ -181,7 +193,7 @@ function activeAgentsFor(projectId: string, snapshot: ReturnType<typeof loadSnap
   return panels.flatMap((panel) => {
     if (!CLI_KINDS.has(panel.type)) return []
     const session = ptyManager.getSessionSnapshot(panel.id)
-    if (!session || session.kind !== panel.type || !isActiveSessionStatus(session.status)) return []
+    if (!session || session.projectId !== projectId || session.kind !== panel.type || !isActiveSessionStatus(session.status)) return []
     return [{
       kind: panel.type as CliUsageKind,
       title: redactSecrets(panel.title).text.trim().slice(0, 120) || `${panel.type} CLI`,
@@ -192,11 +204,37 @@ function activeAgentsFor(projectId: string, snapshot: ReturnType<typeof loadSnap
   }).slice(0, MAX_ACTIVE_AGENTS)
 }
 
+function terminalFailuresFor(
+  projectId: string,
+  root: string,
+  snapshot: ReturnType<typeof loadSnapshot> | null
+): SecretaryProjectContext['terminalFailures'] {
+  const panels = snapshot?.workspaces[projectId]?.panels ?? []
+  return panels.flatMap((panel) => {
+    if (panel.type !== 'terminal' && !CLI_KINDS.has(panel.type)) return []
+    const session = ptyManager.getSessionSnapshot(panel.id)
+    if (!session || session.projectId !== projectId || session.kind !== panel.type) return []
+    const excerpt = managerTerminalFailureExcerpt(
+      ptyManager.getOutputTail(panel.id, 8_000),
+      session.cwd || root,
+      session.status === 'error'
+    )
+    if (!excerpt) return []
+    return [{
+      sessionId: session.sessionId,
+      kind: session.kind,
+      title: sanitizeInspectionText(panel.title, root, 120) || `${panel.type} terminal`,
+      status: session.status,
+      excerpt: sanitizeInspectionText(excerpt, root, 2_200)
+    }]
+  }).slice(-MAX_TERMINAL_FAILURES)
+}
+
 /**
  * Builds a bounded, redacted, read-only project summary for Secretary planning.
  * It never follows symlinks, reads environment files, or returns absolute paths.
  */
-export async function buildSecretaryProjectContext(project: SecretaryProjectRef): Promise<SecretaryProjectContext> {
+export async function buildSecretaryProjectContext(project: SecretaryProjectRef, focus = ''): Promise<SecretaryProjectContext> {
   if (!project.folderPath) return emptyContext(project, 'This project has no folder attached.')
 
   let root: string
@@ -224,6 +262,13 @@ export async function buildSecretaryProjectContext(project: SecretaryProjectRef)
     priority: task.priority
   }))
   const activeAgents = activeAgentsFor(project.id, savedSnapshot)
+  const terminalFailures = terminalFailuresFor(project.id, root, savedSnapshot)
+  const sourceExcerpts = await readManagerSourceExcerpts(
+    root,
+    treeResult.entries.filter((entry) => entry.kind === 'file').map((entry) => entry.path),
+    gitStatus?.changes.map((change) => change.path) ?? [],
+    `${focus}\n${terminalFailures.map((failure) => failure.excerpt).join('\n')}`
+  )
 
   return {
     project: { id: project.id, name: project.name, rootName: basename(root), available: true },
@@ -249,8 +294,12 @@ export async function buildSecretaryProjectContext(project: SecretaryProjectRef)
     tree: treeResult.entries,
     tasks,
     activeAgents,
-    warnings: treeResult.entries.length >= MAX_TREE_ENTRIES
-      ? ['The project tree was truncated to a safe planning limit.']
-      : []
+    sourceExcerpts,
+    terminalFailures,
+    warnings: [
+      ...(treeResult.entries.length >= MAX_TREE_ENTRIES ? ['The project tree was truncated to a safe planning limit.'] : []),
+      'Source excerpts are a bounded sample; this inspection does not run tests or read every file.',
+      ...(terminalFailures.length > 0 ? ['Terminal excerpts contain recent error-shaped lines; they may refer to earlier or recovered failures.'] : [])
+    ]
   }
 }
