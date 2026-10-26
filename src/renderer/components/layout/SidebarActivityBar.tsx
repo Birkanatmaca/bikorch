@@ -1,4 +1,4 @@
-import { Brain, CircleUser, FolderTree, GitBranch, SquareTerminal } from 'lucide-react'
+import { Brain, CircleUser, FolderTree, GitBranch, HardDrive, KeyRound, PackagePlus, SquareTerminal } from 'lucide-react'
 import type { LeftSidebarView } from '@shared/types'
 import { cn } from '@renderer/lib/utils'
 import { SidebarToolsGroup } from './SidebarToolsGroup'
@@ -12,9 +12,12 @@ interface SidebarActivityBarProps {
   onSelectFiles: () => void
   onSelectChanges: () => void
   onSelectAccounts: () => void
+  onSelectClis: () => void
+  onSelectApiKeys: () => void
   onSelectMemory: () => void
   onSelectTasks: () => void
   onSelectProfile: () => void
+  onSelectStorage: () => void
   onSelectMusic: () => void
   onSelectTimer: () => void
   onSelectSettings: () => void
@@ -29,9 +32,12 @@ export function SidebarActivityBar({
   onSelectFiles,
   onSelectChanges,
   onSelectAccounts,
+  onSelectClis,
+  onSelectApiKeys,
   onSelectMemory,
   onSelectTasks,
   onSelectProfile,
+  onSelectStorage,
   onSelectMusic,
   onSelectTimer,
   onSelectSettings
@@ -39,8 +45,11 @@ export function SidebarActivityBar({
   const filesActive = isOpen && view === 'files'
   const changesActive = isOpen && view === 'changes'
   const accountsActive = isOpen && view === 'accounts'
+  const clisActive = isOpen && view === 'clis'
+  const apiKeysActive = isOpen && view === 'apiKeys'
   const memoryActive = isOpen && view === 'memory'
   const profileActive = isOpen && view === 'profile'
+  const storageActive = isOpen && view === 'storage'
   const badge = changesCount > 99 ? '99+' : String(changesCount)
   const overlapBadge = overlapCount > 9 ? '9+' : String(overlapCount)
   const gitAlert = conflict || overlapCount > 0
@@ -83,6 +92,26 @@ export function SidebarActivityBar({
         >
           <SquareTerminal className="h-4 w-4" />
         </button>
+        <button
+          type="button"
+          onClick={onSelectClis}
+          aria-pressed={clisActive}
+          title={clisActive ? 'Hide CLI setup' : 'Install, update and remove CLIs'}
+          aria-label={clisActive ? 'Hide CLI setup' : 'Show CLI setup'}
+          className={cn('glass-icon-btn h-9 w-9', clisActive && 'glass-icon-btn-active')}
+        >
+          <PackagePlus className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onSelectApiKeys}
+          aria-pressed={apiKeysActive}
+          title={apiKeysActive ? 'Hide API keys' : 'Manage API keys'}
+          aria-label={apiKeysActive ? 'Hide API keys' : 'Show API keys'}
+          className={cn('glass-icon-btn h-9 w-9', apiKeysActive && 'glass-icon-btn-active')}
+        >
+          <KeyRound className="h-4 w-4" />
+        </button>
       </div>
       <span className="activity-rail-divider" aria-hidden="true" />
       <div className="activity-rail-group" aria-label="Intelligence">
@@ -105,6 +134,16 @@ export function SidebarActivityBar({
           className={cn('glass-icon-btn h-9 w-9', profileActive && 'glass-icon-btn-active')}
         >
           <CircleUser className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onSelectStorage}
+          aria-pressed={storageActive}
+          title={storageActive ? 'Hide storage' : 'Storage & caches'}
+          aria-label={storageActive ? 'Hide storage' : 'Show storage and caches'}
+          className={cn('glass-icon-btn h-9 w-9', storageActive && 'glass-icon-btn-active')}
+        >
+          <HardDrive className="h-4 w-4" />
         </button>
       </div>
       <SidebarToolsGroup

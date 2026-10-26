@@ -6,13 +6,22 @@ export interface CliTaskNotification {
   projectName: string
   title: string
   outcome: CliTaskNotificationOutcome
+  /** Optional richer copy, e.g. the Manager's "what I did" summary. */
+  heading?: string
+  summary?: string
 }
 
-export function cliTaskNotificationCopy(input: Pick<CliTaskNotification, 'title' | 'projectName' | 'outcome'>): {
+export function cliTaskNotificationCopy(input: Pick<CliTaskNotification, 'title' | 'projectName' | 'outcome' | 'heading' | 'summary'>): {
   title: string
   body: string
 } {
   const finished = input.outcome !== 'error'
+  if (input.heading || input.summary) {
+    return {
+      title: input.heading || (finished ? 'Task finished' : 'Task failed'),
+      body: input.summary || `${input.title} in ${input.projectName}`
+    }
+  }
   return {
     title: finished ? 'Task finished' : 'Task failed',
     body: `${input.title} ${finished ? 'finished' : 'failed'} in ${input.projectName}`

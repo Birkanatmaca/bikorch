@@ -59,3 +59,23 @@ export function loadUserShellEnv(): void {
     // Keep the GUI environment; enrichedPath() still adds common tool dirs.
   }
 }
+
+/**
+ * When Bikorch is started from inside a Claude Code session (its terminal, an
+ * agent's shell, a desktop app), it inherits that session's markers, sockets and
+ * account ids. Passed on, they make every Claude panel think it is a child of
+ * someone else's session: transcripts stop saving and requests can route
+ * through the host's proxy. Drop them when that host marker is present.
+ */
+export function scrubInheritedAgentSession(env: NodeJS.ProcessEnv = process.env): string[] {
+  const insideClaudeSession = Boolean(env.CLAUDECODE || env.CLAUDE_CODE_SESSION_ID || env.CLAUDE_CODE_CHILD_SESSION)
+  if (!insideClaudeSession) return []
+  const removed: string[] = []
+  for (const key of Object.keys(env)) {
+    if (key === 'CLAUDECODE' || key.startsWith('CLAUDE_') || key === 'ANTHROPIC_BASE_URL' || key === 'ANTHROPIC_AUTH_TOKEN') {
+      delete env[key]
+      removed.push(key)
+    }
+  }
+  return removed
+}

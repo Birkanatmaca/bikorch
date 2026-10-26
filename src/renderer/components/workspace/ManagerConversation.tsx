@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { AlertCircle, ArrowUp, Check, CircleHelp, FileCode2, Loader2, Pencil, Save, Square } from 'lucide-react'
 import { AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
-import type { SecretaryPlan, SecretaryRun, SecretaryRunEvidence } from '@shared/contracts/secretary'
+import type { SecretaryGoal, SecretaryPlan, SecretaryRun, SecretaryRunEvidence } from '@shared/contracts/secretary'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import { ManagerMarkdown } from './ManagerMarkdown'
 import { cn } from '@renderer/lib/utils'
@@ -22,6 +22,8 @@ export interface ManagerChatItem {
   awaitingAssignmentId?: string
   report?: SecretaryRunEvidence
   error?: boolean
+  /** Goal this plan starts or continues (goal mode). */
+  goal?: SecretaryGoal
 }
 
 interface ManagerConversationProps {
@@ -119,11 +121,25 @@ function ManagerPlanCard({ item, props }: { item: ManagerChatItem; props: Manage
         <>
           <div className="secretary-plan-heading manager-chat-card-heading">
             <div>
-              <strong>{item.followUp ? 'Next step' : 'Ready to start'}</strong>
-              <ManagerMarkdown content={plan.overview} />
+              <strong>{item.goal ? 'Goal' : item.followUp ? 'Next step' : 'Ready to start'}</strong>
+              <ManagerMarkdown content={item.goal ? item.goal.objective : plan.overview} />
             </div>
             <span className="manager-chat-status is-pending">Your approval</span>
           </div>
+          {item.goal ? (
+            <div className="manager-goal-card">
+              <p className="manager-goal-label">Done means</p>
+              <ul className="manager-goal-criteria">
+                {item.goal.criteria.map((criterion, index) => <li key={index}>{criterion}</li>)}
+              </ul>
+              <p className="manager-goal-meta">
+                {item.goal.verifyCommands.length > 0
+                  ? <>Bikorch checks with <code>{item.goal.verifyCommands.join(' · ')}</code> after each round. </>
+                  : 'No check command was found, so results rest on the CLI reports. '}
+                Up to {item.goal.maxRounds} rounds, no further approvals. Commits and pushes stay with you.
+              </p>
+            </div>
+          ) : null}
           <details className="manager-chat-details">
             <summary>Plan details <span>{plan.assignments.length} task{plan.assignments.length === 1 ? '' : 's'}{rootCount > 1 ? ` · ${rootCount} in parallel` : ''}</span></summary>
             {assignments}
@@ -131,7 +147,7 @@ function ManagerPlanCard({ item, props }: { item: ManagerChatItem; props: Manage
           <div className="secretary-plan-actions">
             {pending ? (
               <>
-                <button type="button" className="manager-chat-action-primary" disabled={props.sending || props.revisingPlan} onClick={() => props.onApprovePlan(item.id, plan, item.planOpenKinds ?? [], item.runId)}><ArrowUp className="h-3.5 w-3.5" /> Start work</button>
+                <button type="button" className="manager-chat-action-primary" disabled={props.sending || props.revisingPlan} onClick={() => props.onApprovePlan(item.id, plan, item.planOpenKinds ?? [], item.runId)}><ArrowUp className="h-3.5 w-3.5" /> {item.goal ? 'Start goal' : 'Start work'}</button>
                 {item.runId ? <button type="button" disabled={props.sending || props.revisingPlan} onClick={() => props.onStartPlanRevision(item.id, plan)}><Pencil className="h-3.5 w-3.5" /> Edit plan</button> : null}
                 <button type="button" disabled={props.sending} onClick={() => props.onRejectPlan(item.id, item.runId)}>Cancel</button>
               </>

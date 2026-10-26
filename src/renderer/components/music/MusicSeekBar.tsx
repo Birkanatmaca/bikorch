@@ -76,13 +76,12 @@ export function MusicSeekBar(): React.JSX.Element {
   useEffect(() => {
     paintFromClock()
     if (!playing) return
-    let frame = 0
-    const tick = (): void => {
+    // The bar moves a few pixels per second and the clock shows seconds, so a
+    // quarter-second repaint looks the same as a per-frame loop at a fraction of the cost.
+    const id = window.setInterval(() => {
       if (!draggingRef.current) paintFromClock()
-      frame = window.requestAnimationFrame(tick)
-    }
-    frame = window.requestAnimationFrame(tick)
-    return () => window.cancelAnimationFrame(frame)
+    }, 250)
+    return () => window.clearInterval(id)
   }, [playing, storePosition, storeDuration, trackDuration])
 
   useEffect(() => {

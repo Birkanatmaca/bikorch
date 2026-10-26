@@ -13,7 +13,7 @@ export default defineConfig({
     plugins: [
       // Pure JS deps (cron-parser is ESM-only) must be bundled. Native modules and
       // sql.js (WASM file) stay external and are copied into the packaged app.
-      externalizeDepsPlugin({ exclude: ['cron-parser'] })
+      externalizeDepsPlugin({ exclude: ['cron-parser', '@xterm/headless'] })
     ],
     build: {
       rollupOptions: {

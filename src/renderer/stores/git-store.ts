@@ -169,6 +169,30 @@ function statusToState(result: GitStatusResponse): GitState {
   }
 }
 
+function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+/**
+ * Keeps the previous objects when a poll finds nothing new, so selectors keep
+ * returning the same references and subscribers skip re-rendering. Only
+ * `lastFetchedAt` moves, which the diff viewer uses to re-read file contents.
+ */
+export function shareGitState(previous: GitState | undefined, next: GitState): GitState {
+  if (!previous) return next
+  const { lastFetchedAt: _previousAt, ...previousRest } = previous
+  const { lastFetchedAt: _nextAt, ...nextRest } = next
+  if (sameJson(previousRest, nextRest)) return { ...previous, lastFetchedAt: next.lastFetchedAt }
+  return {
+    ...next,
+    changes: sameJson(previous.changes, next.changes) ? previous.changes : next.changes,
+    branches: sameJson(previous.branches, next.branches) ? previous.branches : next.branches,
+    recentCommits: sameJson(previous.recentCommits, next.recentCommits)
+      ? previous.recentCommits
+      : next.recentCommits
+  }
+}
+
 function pickSelectedRoot(repos: GitRepoInfo[], previous: string | null): string | null {
   if (previous && repos.some((repo) => normalizePath(repo.root) === normalizePath(previous))) {
     return previous
@@ -210,7 +234,7 @@ export const useGitStore = create<GitStore>((set, get) => ({
 
       const byRoot: Record<string, GitState> = {}
       for (const [root, repoState] of statuses) {
-        byRoot[root] = repoState
+        byRoot[root] = shareGitState(previous.byRoot[root], repoState)
       }
 
       if (latestRefreshByProject.get(projectId) !== refreshId) return
@@ -224,7 +248,7 @@ export const useGitStore = create<GitStore>((set, get) => ({
           ...state.stateByProject,
           [projectId]: {
             workspaceRoot: projectRoot,
-            repos: discovered.repos,
+            repos: sameJson(previous.repos, discovered.repos) ? previous.repos : discovered.repos,
             selectedRoot,
             byRoot,
             loading: false,

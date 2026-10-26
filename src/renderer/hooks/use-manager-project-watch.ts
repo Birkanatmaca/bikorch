@@ -3,13 +3,26 @@ import type { PanelDefinition, Project } from '@shared/types'
 import type { SecretaryChatRequest } from '@shared/contracts/secretary'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { fingerprint, managerFailureSignals } from '@renderer/lib/manager-watch'
+import { isDocumentHidden } from '@renderer/lib/visibility'
 
 type InspectionPurpose = NonNullable<SecretaryChatRequest['purpose']>
 const REVIEW_INTERVAL = 5 * 60_000
 const reviewCache = new Map<string, { root: string; signature: string; reviewedAt: number; failures: Set<string> }>()
 
-function watchPreference(projectId: string): boolean {
-  try { return localStorage.getItem(`bikorch:manager-watch:${projectId}`) !== 'paused' } catch { return true }
+type WatchPreference = 'active' | 'errors' | 'paused'
+
+/**
+ * Unset means 'errors': diagnose a failing CLI (rare, useful) but do not review the
+ * whole project every few minutes, which spends tokens the user never asked for.
+ * 'active' (the Watch toggle) adds the periodic review; 'paused' turns both off.
+ */
+function watchPreference(projectId: string): WatchPreference {
+  try {
+    const stored = localStorage.getItem(`bikorch:manager-watch:${projectId}`)
+    return stored === 'active' || stored === 'paused' ? stored : 'errors'
+  } catch {
+    return 'errors'
+  }
 }
 
 export function useManagerProjectWatch(input: {
@@ -19,18 +32,20 @@ export function useManagerProjectWatch(input: {
   busy: boolean
   inspect: (purpose: InspectionPurpose, automatic: boolean) => Promise<boolean>
 }): { enabled: boolean; setEnabled: (enabled: boolean) => void; lastReviewedAt: number | null } {
-  const [enabled, updateEnabled] = useState(() => watchPreference(input.project.id))
+  const [preference, updatePreference] = useState(() => watchPreference(input.project.id))
+  const enabled = preference === 'active'
   const [lastReviewedAt, setLastReviewedAt] = useState<number | null>(null)
   const latest = useRef(input)
   latest.current = input
 
   useEffect(() => {
-    updateEnabled(watchPreference(input.project.id))
+    updatePreference(watchPreference(input.project.id))
     setLastReviewedAt(reviewCache.get(input.project.id)?.reviewedAt ?? null)
   }, [input.project.id])
 
   useEffect(() => {
-    if (!enabled || !input.ready || !input.project.folderPath) return
+    if (preference === 'paused' || !input.ready || !input.project.folderPath) return
+    const reviewProject = preference === 'active'
     const projectId = input.project.id
     const previous = reviewCache.get(projectId)
     const cache = previous?.root === input.project.folderPath ? previous
@@ -42,7 +57,7 @@ export function useManagerProjectWatch(input: {
     let nextErrorCheck = 0
     const tick = async (): Promise<void> => {
       const current = latest.current
-      if (!active || checking || current.busy || !current.ready || current.project.id !== projectId) return
+      if (!active || checking || current.busy || !current.ready || current.project.id !== projectId || isDocumentHidden()) return
       checking = true
       try {
         const terminal = useTerminalStore.getState()
@@ -62,7 +77,7 @@ export function useManagerProjectWatch(input: {
           }
           return
         }
-        if (Date.now() < nextReviewCheck) return
+        if (!reviewProject || Date.now() < nextReviewCheck) return
         nextReviewCheck = Date.now() + REVIEW_INTERVAL
         if (Date.now() - cache.reviewedAt < REVIEW_INTERVAL) return
         const git = await window.api.git.status({ projectRoot: current.project.folderPath! }).catch(() => null)
@@ -93,11 +108,12 @@ export function useManagerProjectWatch(input: {
     const initial = window.setTimeout(() => { void tick() }, 1500)
     const timer = window.setInterval(() => { void tick() }, 5000)
     return () => { active = false; window.clearTimeout(initial); window.clearInterval(timer) }
-  }, [enabled, input.ready, input.project.id, input.project.folderPath])
+  }, [preference, input.ready, input.project.id, input.project.folderPath])
 
   const setEnabled = (next: boolean): void => {
-    updateEnabled(next)
-    try { localStorage.setItem(`bikorch:manager-watch:${input.project.id}`, next ? 'active' : 'paused') } catch { /* Ephemeral preference remains usable. */ }
+    const value: WatchPreference = next ? 'active' : 'errors'
+    updatePreference(value)
+    try { localStorage.setItem(`bikorch:manager-watch:${input.project.id}`, value) } catch { /* Ephemeral preference remains usable. */ }
   }
   return { enabled, setEnabled, lastReviewedAt }
 }

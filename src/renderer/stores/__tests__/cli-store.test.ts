@@ -6,7 +6,7 @@ const install = vi.fn()
 const status = vi.fn()
 beforeEach(() => {
   vi.stubGlobal('window', { api: { cli: { detect, install, status } } })
-  useCliStore.setState({ installedByKind: {}, errorsByKind: {}, installingKind: null, installation: null })
+  useCliStore.setState({ installedByKind: {}, versionByKind: {}, managedByKind: {}, errorsByKind: {}, installingKind: null, installation: null })
   status.mockReset().mockResolvedValue({ installation: null })
   detect.mockReset().mockResolvedValue({ installed: false, command: null })
   install.mockReset()

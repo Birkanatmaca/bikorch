@@ -114,27 +114,87 @@ async function detectRemote(
   return { name, url: url ? sanitizeRemoteUrl(url) : null }
 }
 
-async function detectSync(
-  projectRoot: string
-): Promise<{ upstream: string | null; ahead: number; behind: number }> {
-  const upstream = (
-    await runGit(projectRoot, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']).catch(
-      () => ''
-    )
-  ).trim()
-  if (!upstream) return { upstream: null, ahead: 0, behind: 0 }
+interface BranchHeader {
+  branch: string | null
+  upstream: string | null
+  ahead: number
+  behind: number
+}
 
-  const counts = (
-    await runGit(projectRoot, ['rev-list', '--left-right', '--count', `${upstream}...HEAD`]).catch(
-      () => ''
-    )
-  ).trim()
-  const [behindRaw, aheadRaw] = counts.split(/\s+/)
-  return {
-    upstream,
-    ahead: Number(aheadRaw) || 0,
-    behind: Number(behindRaw) || 0
+/** Parses the `## …` line of `git status --porcelain -b`. */
+export function parseBranchHeader(line: string): BranchHeader {
+  const empty: BranchHeader = { branch: null, upstream: null, ahead: 0, behind: 0 }
+  if (!line.startsWith('## ')) return empty
+  let rest = line.slice(3).trim()
+
+  const unborn = /^(?:No commits yet on|Initial commit on) (.+)$/.exec(rest)
+  if (unborn) return { ...empty, branch: unborn[1].trim() || null }
+  if (rest.startsWith('HEAD (no branch)')) return empty
+
+  let ahead = 0
+  let behind = 0
+  let gone = false
+  const tracking = /\s\[([^\]]*)\]$/.exec(rest)
+  if (tracking) {
+    rest = rest.slice(0, tracking.index).trim()
+    gone = tracking[1].trim() === 'gone'
+    ahead = Number(/ahead (\d+)/.exec(tracking[1])?.[1] ?? 0)
+    behind = Number(/behind (\d+)/.exec(tracking[1])?.[1] ?? 0)
   }
+
+  const separator = rest.indexOf('...')
+  const branch = separator >= 0 ? rest.slice(0, separator) : rest
+  const upstream = separator >= 0 && !gone ? rest.slice(separator + 3) || null : null
+  return { branch: branch || null, upstream, ahead, behind }
+}
+
+interface RepoMetadata {
+  key: string
+  fetchedAt: number
+  remote: { name: string | null; url: string | null }
+  branches: string[]
+  recentCommits: GitCommit[]
+}
+
+// Remotes, branch lists and the commit log change rarely, but status is polled
+// every few seconds. Re-read them when HEAD moves or after a short TTL.
+const METADATA_TTL_MS = 30_000
+const metadataCache = new Map<string, RepoMetadata>()
+
+export function invalidateGitMetadata(projectRoot: string): void {
+  metadataCache.delete(projectRoot)
+}
+
+async function readRepoMetadata(projectRoot: string, header: BranchHeader): Promise<RepoMetadata> {
+  const key = `${header.branch}\0${header.upstream}\0${header.ahead}\0${header.behind}`
+  const cached = metadataCache.get(projectRoot)
+  if (cached && cached.key === key && Date.now() - cached.fetchedAt < METADATA_TTL_MS) {
+    return cached
+  }
+
+  const [remote, branchesOutput, commitLog] = await Promise.all([
+    detectRemote(projectRoot),
+    runGit(projectRoot, ['for-each-ref', '--format=%(refname:short)', 'refs/heads/']).catch(() => ''),
+    runGit(projectRoot, [
+      'log',
+      '-n',
+      '8',
+      '--date=iso-strict',
+      '--pretty=format:%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1e'
+    ]).catch(() => '')
+  ])
+  const metadata: RepoMetadata = {
+    key,
+    fetchedAt: Date.now(),
+    remote,
+    branches: branchesOutput
+      .split(/\r?\n/)
+      .map((branch) => branch.trim())
+      .filter(Boolean),
+    recentCommits: parseRecentCommits(commitLog)
+  }
+  metadataCache.set(projectRoot, metadata)
+  return metadata
 }
 
 function parseRecentCommits(raw: string): GitCommit[] {
@@ -184,24 +244,20 @@ export async function getGitStatus(projectRoot: string): Promise<{
   const repo = await isGitRepo(projectRoot)
   if (!repo) return empty
 
-  const [statusOutput, branchOutput, remote, sync, branchesOutput, commitLog] = await Promise.all([
-    runGit(projectRoot, ['-c', 'core.quotepath=false', 'status', '--porcelain']),
-    runGit(projectRoot, ['branch', '--show-current']).catch(() => ''),
-    detectRemote(projectRoot),
-    detectSync(projectRoot),
-    runGit(projectRoot, ['for-each-ref', '--format=%(refname:short)', 'refs/heads/']).catch(() => ''),
-    runGit(projectRoot, [
-      'log',
-      '-n',
-      '8',
-      '--date=iso-strict',
-      '--pretty=format:%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1e'
-    ]).catch(() => '')
+  const statusOutput = await runGit(projectRoot, [
+    '-c',
+    'core.quotepath=false',
+    'status',
+    '--porcelain',
+    '-b'
   ])
+  const [headerLine = '', ...statusLines] = statusOutput.split('\n')
+  const header = parseBranchHeader(headerLine)
+  const metadata = await readRepoMetadata(projectRoot, header)
 
   const changesMap = new Map<string, GitChange>()
 
-  for (const line of statusOutput.split('\n')) {
+  for (const line of statusLines) {
     const trimmed = line.trimEnd()
     if (!trimmed) continue
 
@@ -220,22 +276,18 @@ export async function getGitStatus(projectRoot: string): Promise<{
   }
 
   const changes = Array.from(changesMap.values()).sort((a, b) => a.path.localeCompare(b.path))
-  const branches = branchesOutput
-    .split(/\r?\n/)
-    .map((branch) => branch.trim())
-    .filter(Boolean)
 
   return {
     changes,
-    branch: branchOutput.trim() || null,
-    branches,
-    recentCommits: parseRecentCommits(commitLog),
+    branch: header.branch,
+    branches: metadata.branches,
+    recentCommits: metadata.recentCommits,
     isRepo: true,
-    remoteName: remote.name,
-    remoteUrl: remote.url,
-    upstream: sync.upstream,
-    ahead: sync.ahead,
-    behind: sync.behind
+    remoteName: metadata.remote.name,
+    remoteUrl: metadata.remote.url,
+    upstream: header.upstream,
+    ahead: header.ahead,
+    behind: header.behind
   }
 }
 
@@ -255,6 +307,7 @@ export async function checkoutGitBranch(projectRoot: string, branch: string): Pr
   }
 
   await runGit(projectRoot, ['checkout', branch])
+  invalidateGitMetadata(projectRoot)
 }
 
 export async function stageGitFile(projectRoot: string, filePath: string): Promise<void> {
@@ -296,6 +349,7 @@ export async function commitGitChanges(projectRoot: string, message: string): Pr
   if (!trimmed) throw new Error('Commit message cannot be empty')
   if (trimmed.length > 500) throw new Error('Commit message is too long')
   await runGit(projectRoot, ['commit', '-m', trimmed])
+  invalidateGitMetadata(projectRoot)
 }
 
 const MAX_DIFF_BYTES = 2 * 1024 * 1024

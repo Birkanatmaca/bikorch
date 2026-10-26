@@ -16,7 +16,7 @@ describe('Secretary request policy', () => {
   it('keeps common failures safe while preserving useful validation details', () => {
     expect(secretaryRequestError(401).message).toMatch(/API key was rejected/i)
     expect(secretaryRequestError(429).message).toMatch(/rate-limited/i)
-    expect(secretaryNetworkError(true).message).toMatch(/timed out/i)
+    expect(secretaryNetworkError(true).message).toMatch(/too long/i)
     expect(secretaryRequestError(400, 'The model gpt-5.6-luna is not available').message)
       .toMatch(/gpt-5\.6-luna/)
     expect(secretaryRequestError(400, 'Bearer sk-secret-value').message)

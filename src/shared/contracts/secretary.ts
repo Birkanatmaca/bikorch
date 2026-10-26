@@ -227,8 +227,50 @@ export interface SecretaryChatTurn {
   content: string
 }
 
+export type SecretaryGoalStatus = 'draft' | 'active' | 'met' | 'blocked' | 'exhausted' | 'stopped'
+
+/** A command Bikorch ran itself to check the work, not a CLI's claim. */
+export interface SecretaryGoalVerification {
+  command: string
+  cwd: string
+  exitCode: number | null
+  output: string
+  durationMs: number
+  /** Why the command was not run (unsafe, timed out, missing tool). */
+  skipped?: string
+}
+
+export interface SecretaryGoalCriterion {
+  criterion: string
+  met: boolean
+  evidence: string
+}
+
+/**
+ * "Work until it is done": the Manager repeats plan → CLI work → independent
+ * verification until every acceptance criterion is met or the round limit hits.
+ */
+export interface SecretaryGoal {
+  id: string
+  threadId: string
+  projectId: string
+  objective: string
+  criteria: string[]
+  verifyCommands: string[]
+  maxRounds: number
+  round: number
+  status: SecretaryGoalStatus
+  criteriaStatus: SecretaryGoalCriterion[]
+  lastVerification: SecretaryGoalVerification[]
+  summary: string
+  createdAt: number
+  updatedAt: number
+}
+
 export interface SecretaryChatRequest {
   project: SecretaryProjectRef
+  /** The user asked the Manager to keep going until the request is fully done. */
+  goalMode?: boolean
   /** Inspection turns can report findings but cannot open tools or dispatch work. */
   purpose?: 'project-review' | 'error-diagnosis'
   /** Omitting this starts a new persisted project thread when storage is available. */
@@ -254,6 +296,8 @@ export interface SecretaryChatResponse {
   savedSkills?: { id: string; name: string }[]
   /** Surfaces Manager opened in this turn. CLI prompts still require plan approval. */
   actions?: ManagerAppAction[]
+  /** Draft goal awaiting the user's one-time approval (goal mode only). */
+  goal?: SecretaryGoal
 }
 
 /** One practical lesson for a local calendar day, written from work memories. */
@@ -447,9 +491,20 @@ export interface SecretaryRunAnswerRequest {
   message: string
 }
 
+/** Short "what I did" summary the Manager writes for the completion notification. */
+export interface SecretaryRunNotice {
+  headline: string
+  highlights: string[]
+}
+
 export type SecretaryEvent =
   | {
       type: 'run-report'
+      /** completed, or failed when an assignment failed or was skipped. */
+      status: 'completed' | 'failed'
+      notice: SecretaryRunNotice
+      /** Goal state after this round, when the run belongs to a goal. */
+      goal?: SecretaryGoal
       projectId: string
       threadId: string
       runId: string
@@ -465,6 +520,10 @@ export type SecretaryEvent =
     }
   | {
       type: 'run-followup'
+      /** Goal rounds continue without asking again; the UI starts them itself. */
+      autoStart?: boolean
+      goal?: SecretaryGoal
+      notice?: SecretaryRunNotice
       projectId: string
       threadId: string
       completedRunId: string

@@ -14,6 +14,11 @@ const mocks = vi.hoisted(() => ({
   releaseSecretaryRunLock: vi.fn()
 }))
 
+// These tests exercise run flow; per-task result tokens are covered in the protocol tests.
+vi.mock('@shared/secretary-result-protocol', async () => ({
+  ...await vi.importActual<typeof import('@shared/secretary-result-protocol')>('@shared/secretary-result-protocol'),
+  secretaryResultToken: () => ''
+}))
 vi.mock('../../cli/pty-manager', () => ({
   ptyManager: {
     observe: (listener: typeof mocks.observer) => {
@@ -103,11 +108,24 @@ describe('Secretary result collector', () => {
       sessionId: 'session-1', cwd: 'C:\\workspace', gitStart: { headSha: 'a', changedFiles: [], commits: [] }
     }])
     mocks.observer?.({ type: 'data', sessionId: 'session-1', data: 'Error: connection refused while building' })
-    await vi.advanceTimersByTimeAsync(8 * 60_000)
+    await vi.advanceTimersByTimeAsync(15 * 60_000)
     expect(mocks.writeForSecretary).toHaveBeenCalledWith('session-1', '\u0003')
     expect(mocks.finalizeSecretaryRun).toHaveBeenCalledWith(run.id, [expect.objectContaining({
       outcome: 'failed', output: 'Error: connection refused while building', summary: expect.stringContaining('connection refused')
     })])
+  })
+
+  it('keeps a run alive while the CLI keeps producing output', async () => {
+    vi.useFakeTimers()
+    trackSecretaryRun(run, [{
+      assignment: { id: 'assignment-1', panelId: null, kind: 'cursor', mode: 'implement', title: 'Build', instruction: 'Build app', expectedResult: 'Done', rationale: 'Task', usageNote: 'Available' },
+      sessionId: 'session-1', cwd: '/workspace', gitStart: { headSha: 'a', changedFiles: [], commits: [] }
+    }])
+    for (let minute = 0; minute < 30; minute += 1) {
+      mocks.observer?.({ type: 'data', sessionId: 'session-1', data: `step ${minute}\n` })
+      await vi.advanceTimersByTimeAsync(60_000)
+    }
+    expect(mocks.finalizeSecretaryRun).not.toHaveBeenCalled()
   })
 
   it('uses Git snapshots as the source of truth for changed-file reporting', async () => {

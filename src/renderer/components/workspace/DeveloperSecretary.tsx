@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Activity, ArrowUp, Check, ChevronDown, Code2, Loader2, PanelRightClose, Plus, ScanSearch, SlidersHorizontal } from 'lucide-react'
+import { Activity, ArrowUp, Check, ChevronDown, Code2, Loader2, PanelRightClose, Plus, ScanSearch, SlidersHorizontal, Target } from 'lucide-react'
 import type { PanelDefinition, Project } from '@shared/types'
 import type { ManagerAppAction, SecretaryMessageCursor, SecretaryPlan, SecretaryRun, SecretaryRunStatus, SecretarySessionSummary, SecretarySessionWork, SecretaryThreadDetail } from '@shared/contracts/secretary'
 import type { CacheAnalysis } from '@shared/contracts/resources'
@@ -18,9 +18,12 @@ import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intell
 import { useSecretaryStore } from '@renderer/stores/secretary-store'
 import { useUsageStore } from '@renderer/stores/usage-store'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
+import { ManagerReadiness, readGitSetup } from './ManagerReadiness'
+import { liveTerminalScreen } from '@renderer/lib/live-terminals'
+import { gitSetupReady } from '@shared/contracts/git'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useAiAccountsStore } from '@renderer/stores/ai-accounts-store'
-import { cliPermissionResponse, looksWorkspaceTrustPrompt } from '@shared/cli-permission'
+import { cliPermissionResponse, looksWorkspaceTrustPrompt, permissionKeystrokes } from '@shared/cli-permission'
 import { inferCliActivity, stripAnsi } from '@renderer/lib/cli-activity'
 import { submitCliPrompt } from '@renderer/lib/submit-cli-prompt'
 import { flushPersistence } from '@renderer/lib/persistence-sync'
@@ -221,6 +224,7 @@ function sleep(ms: number): Promise<void> {
 async function waitForCliIdle(sessionId: string, timeoutMs = 60000): Promise<boolean> {
   const started = Date.now()
   let trustReplies = 0
+  let answeredMarker = ''
   while (Date.now() - started < timeoutMs) {
     const terminal = useTerminalStore.getState()
     const status = terminal.getStatus(sessionId)
@@ -230,20 +234,34 @@ async function waitForCliIdle(sessionId: string, timeoutMs = 60000): Promise<boo
     if (status === 'stopped') {
       throw new Error('The CLI process exited before the task could be sent.')
     }
-    const tail = stripAnsi(terminal.getOutputTail(sessionId))
+    const fullTail = stripAnsi(terminal.getOutputTail(sessionId))
+    // Read what the terminal shows now: it is redrawn after an answer, so a stale
+    // "❯ No" cannot trigger a second reply. Without a live terminal (panel not
+    // mounted), fall back to the output after the last reply.
+    const screen = liveTerminalScreen(sessionId)
+    const marker = answeredMarker ? fullTail.lastIndexOf(answeredMarker) : -1
+    const tail = screen ?? (marker >= 0 ? fullTail.slice(marker + answeredMarker.length) : fullTail)
     const panel = useWorkspaceStore.getState().getActiveWorkspace()?.panels.find((item) => item.id === sessionId)
     const managedWorktree = Boolean(panel?.worktreePath && panel.worktreePath.includes('/agent-worktrees/'))
     const permission = cliPermissionResponse(tail, { managedWorktree })
     if (looksWorkspaceTrustPrompt(tail) && permission && trustReplies < 3) {
       trustReplies += 1
-      await window.api.pty.write({ sessionId, data: permission })
-      await sleep(400)
+      answeredMarker = fullTail.slice(-160)
+      for (const [index, keystroke] of permissionKeystrokes(permission).entries()) {
+        if (index > 0) await sleep(350)
+        await window.api.pty.write({ sessionId, data: keystroke })
+      }
+      // Give the CLI time to leave the dialog before reading its screen again.
+      await sleep(900)
       continue
     }
     if (looksWorkspaceTrustPrompt(tail) && !managedWorktree) {
       throw new Error('The CLI is waiting for workspace trust. Review and approve it in the terminal before sending this task.')
     }
-    if (inferCliActivity(tail) === 'waiting') return true
+    const activity = screen !== null
+      ? inferCliActivity(screen, { screen: true })
+      : inferCliActivity(answeredMarker ? tail : fullTail)
+    if (activity === 'waiting') return true
     await sleep(250)
   }
   return inferCliActivity(stripAnsi(useTerminalStore.getState().getOutputTail(sessionId))) === 'waiting'
@@ -274,6 +292,10 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   const [answering, setAnswering] = useState(false)
   const [sending, setSending] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
+  const [readinessAttention, setReadinessAttention] = useState(0)
+  // "Work until done": the next message asks for a goal instead of a single plan.
+  const [goalMode, setGoalMode] = useState(false)
+  const approvePlanRef = useRef<((messageId: string, plan: SecretaryPlan, openKinds: CliUsageKind[], runId?: string) => Promise<void>) | null>(null)
   const [threadId, setThreadId] = useState<string | null>(null)
   const [managerSessions, setManagerSessions] = useState<SecretarySessionSummary[]>([])
   const [sessionsTick, setSessionsTick] = useState(0)
@@ -459,6 +481,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       return
     }
     if (event.type === 'run-followup') {
+      const followUpMessageId = newId()
       setSidebarOpen(true)
       setMessages((current) => [
         ...current.map((item) => item.runId === event.completedRunId
@@ -467,17 +490,24 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           : item),
         { id: newId(), role: 'assistant', content: event.reply, runId: event.completedRunId, report: event.completedEvidence },
         {
-          id: newId(),
+          id: followUpMessageId,
           role: 'assistant',
-          content: 'A follow-up plan is ready for review.',
+          content: event.autoStart ? (event.notice?.headline ?? 'Starting the next goal round.') : 'A follow-up plan is ready for review.',
           plan: event.plan,
           followUp: true,
           runId: event.runId,
           planOpenKinds: event.openKinds,
-          planStatus: 'awaiting-approval' as const
+          planStatus: 'awaiting-approval' as const,
+          ...(event.goal ? { goal: event.goal } : {})
         }
       ])
       setFeedback(null)
+      // Goal rounds were approved with the goal; start the next one right away.
+      if (event.autoStart) {
+        window.setTimeout(() => {
+          void approvePlanRef.current?.(followUpMessageId, event.plan, event.openKinds, event.runId)
+        }, 600)
+      }
       return
     }
     if (event.type === 'run-needs-user') {
@@ -927,6 +957,15 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
     persistedRunId?: string
   ): Promise<void> => {
     if (sending || approvingPlanIdsRef.current.has(messageId)) return
+    // Every task runs in its own Git worktree. Stop here, before panels open, and
+    // point at the one-click fix instead of failing inside a terminal.
+    if (project.folderPath) {
+      const git = await readGitSetup(project.folderPath, true)
+      if (git && !gitSetupReady(git)) {
+        setReadinessAttention((value) => value + 1)
+        return
+      }
+    }
     approvingPlanIdsRef.current.add(messageId)
     const run = runRef.current
     setMessages((current) => current.map((item) => (
@@ -986,6 +1025,8 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       approvingPlanIdsRef.current.delete(messageId)
     }
   }
+  approvePlanRef.current = approvePlan
+
 
   const answerRun = async (messageId: string, runId: string, assignmentId: string | undefined, answer: string): Promise<boolean> => {
     if (answering || !answer.trim()) return false
@@ -1041,6 +1082,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
         message: text,
         history,
         ...(threadId ? { threadId } : {}),
+        ...(goalMode ? { goalMode: true } : {}),
         panels: cliPanels,
         usage
       })
@@ -1068,11 +1110,13 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
                 createdAt: Date.now(),
                 ...(response.runId ? { runId: response.runId, planRevision: response.planRevision } : {}),
                 planOpenKinds: response.openKinds ?? [],
-                planStatus: 'awaiting-approval' as const
+                planStatus: 'awaiting-approval' as const,
+                ...(response.goal ? { goal: response.goal } : {})
               }
             : {})
         }
       ])
+      if (response.goal) setGoalMode(false)
       void loadSettings()
     } catch (cause) {
       if (run !== runRef.current) return
@@ -1157,7 +1201,9 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
       : 'idle'
   const placeholder = !settings.configured
     ? 'Manager is not connected'
-    : 'Ask anything, share an error, or describe what to build…'
+    : goalMode
+      ? 'Describe the outcome; the Manager works until it is verifiably done…'
+      : 'Ask anything, share an error, or describe what to build…'
 
   const revealCli = (panelId: string): void => {
     if (!panels.some((panel) => panel.id === panelId)) {
@@ -1169,15 +1215,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
   }
 
   const composer = !settings.configured ? (
-    <div className="secretary-connect-panel">
-      <strong>Manager is not connected</strong>
-      <p>Choose how Manager should think.</p>
-      <div className="secretary-connect-actions">
-        <button type="button" onClick={() => { void useSecretaryStore.getState().updateProvider({ source: 'api' }); openSettings() }}>Use API</button>
-        <button type="button" onClick={() => { void useSecretaryStore.getState().updateProvider({ source: 'cli' }); openSettings() }}>Use CLI</button>
-        <button type="button" onClick={openSettings}>Configure Manager</button>
-      </div>
-    </div>
+    null
   ) : (
     <div className="secretary-composer">
       <textarea
@@ -1193,6 +1231,18 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
           }
         }}
       />
+      <button
+        type="button"
+        className={cn('secretary-goal-toggle', goalMode && 'is-on')}
+        onClick={() => setGoalMode((value) => !value)}
+        aria-pressed={goalMode}
+        title={goalMode
+          ? 'Goal mode on: the Manager keeps working round after round until every check passes'
+          : 'Goal mode: let the Manager keep going until the request is fully done'}
+      >
+        <Target className="h-3.5 w-3.5" aria-hidden />
+        <span>Goal</span>
+      </button>
       <button
         type="button"
         className="secretary-send"
@@ -1491,6 +1541,7 @@ export function DeveloperSecretary({ project, panels }: { project: Project; pane
             ) : null}
         </div>
         <div className="secretary-compose">
+          <ManagerReadiness project={project} onOpenSettings={openSettings} attention={readinessAttention} />
           {composer}
           {settings.configured ? <div className="manager-composer-note"><span>Code · agents · errors · reviews</span><span>↵ Send <span aria-hidden>·</span> ⇧↵ New line</span></div> : null}
         </div>

@@ -84,9 +84,14 @@ export type PtyEvent =
       kind?: PtyKind
     }
 
+/** Owner id for sign-ins started from the setup screen, outside any project. */
+export const SETUP_SIGN_IN_PROJECT_ID = 'bikorch-setup'
+
 export const CLI_IPC = {
   DETECT: 'cli:detect',
   INSTALL: 'cli:install',
+  CANCEL_INSTALL: 'cli:cancel-install',
+  UNINSTALL: 'cli:uninstall',
   STATUS: 'cli:status'
 } as const
 

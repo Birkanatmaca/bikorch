@@ -1,17 +1,22 @@
 import { create } from 'zustand'
 import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
-import { isCliInstallationRunning, type CliInstallation } from '@shared/contracts/cli'
+import { isCliInstallationRunning, type CliInstallation, type CliInstallMode } from '@shared/contracts/cli'
 
 interface CliStore {
   installedByKind: Partial<Record<CliUsageKind, boolean>>
+  versionByKind: Partial<Record<CliUsageKind, string>>
+  managedByKind: Partial<Record<CliUsageKind, boolean>>
   errorsByKind: Partial<Record<CliUsageKind, string>>
   installingKind: CliUsageKind | null
   installation: CliInstallation | null
   syncStatus: () => Promise<void>
   refresh: () => Promise<void>
   detect: (kind: CliUsageKind) => Promise<boolean>
-  install: (kind: CliUsageKind) => Promise<boolean>
+  install: (kind: CliUsageKind, mode?: CliInstallMode) => Promise<boolean>
+  cancelInstall: (kind: CliUsageKind) => Promise<void>
+  uninstall: (kind: CliUsageKind) => Promise<boolean>
+  dismissError: (kind: CliUsageKind) => void
 }
 
 let refreshInFlight: Promise<void> | null = null
@@ -19,15 +24,20 @@ let statusInFlight: Promise<void> | null = null
 let localInstallKind: CliUsageKind | null = null
 const revisions: Partial<Record<CliUsageKind, number>> = {}
 
+const CHECK_TIMEOUT_MESSAGE = 'CLI check timed out. Try again.'
+const retried = new Set<CliUsageKind>()
+
 function withTimeout<T>(operation: Promise<T>): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('CLI check timed out. Try again.')), 25_000)
+    const timer = setTimeout(() => reject(new Error(CHECK_TIMEOUT_MESSAGE)), 25_000)
     operation.then(resolve, reject).finally(() => clearTimeout(timer))
   })
 }
 
 export const useCliStore = create<CliStore>((set, get) => ({
   installedByKind: {},
+  versionByKind: {},
+  managedByKind: {},
   errorsByKind: {},
   installingKind: null,
   installation: null,
@@ -53,12 +63,21 @@ export const useCliStore = create<CliStore>((set, get) => ({
     const revision = revisions[kind] = (revisions[kind] ?? 0) + 1
     try {
       const result = await withTimeout(window.api.cli.detect(kind))
+      retried.delete(kind)
       if (revision === revisions[kind]) set((state) => ({
         installedByKind: { ...state.installedByKind, [kind]: result.installed },
+        versionByKind: { ...state.versionByKind, [kind]: result.version },
+        managedByKind: { ...state.managedByKind, [kind]: result.managed === true },
         errorsByKind: { ...state.errorsByKind, [kind]: result.installed ? undefined : result.error || state.errorsByKind[kind] }
       }))
       return result.installed
     } catch (error) {
+      // A slow first launch (cold disk, busy startup) can miss the deadline while the
+      // check itself still succeeds. Look again once before reporting a failure.
+      if (error instanceof Error && error.message === CHECK_TIMEOUT_MESSAGE && !retried.has(kind)) {
+        retried.add(kind)
+        window.setTimeout(() => void get().detect(kind), 1_000)
+      }
       if (revision === revisions[kind]) set((state) => ({
         installedByKind: { ...state.installedByKind, [kind]: undefined },
         errorsByKind: { ...state.errorsByKind, [kind]: error instanceof Error ? error.message : 'Could not check CLI installation' }
@@ -75,13 +94,13 @@ export const useCliStore = create<CliStore>((set, get) => ({
     }
     await refreshInFlight
   },
-  install: async (kind) => {
+  install: async (kind, mode = 'install') => {
     if (get().installingKind) return false
     localInstallKind = kind
     revisions[kind] = (revisions[kind] ?? 0) + 1
     set((state) => ({ installingKind: kind, errorsByKind: { ...state.errorsByKind, [kind]: undefined } }))
     try {
-      const result = await window.api.cli.install(kind)
+      const result = await window.api.cli.install(kind, mode)
       if (!result.ok) throw new Error(result.error || `${AI_ACCOUNT_LABELS[kind]} installation failed`)
       if (!await get().detect(kind)) throw new Error(`${AI_ACCOUNT_LABELS[kind]} was not found after installation. Try again.`)
       return true
@@ -98,4 +117,25 @@ export const useCliStore = create<CliStore>((set, get) => ({
       await get().syncStatus()
     }
   }
+,
+  cancelInstall: async (kind) => {
+    await window.api.cli.cancelInstall(kind).catch(() => false)
+  },
+  uninstall: async (kind) => {
+    if (get().installingKind) return false
+    set((state) => ({ errorsByKind: { ...state.errorsByKind, [kind]: undefined } }))
+    try {
+      const result = await window.api.cli.uninstall(kind)
+      if (!result.ok) throw new Error(result.error || `${AI_ACCOUNT_LABELS[kind]} could not be removed`)
+      return true
+    } catch (error) {
+      set((state) => ({
+        errorsByKind: { ...state.errorsByKind, [kind]: error instanceof Error ? error.message : 'Could not remove the CLI' }
+      }))
+      return false
+    } finally {
+      await get().detect(kind)
+    }
+  },
+  dismissError: (kind) => set((state) => ({ errorsByKind: { ...state.errorsByKind, [kind]: undefined } }))
 }))

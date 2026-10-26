@@ -2,8 +2,9 @@ import type { PtyEvent } from '@shared/contracts/pty'
 import type { GitSessionSnapshot } from '@shared/contracts/git'
 import type { SecretaryAssignment, SecretaryCompletionEvidence, SecretaryRun, SecretaryRunAnswerRequest } from '@shared/contracts/secretary'
 import { formatCliPaste } from '@shared/cli-prompt'
-import { readSecretaryCliResult, wrapSecretaryCliInstruction, type SecretaryCliOutcome } from '@shared/secretary-result-protocol'
-import { cliPermissionResponse, looksWorkspaceTrustPrompt } from '@shared/cli-permission'
+import { readSecretaryCliResult, secretaryResultToken, wrapSecretaryCliInstruction, type SecretaryCliOutcome } from '@shared/secretary-result-protocol'
+import { Terminal as HeadlessTerminal } from '@xterm/headless'
+import { cliPermissionResponse, looksWorkspaceTrustPrompt, permissionKeystrokes, type CliPermissionKeys } from '@shared/cli-permission'
 import { ptyManager } from '../cli/pty-manager'
 import { checkAgentGitPatch, snapshotAgentGit } from '../git/session-snapshot'
 import { emitSecretaryEvent } from './events'
@@ -12,13 +13,21 @@ import { getSecretaryStore } from './store'
 import { releaseSecretaryRunLock } from './run-lock'
 import { buildSecretaryRunEvidence } from './evidence'
 import { cleanManagerTerminalOutput } from './inspection-evidence'
+import { inferCliActivityFromText } from '@shared/cli-activity-detect'
 
 const OUTPUT_LIMIT = 8_000
-const RUN_TIMEOUT_MS = 8 * 60_000
+// Real coding tasks often take longer than a few minutes. Time out on silence, not
+// on total length: a CLI that keeps printing is still working. The clock stops while
+// a CLI waits for the user, and a hard cap still ends a run that never settles.
+const RUN_INACTIVITY_TIMEOUT_MS = 15 * 60_000
+const RUN_MAX_DURATION_MS = 2 * 60 * 60_000
+const REARM_THROTTLE_MS = 5_000
 
 interface Target {
   assignment: SecretaryAssignment
   sessionId: string
+  resultToken: string
+  screen: HeadlessTerminal
   output: string
   sawBusy: boolean
   outcome: SecretaryCliOutcome | null
@@ -40,7 +49,9 @@ interface TrackedRun {
   targets: Map<string, Target>
   pending: Array<{ assignment: SecretaryAssignment; sessionId: string; cwd: string; gitStart: GitSessionSnapshot | null }>
   skipped: SecretarySkippedAssignment[]
-  timer: ReturnType<typeof setTimeout>
+  timer: ReturnType<typeof setTimeout> | null
+  startedAt: number
+  armedAt: number
   finalizing: boolean
   waitingSessionIds: Set<string>
 }
@@ -53,16 +64,14 @@ function stripAnsi(value: string): string {
   return cleanManagerTerminalOutput(value)
 }
 
-function inferActivity(buffer: string): 'waiting' | 'busy' | null {
-  const tail = stripAnsi(buffer).replace(/\r/g, '').slice(-1_200)
-  if (!tail.trim() || looksWorkspaceTrustPrompt(tail)) return null
-  if (/(?:^|\n)\s*(?:>|❯|▶|▸|➤|➜)\s*$/.test(tail) || /(?:ask|message|prompt)\s*(?:the\s+)?(?:agent|model|assistant)?\s*$/i.test(tail)) {
-    return 'waiting'
+/** The visible rows of a headless terminal, trailing blank rows removed. */
+function screenText(screen: HeadlessTerminal): string {
+  const buffer = screen.buffer.active
+  const lines: string[] = []
+  for (let row = 0; row < screen.rows; row += 1) {
+    lines.push(buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '')
   }
-  if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷◐◓◑◒]/.test(tail) || /\b(thinking|generating|searching|analyzing|planning)\b|[✶✻]/i.test(tail)) {
-    return 'busy'
-  }
-  return null
+  return lines.join('\n').replace(/\n+$/, '')
 }
 
 function unique(values: string[], limit: number): string[] {
@@ -79,6 +88,7 @@ async function toResult(target: Target): Promise<SecretaryCliResult> {
   const reportedChangedFiles = unique(target.reportedChangedFiles, 30)
   return {
     assignmentId: target.assignment.id,
+    cwd: target.cwd,
     kind: target.assignment.kind,
     mode: target.assignment.mode,
     title: target.assignment.title,
@@ -99,19 +109,45 @@ async function toResult(target: Target): Promise<SecretaryCliResult> {
   }
 }
 
+function armRunTimer(runId: string, force = false): void {
+  const tracked = trackedRuns.get(runId)
+  if (!tracked) return
+  const now = Date.now()
+  if (!force && tracked.timer && now - tracked.armedAt < REARM_THROTTLE_MS) return
+  if (tracked.timer) clearTimeout(tracked.timer)
+  tracked.timer = null
+  if (tracked.waitingSessionIds.size > 0) return
+  const remaining = RUN_MAX_DURATION_MS - (now - tracked.startedAt)
+  if (remaining <= 0) {
+    failTrackedRun(runId, 'The CLI work ran for more than two hours without finishing.')
+    return
+  }
+  tracked.armedAt = now
+  tracked.timer = setTimeout(() => {
+    failTrackedRun(runId, 'The CLI stopped producing output for 15 minutes before it returned a result.')
+  }, Math.min(RUN_INACTIVITY_TIMEOUT_MS, remaining))
+}
+
 function dropTrackedRun(runId: string): TrackedRun | null {
   const tracked = trackedRuns.get(runId) ?? null
   if (!tracked) return null
-  clearTimeout(tracked.timer)
+  if (tracked.timer) clearTimeout(tracked.timer)
   trackedRuns.delete(runId)
-  for (const target of tracked.targets.values()) trackedSessions.delete(target.sessionId)
+  for (const target of tracked.targets.values()) {
+    trackedSessions.delete(target.sessionId)
+    target.screen.dispose()
+  }
   return tracked
 }
 
-function toTarget(binding: { assignment: SecretaryAssignment; sessionId: string; cwd: string; gitStart: GitSessionSnapshot }): Target {
+function toTarget(binding: { assignment: SecretaryAssignment; sessionId: string; cwd: string; gitStart: GitSessionSnapshot }, runId: string): Target {
   return {
     assignment: binding.assignment,
     sessionId: binding.sessionId,
+    resultToken: secretaryResultToken(runId, binding.assignment.id),
+    // TUIs redraw in place; deciding busy/idle needs what is on screen now, not the
+    // stream, whose last bytes are often just the input box being repainted.
+    screen: new HeadlessTerminal({ cols: 200, rows: 60, allowProposedApi: true }),
     output: '',
     sawBusy: false,
     outcome: null,
@@ -157,14 +193,15 @@ async function dispatchNextStep(
     ...binding,
     gitStart: binding.gitStart ?? await snapshotAgentGit(binding.cwd)
   }
-  tracked.targets.set(readyBinding.sessionId, toTarget(readyBinding))
+  tracked.targets.set(readyBinding.sessionId, toTarget(readyBinding, tracked.run.id))
   trackedSessions.set(readyBinding.sessionId, tracked.run.id)
   await ptyManager.writeForSecretary(
     readyBinding.sessionId,
     formatCliPaste(wrapSecretaryCliInstruction(readyBinding.assignment.instruction, {
       mode: readyBinding.assignment.mode,
       expectedResult: readyBinding.assignment.expectedResult,
-      dependencyContext: dependencyContext(tracked, readyBinding.assignment)
+      dependencyContext: dependencyContext(tracked, readyBinding.assignment),
+      resultToken: secretaryResultToken(tracked.run.id, readyBinding.assignment.id)
     }))
   )
   await waitForPasteCommit()
@@ -186,7 +223,7 @@ function failTrackedRun(runId: string, message: string): void {
   const activeSessionIds = [...tracked.targets.values()]
     .filter((target) => !target.outcome)
     .map((target) => target.sessionId)
-  clearTimeout(tracked.timer)
+  if (tracked.timer) clearTimeout(tracked.timer)
   for (const target of tracked.targets.values()) {
     if (target.outcome) continue
     target.outcome = 'failed'
@@ -277,6 +314,7 @@ async function finishTrackedRun(runId: string): Promise<void> {
     if (result.followUpRun?.plan) {
       emitSecretaryEvent({
         type: 'run-followup',
+        ...(result.goal ? { goal: result.goal, autoStart: result.goal.status === 'active', notice: result.notice } : {}),
         projectId: result.completedRun.projectId,
         threadId: result.completedRun.threadId,
         completedRunId: result.completedRun.id,
@@ -290,6 +328,9 @@ async function finishTrackedRun(runId: string): Promise<void> {
     }
     emitSecretaryEvent({
       type: 'run-report',
+      status: result.completedRun.status === 'failed' || (result.goal && result.goal.status !== 'met') ? 'failed' : 'completed',
+      notice: result.notice,
+      ...(result.goal ? { goal: result.goal } : {}),
       projectId: result.completedRun.projectId,
       threadId: result.completedRun.threadId,
       runId: result.completedRun.id,
@@ -344,12 +385,13 @@ function completeTarget(
 
 function resumeRunIfPaused(runId: string, sessionId: string): void {
   const tracked = trackedRuns.get(runId)
-  tracked?.waitingSessionIds.delete(sessionId)
+  const wasWaiting = tracked?.waitingSessionIds.delete(sessionId) ?? false
   const store = getSecretaryStore()
   const run = store?.getRun(runId)
   if (store && run?.status === 'needs-user' && tracked?.waitingSessionIds.size === 0) {
     store.updateRun(runId, { status: 'running' })
   }
+  if (wasWaiting) armRunTimer(runId, true)
 }
 
 function pauseForUser(runId: string, sessionId: string, message: string): void {
@@ -359,6 +401,7 @@ function pauseForUser(runId: string, sessionId: string, message: string): void {
   if (!target) return
   const alreadyWaiting = tracked.waitingSessionIds.has(sessionId)
   tracked.waitingSessionIds.add(sessionId)
+  armRunTimer(runId, true)
   const store = getSecretaryStore()
   const run = store?.getRun(runId)
   if (store && run?.status === 'running') {
@@ -421,6 +464,7 @@ export async function answerTrackedSecretaryRun(payload: unknown): Promise<Secre
   await ptyManager.writeForSecretary(sessionId, '\r')
   target.sawBusy = false
   tracked.waitingSessionIds.delete(sessionId)
+  armRunTimer(request.runId, true)
   const updated = tracked.waitingSessionIds.size === 0
     ? store.updateRun(request.runId, { status: 'running' })
     : store.getRun(request.runId)
@@ -438,7 +482,7 @@ export async function answerTrackedSecretaryRun(payload: unknown): Promise<Secre
 
 const PERMISSION_REPLY_LIMIT = 12
 
-async function answerCliPermission(target: Target, response: '\r' | 'y\r' | 'a\r', key: string): Promise<void> {
+async function answerCliPermission(target: Target, response: CliPermissionKeys, key: string): Promise<void> {
   const now = Date.now()
   if (target.permissionReplies >= PERMISSION_REPLY_LIMIT) return
   if (now - target.lastPermissionAt < 1200) return
@@ -450,7 +494,11 @@ async function answerCliPermission(target: Target, response: '\r' | 'y\r' | 'a\r
   target.permissionKeyReplies += 1
   target.permissionReplies += 1
   target.lastPermissionAt = now
-  await ptyManager.writeForSecretary(target.sessionId, response).catch(() => undefined)
+  const keys = permissionKeystrokes(response)
+  for (const [index, keystroke] of keys.entries()) {
+    if (index > 0) await new Promise((resolve) => setTimeout(resolve, 350))
+    await ptyManager.writeForSecretary(target.sessionId, keystroke).catch(() => undefined)
+  }
 }
 
 function handlePtyEvent(event: PtyEvent): void {
@@ -461,6 +509,7 @@ function handlePtyEvent(event: PtyEvent): void {
   if (!tracked || !target) return
 
   if (event.type === 'data') {
+    armRunTimer(runId)
     target.output = `${target.output}${event.data}`.slice(-OUTPUT_LIMIT)
     const clean = stripAnsi(target.output)
     const permission = cliPermissionResponse(clean, {
@@ -474,7 +523,7 @@ function handlePtyEvent(event: PtyEvent): void {
       void answerCliPermission(target, permission, clean.slice(-240))
       return
     }
-    const structured = readSecretaryCliResult(clean)
+    const structured = readSecretaryCliResult(clean, target.resultToken)
     if (structured) {
       const signature = JSON.stringify(structured)
       const resultCount = clean.split('<BIKORCH_RESULT>').length - 1
@@ -490,16 +539,19 @@ function handlePtyEvent(event: PtyEvent): void {
       completeTarget(runId, event.sessionId, structured.outcome, structured.changedFiles, structured.summary, 'cli-reported')
       return
     }
-    const activity = inferActivity(clean)
-    if (activity === 'busy') {
-      target.sawBusy = true
-      resumeRunIfPaused(runId, event.sessionId)
-    }
-    if (activity === 'waiting' && target.sawBusy) {
-      if (tracked.waitingSessionIds.has(event.sessionId)) return
-      resumeRunIfPaused(runId, event.sessionId)
-      completeTarget(runId, event.sessionId, 'completed')
-    }
+    target.screen.write(event.data, () => {
+      if (trackedRuns.get(runId) !== tracked || target.outcome) return
+      const activity = inferCliActivityFromText(screenText(target.screen), { screen: true })
+      if (activity === 'busy') {
+        target.sawBusy = true
+        resumeRunIfPaused(runId, event.sessionId)
+      }
+      if (activity === 'waiting' && target.sawBusy) {
+        if (tracked.waitingSessionIds.has(event.sessionId)) return
+        resumeRunIfPaused(runId, event.sessionId)
+        completeTarget(runId, event.sessionId, 'completed')
+      }
+    })
     return
   }
 
@@ -529,11 +581,10 @@ export function trackSecretaryRun(
   for (const binding of started) {
     const gitStart = binding.gitStart
     if (!gitStart) continue
-    targets.set(binding.sessionId, toTarget({ ...binding, gitStart }))
+    targets.set(binding.sessionId, toTarget({ ...binding, gitStart }, run.id))
     trackedSessions.set(binding.sessionId, run.id)
   }
-  const timer = setTimeout(() => {
-    failTrackedRun(run.id, 'The CLI did not return a result before the Secretary timeout.')
-  }, RUN_TIMEOUT_MS)
-  trackedRuns.set(run.id, { run, targets, pending, skipped: [], timer, finalizing: false, waitingSessionIds: new Set() })
+  const now = Date.now()
+  trackedRuns.set(run.id, { run, targets, pending, skipped: [], timer: null, startedAt: now, armedAt: 0, finalizing: false, waitingSessionIds: new Set() })
+  armRunTimer(run.id, true)
 }

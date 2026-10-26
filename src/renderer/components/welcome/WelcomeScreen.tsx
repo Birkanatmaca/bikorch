@@ -54,9 +54,10 @@ export function WelcomeScreen(): React.JSX.Element {
   }, [projects])
 
   return (
-    <div className="welcome-screen relative flex h-full flex-col items-center justify-center overflow-auto px-6 py-10">
+    <div className="welcome-screen relative flex h-full flex-col items-center overflow-auto px-6 py-10">
       <div className="welcome-ambient" aria-hidden />
-      <div className="relative w-full max-w-xl animate-fade-in">
+      {/* my-auto centers short content but, unlike justify-center, never pushes the top out of reach. */}
+      <div className="relative my-auto w-full max-w-xl animate-fade-in">
         <div className="mb-9 flex flex-col items-center text-center">
           <div className="welcome-logo">
             <span className="welcome-logo-halo" aria-hidden />

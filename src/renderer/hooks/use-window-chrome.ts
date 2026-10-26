@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { WindowChromeState } from '@shared/contracts/window'
 
-const IDLE: WindowChromeState = { maximized: false, fullScreen: false }
+const IDLE: WindowChromeState = { maximized: false, fullScreen: false, focused: true }
 
 export function useWindowChrome(): WindowChromeState {
   const [state, setState] = useState<WindowChromeState>(IDLE)

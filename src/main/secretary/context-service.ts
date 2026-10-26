@@ -29,7 +29,8 @@ const SKIPPED_DIRECTORIES = new Set([
   'venv'
 ])
 
-const INSTRUCTION_FILES = ['AGENTS.md', 'CONTRIBUTING.md', 'README.md']
+// Agent instruction files first: they tell the Manager how this project wants work done.
+const INSTRUCTION_FILES = ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md', '.cursorrules', 'CONTRIBUTING.md', 'README.md']
 const MAX_TREE_ENTRIES = 250
 const MAX_TREE_DEPTH = 4
 const MAX_INSTRUCTION_CHARS = 4_000

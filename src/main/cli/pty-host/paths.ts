@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'crypto'
-import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'fs'
 import { join, resolve } from 'path'
 
 export function hostSocketPath(root: string, platform = process.platform): string {
@@ -17,4 +17,18 @@ export function hostConnectionToken(root: string): string {
   const token = readFileSync(path, 'utf8').trim()
   if (!/^[a-f0-9]{64}$/.test(token)) throw new Error('Invalid terminal host connection token')
   return token
+}
+
+/**
+ * Identifies the build of a host script. After an app update the running host
+ * still runs the old files (and keeps them on disk while open); comparing
+ * stamps lets the app retire it once it has no live sessions.
+ */
+export function hostBuildStamp(scriptPath: string): string {
+  try {
+    const stat = statSync(scriptPath)
+    return `${stat.size}-${Math.round(stat.mtimeMs)}`
+  } catch {
+    return 'unknown'
+  }
 }

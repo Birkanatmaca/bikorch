@@ -25,7 +25,9 @@ function parsePayload(raw: unknown): CliTaskNotification | null {
     body.outcome === 'done' || body.outcome === 'error' ? body.outcome : null
   if (!projectId || !panelId || !projectName || !title || !outcome) return null
   if (projectId.length < 8 || panelId.length < 8) return null
-  return { projectId, panelId, projectName, title, outcome }
+  const heading = typeof body.heading === 'string' ? body.heading.replace(/\s+/g, ' ').trim().slice(0, 140) : ''
+  const summary = typeof body.summary === 'string' ? body.summary.trim().slice(0, 400) : ''
+  return { projectId, panelId, projectName, title, outcome, ...(heading ? { heading } : {}), ...(summary ? { summary } : {}) }
 }
 
 function sendClicked(win: BrowserWindow, payload: CliTaskNotification): void {

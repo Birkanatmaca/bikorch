@@ -13,7 +13,9 @@ import { registerMusicHandlers } from './music'
 import { registerAutomationHandlers } from './automation'
 import { registerNotificationHandlers } from './notifications'
 import { registerResourceHandlers } from './resources'
+import { registerStorageHandlers } from './storage'
 import { registerSecretaryHandlers } from './secretary'
+import { registerApiKeyHandlers } from './api-keys'
 
 export function registerIpcHandlers(): void {
   registerPtyHandlers()
@@ -30,7 +32,9 @@ export function registerIpcHandlers(): void {
   registerAutomationHandlers()
   registerNotificationHandlers()
   registerResourceHandlers()
+  registerStorageHandlers()
   registerSecretaryHandlers()
+  registerApiKeyHandlers()
 
   ipcMain.handle('dialog:selectFolder', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)

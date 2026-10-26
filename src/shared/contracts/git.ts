@@ -385,6 +385,18 @@ export interface IsolationDiffRequest {
   filePath: string
 }
 
+/** What a project still needs before the Manager can run work in Git worktrees. */
+export interface GitSetupStatus {
+  gitInstalled: boolean
+  isRepo: boolean
+  hasCommits: boolean
+  identityConfigured: boolean
+}
+
+export function gitSetupReady(status: GitSetupStatus): boolean {
+  return status.gitInstalled && status.isRepo && status.hasCommits
+}
+
 export const GIT_IPC = {
   DISCOVER: 'git:discover',
   STATUS: 'git:status',
@@ -410,7 +422,10 @@ export const GIT_IPC = {
   AGENT_SESSION_NOTE: 'git:agent-session-note',
   WORKTREE_PROVISION: 'git:worktree-provision',
   WORKTREE_SETUP_RETRY: 'git:worktree-setup-retry',
-  APPLY_PHASE: 'git:apply-phase'
+  APPLY_PHASE: 'git:apply-phase',
+  SETUP_INSPECT: 'git:setup-inspect',
+  SETUP_INIT: 'git:setup-init',
+  SETUP_INSTALL_TOOLS: 'git:setup-install-tools'
 } as const
 
 export const GIT_STATUS_LABELS: Record<GitChangeStatus, string> = {

@@ -2017,16 +2017,8 @@ kbd {
 .cli-busy-beam {
   z-index: 4;
   padding: 1px;
-  background: conic-gradient(
-    from var(--card-edge-angle, 0deg),
-    transparent 0 44%,
-    color-mix(in srgb, var(--color-primary) 40%, transparent) 62%,
-    color-mix(in srgb, var(--color-purple-light) 85%, transparent) 74%,
-    #f2eeff 78%,
-    color-mix(in srgb, var(--color-purple-light) 85%, transparent) 82%,
-    color-mix(in srgb, var(--color-primary) 40%, transparent) 92%,
-    transparent 100%
-  );
+  overflow: hidden;
+  container-type: size;
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);
@@ -2035,7 +2027,32 @@ kbd {
     linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);
   mask-composite: exclude;
-  animation: card-edge-spin 4.5s linear infinite;
+}
+/* The beam rotates a pre-rendered square with `transform`, which the compositor
+   animates on its own. Animating the gradient angle repainted every busy panel
+   at 60fps for as long as an agent worked. 142cqmax covers the panel diagonal. */
+.cli-busy-beam::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 142cqmax;
+  aspect-ratio: 1;
+  background: conic-gradient(
+    transparent 0 44%,
+    color-mix(in srgb, var(--color-primary) 40%, transparent) 62%,
+    color-mix(in srgb, var(--color-purple-light) 85%, transparent) 74%,
+    #f2eeff 78%,
+    color-mix(in srgb, var(--color-purple-light) 85%, transparent) 82%,
+    color-mix(in srgb, var(--color-primary) 40%, transparent) 92%,
+    transparent 100%
+  );
+  transform: translate(-50%, -50%) rotate(0deg);
+  animation: cli-busy-beam-spin 4.5s linear infinite;
+  will-change: transform;
+}
+@keyframes cli-busy-beam-spin {
+  to { transform: translate(-50%, -50%) rotate(360deg); }
 }
 @keyframes cli-busy-drift {
   from { transform: translate3d(-7%, 0, 0); }
@@ -2043,7 +2060,7 @@ kbd {
 }
 @media (prefers-reduced-motion: reduce) {
   .cli-busy-aura::before,
-  .cli-busy-beam { animation: none; }
+  .cli-busy-beam::before { animation: none; }
 }
 .terminal-surface {
   display: flex;

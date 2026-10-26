@@ -361,6 +361,20 @@ export function windowsPtySpawnOptions(): Array<{ useConpty?: boolean }> {
   return [{ useConpty: true }, { useConpty: false }]
 }
 
+// `--skip-trust` exists only in some Gemini CLI releases; others reject unknown
+// flags and exit at once. Health checks read `gemini --help` and record whether
+// the installed release has it. Until then, launch without it: the worst case is
+// Gemini asking whether to trust the folder.
+let geminiSkipTrustSupported = false
+
+export function setGeminiSkipTrustSupport(supported: boolean): void {
+  geminiSkipTrustSupported = supported
+}
+
+export function geminiTrustArgs(): string[] {
+  return geminiSkipTrustSupported ? ['--skip-trust'] : []
+}
+
 export function cliLaunchArgs(
   kind: PtyKind,
   launchMode: 'normal' | 'login' = 'normal',
@@ -368,7 +382,7 @@ export function cliLaunchArgs(
 ): string[] {
   if (launchMode === 'login' && (kind === 'codex' || kind === 'cursor')) return ['login']
   if (kind === 'cursor') return cliModel ? ['--trust', '--model', cliModel] : ['--trust']
-  if (kind === 'gemini') return ['--skip-trust']
+  if (kind === 'gemini') return geminiTrustArgs()
   return []
 }
 

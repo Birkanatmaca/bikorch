@@ -7,6 +7,7 @@ const sandbox = vi.hoisted(() => ({ home: '', exec: vi.fn() }))
 vi.mock('os', async () => ({ ...await vi.importActual<typeof import('os')>('os'), homedir: () => sandbox.home }))
 vi.mock('util', () => ({ promisify: () => sandbox.exec }))
 vi.mock('../adapters', () => ({ terminalUserEnv: () => ({}) }))
+vi.mock('../run-logged', () => ({ runLogged: (command: string, args: string[], options: unknown) => sandbox.exec(command, args, options) }))
 import { installManagedPackage } from '../install-package'
 import { managedCliPaths } from '../managed-paths'
 

@@ -10,3 +10,8 @@ export function formatMemoryContextInline(pkg: MemoryContextPackage): string {
     .slice(0, 850)
   return facts ? ` [Bikorch developer context: ${facts}]` : ''
 }
+
+/** Plain prompts only. Commands and mode prefixes would treat the context as arguments. */
+export function acceptsInlineContext(prompt: string): boolean {
+  return !/^[/!#@$]/.test(prompt.trim())
+}

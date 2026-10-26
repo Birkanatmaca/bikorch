@@ -59,3 +59,37 @@ describe('CliActivityTracker', () => {
     ).toBeNull()
   })
 })
+
+describe('modern CLI screens', () => {
+  const claudeIdle = [
+    '──────────────────────────────────────',
+    '❯ Try "edit <filepath> to..."',
+    '──────────────────────────────────────',
+    '  ⏵⏵ auto mode on (shift+tab to cycle)            ◐ medium · /effort'
+  ].join('\n')
+
+  it('sees Claude Code 2.x at rest, with a placeholder and a status line under the prompt', () => {
+    expect(inferCliActivity(claudeIdle)).toBe('waiting')
+  })
+
+  it('sees Claude Code working', () => {
+    expect(inferCliActivity('✻ Pondering… (12s · ↓ 1.2k tokens · esc to interrupt)\n❯ \n  ⏵⏵ auto mode on')).toBe('busy')
+  })
+
+  it('lets the newest state win in a stream that still holds the previous one', () => {
+    expect(inferCliActivity('✻ Working… (esc to interrupt)\nDone.\n' + claudeIdle)).toBe('waiting')
+    expect(inferCliActivity(claudeIdle + '\n✻ Working… (3s · esc to interrupt)')).toBe('busy')
+  })
+
+  it('does not mistake the effort label for a spinner', () => {
+    expect(inferCliActivity('Some output\n◐ medium · /effort')).toBeNull()
+  })
+})
+
+describe('reading a rendered screen', () => {
+  it('treats a visible "esc to interrupt" as working even though input hints sit below it', () => {
+    const working = '✻ Pondering… (8s · esc to interrupt)\n❯ \n  ⏵⏵ auto mode on (shift+tab to cycle)'
+    expect(inferCliActivity(working, { screen: true })).toBe('busy')
+    expect(inferCliActivity('❯ Try "fix lint"\n  ⏵⏵ auto mode on (shift+tab to cycle)', { screen: true })).toBe('waiting')
+  })
+})

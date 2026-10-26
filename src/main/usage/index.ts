@@ -1,6 +1,7 @@
 import { spawn } from 'child_process'
-import { existsSync, readFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync } from 'fs'
 import * as pty from '@homebridge/node-pty-prebuilt-multiarch'
+import { Terminal as HeadlessTerminal } from '@xterm/headless'
 import { homedir } from 'os'
 import { join } from 'path'
 import type {
@@ -12,7 +13,7 @@ import type {
   CliUsageWindow,
   UsageAccountRequest
 } from '@shared/contracts/usage'
-import { detectCli, resolveSpawnConfigCandidates, spawnEnv } from '../cli/adapters'
+import { detectCli, geminiTrustArgs, resolveSpawnConfigCandidates, spawnEnv } from '../cli/adapters'
 import { getAuthProfileEnv, prepareAuthProfileLaunch } from '../accounts/profile-manager'
 import {
   deleteAntigravityCredential,
@@ -26,6 +27,13 @@ import {
   isAntigravityFreshLoginActive
 } from '../accounts/antigravity-credential'
 import { readCursorAccountUsage } from './cursor'
+import {
+  detectClaudeUsageFailure,
+  looksClaudeReady,
+  looksClaudeTrustPrompt,
+  parseClaudeUsage,
+  type ClaudeUsageSnapshot
+} from './claude-usage'
 import {
   withAntigravityCredentialLock
 } from '../accounts/credential-lock'
@@ -352,6 +360,13 @@ interface InteractiveUsageOptions<T> {
   detectFailureAfterCommand?: boolean
   extraArgs?: string[]
   timeoutMs?: number
+  cwd?: string
+  /** Keys to send once, one after another, when the CLI shows a startup prompt. */
+  answerStartupPrompt?: (output: string) => string[] | null
+  /** Parse the rendered screen instead of the raw stream (for redrawing TUIs). */
+  screen?: boolean
+  /** How long to wait after the first match so late-rendering sections arrive. */
+  settleMs?: number
 }
 
 class InteractiveUsageError extends Error {
@@ -373,7 +388,7 @@ function stripTerminalControlCodes(value: string): string {
 }
 
 function queryInteractiveUsage<T>(
-  kind: Extract<CliUsageKind, 'cursor' | 'gemini' | 'antigravity'>,
+  kind: Extract<CliUsageKind, 'cursor' | 'gemini' | 'antigravity' | 'claude'>,
   options: InteractiveUsageOptions<T>,
   profileEnv: Record<string, string> = {}
 ): Promise<T> {
@@ -387,13 +402,14 @@ function queryInteractiveUsage<T>(
       name: 'xterm-256color',
       cols: 140,
       rows: 50,
-      cwd: process.cwd(),
+      cwd: options.cwd ?? process.cwd(),
       env: { ...spawnEnv(), ...profileEnv },
       ...(process.platform === 'win32' ? { useConpty: false } : {})
     })
 
     let output = ''
     let settled = false
+    let startupPromptAnswered = false
     let commandSent = false
     let commandScheduled = false
     let commandAttempt = 0
@@ -418,6 +434,7 @@ function queryInteractiveUsage<T>(
       if (retryTimer) clearTimeout(retryTimer)
       if (settleTimer) clearTimeout(settleTimer)
       clearTimeout(timeout)
+      screen?.dispose()
       try {
         terminal.kill()
       } catch {
@@ -463,17 +480,30 @@ function queryInteractiveUsage<T>(
       readyTimer = setTimeout(sendUsageCommand, INTERACTIVE_USAGE_READY_DELAY_MS)
     }
 
-    terminal.onData((chunk) => {
-      output = (output + chunk).slice(-INTERACTIVE_USAGE_OUTPUT_LIMIT)
-      const cleanOutput = stripTerminalControlCodes(output)
+    // TUIs such as Claude Code redraw only the cells that changed, so the raw
+    // stream holds fragments ("Rese" … "ts"). In screen mode the output is played
+    // into a headless terminal and the parsers read what is actually on screen.
+    const screen = options.screen ? new HeadlessTerminal({ cols: 140, rows: 50, allowProposedApi: true }) : null
+    const screenText = (): string => {
+      if (!screen) return output
+      const buffer = screen.buffer.active
+      const lines: string[] = []
+      for (let row = 0; row < buffer.length; row += 1) lines.push(buffer.getLine(row)?.translateToString(true) ?? '')
+      return lines.join('\n')
+    }
 
-      const snapshot = options.parse(output)
+    const evaluate = (view: string): void => {
+      if (settled) return
+      const cleanOutput = stripTerminalControlCodes(view)
+
+      const snapshot = options.parse(view)
       if (snapshot) {
         if (!settleTimer) {
-          settleTimer = setTimeout(
-            () => finish(() => resolve(snapshot)),
-            INTERACTIVE_USAGE_SETTLE_DELAY_MS
-          )
+          settleTimer = setTimeout(() => {
+            // Read the final screen before finish() disposes the headless terminal.
+            const latest = options.parse(screenText()) ?? snapshot
+            finish(() => resolve(latest))
+          }, options.settleMs ?? INTERACTIVE_USAGE_SETTLE_DELAY_MS)
         }
         return
       }
@@ -484,12 +514,28 @@ function queryInteractiveUsage<T>(
         return
       }
 
+      if (!commandSent && !startupPromptAnswered && options.answerStartupPrompt) {
+        const keys = options.answerStartupPrompt(cleanOutput)
+        if (keys) {
+          startupPromptAnswered = true
+          keys.forEach((key, index) => {
+            setTimeout(() => { if (!settled) terminal.write(key) }, 250 * (index + 1))
+          })
+          return
+        }
+      }
       if (!commandSent && options.isReady(cleanOutput)) scheduleUsageCommand()
+    }
+
+    terminal.onData((chunk) => {
+      output = (output + chunk).slice(-INTERACTIVE_USAGE_OUTPUT_LIMIT)
+      if (screen) screen.write(chunk, () => evaluate(screenText()))
+      else evaluate(output)
     })
 
     terminal.onExit(({ exitCode }) => {
       if (settled) return
-      const snapshot = options.parse(output)
+      const snapshot = options.parse(screen ? screenText() : output)
       if (snapshot) {
         finish(() => resolve(snapshot))
         return
@@ -571,7 +617,36 @@ function queryGeminiUsage(profileEnv: Record<string, string> = {}): Promise<Gemi
       isReady: (output) =>
         /Type your message/i.test(output) || /(?:^|\n)>\s*(?:\n|$)/m.test(output),
       detectFailure: detectGeminiUsageFailure,
-      extraArgs: ['--skip-trust']
+      extraArgs: geminiTrustArgs()
+    },
+    profileEnv
+  )
+}
+
+// Claude starts in an empty folder of its own, so the one-time folder trust
+// question is about that folder only and never about the user's projects.
+function claudeUsageProbeDir(): string {
+  const dir = join(homedir(), '.bikorch', 'usage-probe')
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+function queryClaudeUsage(profileEnv: Record<string, string> = {}): Promise<ClaudeUsageSnapshot> {
+  return queryInteractiveUsage(
+    'claude',
+    {
+      command: '/usage',
+      parse: parseClaudeUsage,
+      isReady: looksClaudeReady,
+      detectFailure: detectClaudeUsageFailure,
+      // Claude takes longer than other CLIs to start and fetch the numbers.
+      timeoutMs: 30_000,
+      cwd: claudeUsageProbeDir(),
+      // The trust question defaults to "No, exit": move to "Yes, I trust this folder" first.
+      answerStartupPrompt: (output) => (looksClaudeTrustPrompt(output) ? ['\x1b[B', '\r'] : null),
+      screen: true,
+      // The weekly section renders a moment after the session bar.
+      settleMs: 2500
     },
     profileEnv
   )
@@ -827,6 +902,28 @@ async function readProviderUsage(
   const detected = detectCli(kind)
   if (!detected.installed) {
     return scoped({ ...baseUsageInfo(kind, 'not-installed', 'CLI bulunamadı'), ...localIdentity })
+  }
+
+  if (kind === 'claude') {
+    try {
+      const snapshot = await queryClaudeUsage(profileEnv)
+      return scoped({
+        ...baseUsageInfo(kind, 'available', 'Live usage pulled from /usage'),
+        ...localIdentity,
+        ...(snapshot.primary ? { primary: snapshot.primary } : {}),
+        ...(snapshot.secondary ? { secondary: snapshot.secondary } : {}),
+        breakdown: snapshot.breakdown
+      })
+    } catch (error) {
+      return scoped({
+        ...baseUsageInfo(
+          kind,
+          error instanceof InteractiveUsageError ? error.status : 'error',
+          error instanceof Error ? error.message : 'Claude usage could not be read'
+        ),
+        ...localIdentity
+      })
+    }
   }
 
   if (kind !== 'codex') {

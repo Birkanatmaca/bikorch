@@ -11,11 +11,15 @@ import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { LayoutModeMenu } from '@renderer/components/layout/LayoutModeMenu'
 import { currentResourceLimits } from '@renderer/lib/resource-limits'
 import { isDocumentHidden, onDocumentVisibility, visibilityScaledInterval } from '@renderer/lib/visibility'
+import { isWindowInactive, onWindowActivity } from '@renderer/lib/window-activity'
 import {
   WORKSPACE_SCALE_MAX,
   WORKSPACE_SCALE_MIN,
   WORKSPACE_SCALE_STEP
 } from '@shared/types'
+
+const GIT_POLL_ACTIVE_MS = 4000
+const GIT_POLL_INACTIVE_MS = 15_000
 
 export function StatusBar(): React.JSX.Element {
   const { projectId, projectName, projectRoot } = useActiveProject()
@@ -41,23 +45,32 @@ export function StatusBar(): React.JSX.Element {
       void refresh(projectId, projectRoot, { quiet: true })
       void inspectIsolation(projectId, projectRoot)
     }
-    const arm = (hidden: boolean): void => {
+    // Each tick spawns git processes. Poll briskly only while the user is looking;
+    // a blurred window still catches agent edits, just less often.
+    const arm = (): void => {
       if (timer !== null) window.clearInterval(timer)
+      const hidden = isDocumentHidden()
+      const base = isWindowInactive() ? GIT_POLL_INACTIVE_MS : GIT_POLL_ACTIVE_MS
       timer = window.setInterval(
         tick,
-        visibilityScaledInterval(2500, currentResourceLimits().hiddenPollMultiplier, hidden)
+        visibilityScaledInterval(base, currentResourceLimits().hiddenPollMultiplier, hidden)
       )
     }
 
-    arm(isDocumentHidden())
+    arm()
     const stopVisibility = onDocumentVisibility((hidden) => {
       if (!hidden) tick()
-      arm(hidden)
+      arm()
+    })
+    const stopActivity = onWindowActivity((inactive) => {
+      if (!inactive) tick()
+      arm()
     })
 
     return () => {
       if (timer !== null) window.clearInterval(timer)
       stopVisibility()
+      stopActivity()
     }
   }, [projectId, projectRoot, refresh, inspectIsolation])
 

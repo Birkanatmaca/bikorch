@@ -46,9 +46,12 @@ export type LeftSidebarView =
   | 'files'
   | 'changes'
   | 'accounts'
+  | 'clis'
+  | 'apiKeys'
   | 'memory'
   | 'tasks'
   | 'profile'
+  | 'storage'
   | 'music'
   | 'timer'
 
@@ -56,15 +59,18 @@ export const LEFT_SIDEBAR_VIEWS: readonly LeftSidebarView[] = [
   'files',
   'changes',
   'accounts',
+  'clis',
+  'apiKeys',
   'memory',
   'tasks',
   'profile',
+  'storage',
   'music',
   'timer'
 ] as const
 
 /** Wide sidebar views render a full-width panel instead of the narrow file/changes rail. */
-export const WIDE_LEFT_SIDEBAR_VIEWS: readonly LeftSidebarView[] = ['accounts', 'memory', 'profile']
+export const WIDE_LEFT_SIDEBAR_VIEWS: readonly LeftSidebarView[] = ['accounts', 'clis', 'apiKeys', 'memory', 'profile', 'storage']
 
 export function isLeftSidebarView(value: unknown): value is LeftSidebarView {
   return typeof value === 'string' && (LEFT_SIDEBAR_VIEWS as readonly string[]).includes(value)

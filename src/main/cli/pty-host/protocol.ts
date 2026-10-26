@@ -25,6 +25,8 @@ export type PtyHostClientMessage = (
   | { v: 1; id: string; type: 'kill'; payload: { sessionId: string } }
   | { v: 1; id: string; type: 'replay'; payload: { sessionId: string } }
   | { v: 1; id: string; type: 'list' }
+  /** Exit if no session is running; refused otherwise. */
+  | { v: 1; id: string; type: 'retire' }
 ) & { token?: string }
 
 export type PtyHostServerMessage =
@@ -60,6 +62,8 @@ export type PtyHostServerMessage =
       v: 1
       type: 'hello'
       payload: {
+        /** Build stamp of the running host; absent on hosts older than this field. */
+        build?: string
         sessions: Array<{
           sessionId: string
           kind: string

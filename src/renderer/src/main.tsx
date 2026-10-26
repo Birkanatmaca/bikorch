@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from '../App'
 import { ErrorBoundary } from '../components/ui/ErrorBoundary'
+import { trackWindowActivity } from '../lib/window-activity'
 import '../styles/globals.css'
 import '../styles/workstation.css'
 import '../styles/studio.css'
@@ -12,6 +13,8 @@ const root = document.getElementById('root')
 if (!root) {
   throw new Error('Root element not found')
 }
+
+trackWindowActivity()
 
 createRoot(root).render(
   <StrictMode>

@@ -12,6 +12,7 @@ import {
 } from './protocol'
 import { appendOutputBuffer, hostHasRunningSessions, hostSessionMatchesRequest } from './session-store'
 import { resolveSafeCwd, resolveWindowsSpawnPath } from '../path-validator'
+import { hostBuildStamp } from './paths'
 
 interface HostSession {
   id: string
@@ -64,7 +65,7 @@ class PtyHostRuntime {
       this.broadcast({
         v: 1,
         type: 'hello',
-        payload: { sessions: this.listSessions() }
+        payload: { build: HOST_BUILD, sessions: this.listSessions() }
       })
     })
 
@@ -93,7 +94,7 @@ class PtyHostRuntime {
           if (!this.clients.has(socket)) {
             this.clients.add(socket)
             this.clearIdleTimer()
-            socket.write(encodeMessage({ v: 1, type: 'hello', payload: { sessions: this.listSessions() } }))
+            socket.write(encodeMessage({ v: 1, type: 'hello', payload: { build: HOST_BUILD, sessions: this.listSessions() } }))
           }
           this.handle(socket, message)
         } catch {
@@ -128,9 +129,20 @@ class PtyHostRuntime {
           encodeMessage({
             v: 1,
             type: 'hello',
-            payload: { sessions: this.listSessions() }
+            payload: { build: HOST_BUILD, sessions: this.listSessions() }
           })
         )
+        return
+      case 'retire':
+        if (hostHasRunningSessions(this.sessions)) {
+          socket.write(encodeMessage({ v: 1, id: message.id, type: 'error', error: 'Sessions are still running' }))
+          return
+        }
+        socket.write(encodeMessage({ v: 1, id: message.id, type: 'ok' }))
+        setTimeout(() => {
+          this.shutdown(true)
+          process.exit(0)
+        }, 50)
         return
       case 'spawn':
         socket.write(encodeMessage(this.spawn(message.id, message.payload)))
@@ -381,5 +393,7 @@ class PtyHostRuntime {
     }
   }
 }
+
+const HOST_BUILD = hostBuildStamp(__filename)
 
 new PtyHostRuntime().start()

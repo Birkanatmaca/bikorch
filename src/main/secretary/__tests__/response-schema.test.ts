@@ -41,7 +41,11 @@ describe('Secretary response schemas', () => {
     })
   })
 
-  it('keeps a post-CLI follow-up behind the same plan response shape', () => {
-    expect(SECRETARY_FINAL_DECISION_RESPONSE_FORMAT.schema).toBe(SECRETARY_CHAT_RESPONSE_FORMAT.schema)
+  it('keeps a post-CLI follow-up behind the same plan response shape, plus the completion notice', () => {
+    const chat = SECRETARY_CHAT_RESPONSE_FORMAT.schema as { required: string[]; properties: Record<string, unknown> }
+    const final = SECRETARY_FINAL_DECISION_RESPONSE_FORMAT.schema as { required: string[]; properties: Record<string, unknown> }
+    expect(final.properties.plan).toBe(chat.properties.plan)
+    expect(final.required).toEqual([...chat.required, 'notification'])
+    expect(final.properties.notification).toMatchObject({ required: ['headline', 'highlights'] })
   })
 })

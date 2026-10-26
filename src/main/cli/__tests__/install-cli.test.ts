@@ -1,19 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ exec: vi.fn(), inspect: vi.fn(), ensureNode: vi.fn(), installPackage: vi.fn(), state: vi.fn() }))
-vi.mock('util', () => ({ promisify: () => mocks.exec }))
+vi.mock('../run-logged', () => ({ runLogged: mocks.exec, InstallCancelledError: class extends Error {} }))
 vi.mock('../adapters', () => ({ terminalUserEnv: () => ({ PATH: 'tools' }) }))
 vi.mock('../health', () => ({ inspectCli: mocks.inspect }))
 vi.mock('../install-runtime', () => ({ ensureManagedNode: mocks.ensureNode }))
 vi.mock('../setup-recovery', () => ({ initializeManagedSetup: async () => {} }))
 vi.mock('../install-package', () => ({ installManagedPackage: mocks.installPackage }))
 vi.mock('../install-state', () => ({ getCliSetupSnapshot: () => ({ installation: null }), setCliInstallation: mocks.state }))
-import { installCli } from '../install-cli'
+import { cancelCliInstall, installCli } from '../install-cli'
 
 beforeEach(() => {
   vi.resetAllMocks()
   mocks.inspect.mockResolvedValueOnce({ installed: false }).mockResolvedValue({ installed: true })
-  mocks.exec.mockResolvedValue({ stdout: '', stderr: '' })
+  mocks.exec.mockResolvedValue(undefined)
   mocks.ensureNode.mockResolvedValue(undefined)
   mocks.installPackage.mockImplementation(async (_kind, verifying) => verifying())
 })
@@ -33,7 +33,7 @@ describe('CLI installer', () => {
   it.each(['gemini', 'codex'] as const)('installs %s using a managed runtime and isolated package prefix', async (kind) => {
     expect(await installCli(kind)).toEqual({ ok: true })
     expect(mocks.ensureNode).toHaveBeenCalledOnce()
-    expect(mocks.installPackage).toHaveBeenCalledWith(kind, expect.any(Function))
+    expect(mocks.installPackage).toHaveBeenCalledWith(kind, expect.any(Function), expect.objectContaining({ signal: expect.any(Object) }))
     expect(mocks.state.mock.calls.map(([value]) => value.phase)).toContain('runtime')
   })
 
@@ -41,6 +41,31 @@ describe('CLI installer', () => {
     mocks.inspect.mockReset().mockResolvedValue({ installed: true })
     expect(await installCli('cursor')).toEqual({ ok: true })
     expect(mocks.exec).not.toHaveBeenCalled()
+  })
+
+  it('re-runs the official installer to update an installed CLI', async () => {
+    mocks.inspect.mockReset().mockResolvedValue({ installed: true, version: '2.0.0' })
+    expect(await installCli('claude', 'update')).toEqual({ ok: true })
+    expect(mocks.exec).toHaveBeenCalledOnce()
+    expect(mocks.state).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'update', phase: 'complete' }))
+  })
+
+  it('stops an installation when it is cancelled', async () => {
+    mocks.exec.mockImplementationOnce((_command, _args, options: { signal: AbortSignal }) =>
+      new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted')))))
+    const running = installCli('cursor')
+    await vi.waitFor(() => expect(mocks.exec).toHaveBeenCalled())
+    expect(cancelCliInstall('cursor')).toBe(true)
+    expect(await running).toEqual(expect.objectContaining({ ok: false, cancelled: true }))
+  })
+
+  it('records installer output lines for the UI', async () => {
+    mocks.exec.mockImplementationOnce(async (_command, _args, options: { onLine: (line: string) => void }) => {
+      options.onLine('Downloading Cursor Agent')
+    })
+    await installCli('cursor')
+    const logs = mocks.state.mock.calls.map(([value]) => value.log ?? []).flat()
+    expect(logs).toContain('Downloading Cursor Agent')
   })
 
   it('repairs a present but broken executable and records verification failure', async () => {

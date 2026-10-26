@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { cliLaunchArgs, detectCli, enrichedPath, getDefaultShell, resolveSpawnConfigCandidates, terminalUserEnv } from '../adapters'
+import { cliLaunchArgs, detectCli, enrichedPath, getDefaultShell, resolveSpawnConfigCandidates, setGeminiSkipTrustSupport, terminalUserEnv } from '../adapters'
 import { existsSync } from 'fs'
 import { join } from 'path'
 
@@ -48,7 +48,11 @@ describe('cliLaunchArgs', () => {
     expect(cliLaunchArgs('cursor', 'normal', 'cursor-grok-4.6-high'))
       .toEqual(['--trust', '--model', 'cursor-grok-4.6-high'])
     expect(cliLaunchArgs('cursor', 'login')).toEqual(['login'])
+    setGeminiSkipTrustSupport(false)
+    expect(cliLaunchArgs('gemini')).toEqual([])
+    setGeminiSkipTrustSupport(true)
     expect(cliLaunchArgs('gemini')).toEqual(['--skip-trust'])
+    setGeminiSkipTrustSupport(false)
     expect(cliLaunchArgs('claude')).toEqual([])
   })
 })

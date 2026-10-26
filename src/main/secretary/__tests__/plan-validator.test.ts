@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isSafeSecretaryInstruction, routeSecretaryPanel, validateSecretaryPlan } from '../plan-validator'
+import { isSafeSecretaryInstruction, routeSecretaryPanel, validateSecretaryPlan, retargetPlanToReadyClis } from '../plan-validator'
 
 const panels = [
   { id: 'cursor-busy', kind: 'cursor' as const, title: 'Busy Cursor', status: 'busy' as const },
@@ -77,5 +77,29 @@ describe('Secretary plan validation', () => {
         { kind: 'codex', instruction: 'Implement the approved findings.', dependsOn: [0] }
       ]
     }, { panels, usage: [] }, true)).toThrow(/dependency cycle/i)
+  })
+})
+
+describe('retargetPlanToReadyClis', () => {
+  const plan = {
+    overview: 'x',
+    assignments: [
+      { id: 'a', panelId: 'p1', kind: 'cursor', mode: 'implement', title: 't', instruction: 'i', expectedResult: 'e', rationale: 'r', usageNote: '', dependsOn: [] },
+      { id: 'b', panelId: null, kind: 'codex', mode: 'review', title: 't', instruction: 'i', expectedResult: 'e', rationale: 'r', usageNote: '', dependsOn: [] }
+    ]
+  } as unknown as Parameters<typeof retargetPlanToReadyClis>[0]
+
+  it('moves work from an unavailable CLI to a ready one', () => {
+    const next = retargetPlanToReadyClis(plan, ['codex'])
+    expect(next?.assignments.map((assignment) => assignment.kind)).toEqual(['codex', 'codex'])
+    expect(next?.assignments[0].panelId).toBeNull()
+  })
+
+  it('keeps a plan whose CLIs are all ready', () => {
+    expect(retargetPlanToReadyClis(plan, ['cursor', 'codex'])).toBe(plan)
+  })
+
+  it('drops the plan when no CLI is ready', () => {
+    expect(retargetPlanToReadyClis(plan, [])).toBeNull()
   })
 })

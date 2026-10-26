@@ -6,18 +6,31 @@ import { promisify } from 'util'
 import { terminalUserEnv } from './adapters'
 import { managedCliPaths } from './managed-paths'
 import { replaceDirectory } from './atomic-directory'
+import { runLogged } from './run-logged'
 
 const execFileAsync = promisify(execFile)
 
-export async function installManagedPackage(kind: 'gemini' | 'codex', onVerifying: () => void): Promise<void> {
+export interface ManagedPackageOptions {
+  signal?: AbortSignal
+  onLine?: (line: string) => void
+}
+
+export async function installManagedPackage(
+  kind: 'gemini' | 'codex',
+  onVerifying: () => void,
+  install: ManagedPackageOptions = {}
+): Promise<void> {
   const paths = managedCliPaths(kind)
   await mkdir(join(paths.root, 'packages'), { recursive: true })
   const staging = await mkdtemp(join(paths.root, `${kind}-install-`))
   const packageName = kind === 'gemini' ? '@google/gemini-cli' : '@openai/codex'
   const options = { cwd: homedir(), env: terminalUserEnv(), windowsHide: true, timeout: 10 * 60 * 1000, maxBuffer: 4 * 1024 * 1024 }
   try {
-    await execFileAsync(paths.node, [paths.npm, 'install', '--global', '--prefix', staging,
-      '--registry=https://registry.npmjs.org', '--no-audit', '--no-fund', packageName], options)
+    await runLogged(paths.node, [paths.npm, 'install', '--global', '--prefix', staging,
+      '--registry=https://registry.npmjs.org', '--no-audit', '--no-fund', '--no-update-notifier', '--loglevel=http', packageName], {
+      cwd: options.cwd, env: options.env, windowsHide: true, timeoutMs: options.timeout,
+      signal: install.signal, onLine: install.onLine
+    })
     onVerifying()
     const packageRoot = join(staging, ...(process.platform === 'win32' ? [] : ['lib']), 'node_modules', packageName)
     const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'))
@@ -31,4 +44,12 @@ export async function installManagedPackage(kind: 'gemini' | 'codex', onVerifyin
   } finally {
     if (resolve(staging).startsWith(resolve(paths.root) + sep)) await rm(staging, { recursive: true, force: true }).catch(() => undefined)
   }
+}
+
+/** Removes a CLI that Bikorch installed under ~/.bikorch/cli. Other installs are left alone. */
+export async function uninstallManagedPackage(kind: 'gemini' | 'codex'): Promise<void> {
+  const paths = managedCliPaths(kind)
+  const target = resolve(paths.prefix)
+  if (!target.startsWith(resolve(paths.root) + sep)) throw new Error('Invalid managed CLI path')
+  await rm(target, { recursive: true, force: true })
 }

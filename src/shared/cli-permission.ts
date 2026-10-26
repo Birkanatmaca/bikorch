@@ -1,5 +1,5 @@
 const ANSI_RE = /\u001b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g
-const TRUST_RE = /workspace trust required|trust this workspace|do you trust the (?:files|contents) of this (?:directory|project|folder)|i trust this folder/i
+const TRUST_RE = /workspace trust required|trust this workspace|do you trust the (?:files|contents) (?:of|in) this (?:directory|project|folder)|i trust this folder|is this a project you created or one you trust/i
 const MANAGED_WORKTREE_RE = /\/Bikorch\/agent-worktrees\//i
 
 const READ_BINS = new Set([
@@ -162,14 +162,41 @@ export function looksWorkspaceTrustPrompt(buffer: string): boolean {
   return TRUST_RE.test(buffer.replace(ANSI_RE, '').replace(/\r/g, ''))
 }
 
-/** Enter confirms trust only for a Bikorch agent worktree, and only while Yes stays selected. */
-function managedWorktreeTrustResponse(tail: string, managedWorktree = false): '\r' | 'a\r' | null {
+/** Down arrow, then Enter: moves a menu from its default "No" to "Yes" and confirms. */
+export const TRUST_DOWN_THEN_ENTER = '\u001b[B\r'
+
+export type CliPermissionKeys = '\r' | 'y\r' | 'a\r' | typeof TRUST_DOWN_THEN_ENTER
+
+/** Terminal writes for a response; menus need a pause between moving and confirming. */
+export function permissionKeystrokes(keys: CliPermissionKeys): string[] {
+  return keys === TRUST_DOWN_THEN_ENTER ? ['\u001b[B', '\r'] : [keys]
+}
+
+const SELECTED_RE = /^(?:>|❯|▶|▸|›|●)\s*(?:\d+\.\s*)?(.*)$/
+const DECLINE_RE = /^(?:no\b|don'?t trust|do not trust|quit|exit)/i
+const ACCEPT_RE = /^(?:yes\b|trust folder|trust this|i trust)/i
+
+/**
+ * Confirms folder trust only for a Bikorch agent worktree, and only by choosing
+ * the option that trusts that exact folder:
+ * - Claude Code: "❯ No, exit / Yes, I trust this folder" (No is the default)
+ * - Codex: "› 1. Yes, continue / 2. No, quit"
+ * - Gemini CLI: "● 1. Trust folder (x) / 2. Trust parent folder / 3. Don't trust"
+ */
+function managedWorktreeTrustResponse(tail: string, managedWorktree = false): CliPermissionKeys | null {
   if (!TRUST_RE.test(tail)) return null
   if (!managedWorktree && !MANAGED_WORKTREE_RE.test(tail)) return null
-  const lines = tail.split('\n').map((line) => line.trim())
-  if (lines.some((line) => /^(?:>|❯|▶|▸|›)\s*no\b/i.test(line))) return null
+  const lines = tail.split('\n').map((line) => line.replace(/[│|]/g, ' ').trim()).filter(Boolean)
   if (lines.some((line) => /\[a\]\s*trust/i.test(line))) return 'a\r'
-  if (/yes,\s*i trust|trust this (?:folder|workspace|directory)/i.test(tail)) return '\r'
+  const selected = lines.map((line) => SELECTED_RE.exec(line)?.[1]?.trim()).filter((text): text is string => Boolean(text)).pop()
+  if (selected && ACCEPT_RE.test(selected) && !/parent/i.test(selected)) return '\r'
+  if (selected && DECLINE_RE.test(selected)) {
+    // Only step down when the option right below is the one that trusts this folder.
+    const index = lines.findIndex((line) => SELECTED_RE.exec(line)?.[1]?.trim() === selected)
+    const next = lines[index + 1]?.replace(/^\d+\.\s*/, '') ?? ''
+    return ACCEPT_RE.test(next) && !/parent/i.test(next) ? TRUST_DOWN_THEN_ENTER : null
+  }
+  if (/yes,\s*i trust|trust this (?:folder|workspace|directory)/i.test(tail) && !selected) return '\r'
   return null
 }
 
@@ -187,7 +214,7 @@ function confirmationKind(end: string): '\r' | 'y\r' | null {
 export function cliPermissionResponse(
   buffer: string,
   options?: { managedWorktree?: boolean }
-): '\r' | 'y\r' | 'a\r' | null {
+): CliPermissionKeys | null {
   const tail = buffer.replace(ANSI_RE, '').replace(/\r/g, '').slice(-1200)
   if (!tail.trim()) return null
   if (TRUST_RE.test(tail)) return managedWorktreeTrustResponse(tail, options?.managedWorktree === true)

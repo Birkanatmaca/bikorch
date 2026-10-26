@@ -28,6 +28,8 @@ export interface AiAccount {
   lastSeenAt: number | null
   profileReady: boolean
   lastAuthenticatedAt: number | null
+  /** Set when the account signs in with a vault API key instead of a browser login. */
+  apiKeyId?: string
 }
 
 export type ActiveAccountByKind = Record<CliUsageKind, string | null>

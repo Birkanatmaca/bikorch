@@ -1,3 +1,4 @@
+import { API_KEYS_IPC } from '@shared/contracts/api-keys'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
   type ReadDirectoryRequest,
@@ -176,6 +177,7 @@ import {
   type ResourceProcessSnapshot,
   type ResourceProfile
 } from '@shared/contracts/resources'
+import { STORAGE_IPC, type StorageCleanResult, type StorageReport } from '@shared/contracts/storage'
 
 export interface MusicApi {
   library: {
@@ -254,13 +256,24 @@ export interface MusicApi {
   }
 }
 
+export interface ApiKeysApi {
+  list: () => Promise<import('@shared/contracts/api-keys').ApiKeyRecord[]>
+  add: (request: import('@shared/contracts/api-keys').ApiKeyAddRequest) => Promise<import('@shared/contracts/api-keys').ApiKeyResult>
+  remove: (id: string) => Promise<import('@shared/contracts/api-keys').ApiKeyResult>
+  rename: (id: string, label: string) => Promise<import('@shared/contracts/api-keys').ApiKeyResult>
+  setManager: (id: string | null) => Promise<import('@shared/contracts/api-keys').ApiKeyResult>
+  test: (id: string) => Promise<import('@shared/contracts/api-keys').ApiKeyTestResult>
+  connectCli: (request: import('@shared/contracts/api-keys').ApiKeyConnectCliRequest) => Promise<AuthProfileResult>
+}
+
 export interface CliApi {
-  detect: (kind: Exclude<PtyKind, 'terminal'>) => Promise<{
-    installed: boolean
-    command: string | null
-    error?: string
-  }>
-  install: (kind: Exclude<PtyKind, 'terminal'>) => Promise<{ ok: boolean; error?: string }>
+  detect: (kind: Exclude<PtyKind, 'terminal'>) => Promise<import('@shared/contracts/cli').CliDetection>
+  install: (
+    kind: Exclude<PtyKind, 'terminal'>,
+    mode?: import('@shared/contracts/cli').CliInstallMode
+  ) => Promise<import('@shared/contracts/cli').CliInstallResult>
+  cancelInstall: (kind: Exclude<PtyKind, 'terminal'>) => Promise<boolean>
+  uninstall: (kind: Exclude<PtyKind, 'terminal'>) => Promise<import('@shared/contracts/cli').CliUninstallResult>
   status: () => Promise<import('@shared/contracts/cli').CliSetupSnapshot>
 }
 
@@ -281,6 +294,9 @@ export interface FilesystemApi {
 }
 
 export interface GitApi {
+  setupInspect: (projectRoot: string) => Promise<import('@shared/contracts/git').GitSetupStatus>
+  setupInit: (request: { projectRoot: string; name?: string; email?: string }) => Promise<{ ok: boolean; error?: string; status: import('@shared/contracts/git').GitSetupStatus }>
+  setupInstallTools: () => Promise<{ ok: boolean; message: string }>
   discover: (request: GitDiscoverRequest) => Promise<GitDiscoverResponse>
   status: (request: GitStatusRequest) => Promise<GitStatusResponse>
   checkoutBranch: (request: GitCheckoutBranchRequest) => Promise<{ ok: true }>
@@ -446,6 +462,12 @@ export interface ResourcesApi {
   respondCache: (accept: boolean) => Promise<CacheAnalysis>
 }
 
+export interface StorageApi {
+  scan: () => Promise<StorageReport>
+  clean: (ids: string[]) => Promise<StorageCleanResult[]>
+  reveal: (id: string) => Promise<void>
+}
+
 export interface AppApi {
   platform: NodeJS.Platform
   selectFolder: () => Promise<string | null>
@@ -457,6 +479,7 @@ export interface AppApi {
   usage: UsageApi
   logs: LogsApi
   authProfiles: AuthProfilesApi
+  apiKeys: ApiKeysApi
   window: WindowApi
   developerIntelligence: DeveloperIntelligenceApi
   music: MusicApi
@@ -464,6 +487,7 @@ export interface AppApi {
   secretary: SecretaryApi
   notifications: NotificationsApi
   resources: ResourcesApi
+  storage: StorageApi
 }
 
 const ptyApi: PtyApi = {
@@ -485,7 +509,9 @@ const ptyApi: PtyApi = {
 
 const cliApi: CliApi = {
   detect: (kind) => ipcRenderer.invoke(CLI_IPC.DETECT, kind),
-  install: (kind) => ipcRenderer.invoke(CLI_IPC.INSTALL, kind),
+  install: (kind, mode) => ipcRenderer.invoke(CLI_IPC.INSTALL, kind, mode ?? 'install'),
+  cancelInstall: (kind) => ipcRenderer.invoke(CLI_IPC.CANCEL_INSTALL, kind),
+  uninstall: (kind) => ipcRenderer.invoke(CLI_IPC.UNINSTALL, kind),
   status: () => ipcRenderer.invoke(CLI_IPC.STATUS)
 }
 
@@ -497,6 +523,9 @@ const fsApi: FilesystemApi = {
 }
 
 const gitApi: GitApi = {
+  setupInspect: (projectRoot) => ipcRenderer.invoke(GIT_IPC.SETUP_INSPECT, { projectRoot }),
+  setupInit: (request) => ipcRenderer.invoke(GIT_IPC.SETUP_INIT, request),
+  setupInstallTools: () => ipcRenderer.invoke(GIT_IPC.SETUP_INSTALL_TOOLS),
   discover: (request) => ipcRenderer.invoke(GIT_IPC.DISCOVER, request),
   status: (request) => ipcRenderer.invoke(GIT_IPC.STATUS, request),
   checkoutBranch: (request) => ipcRenderer.invoke(GIT_IPC.CHECKOUT_BRANCH, request),
@@ -561,6 +590,16 @@ const logsApi: LogsApi = {
       ipcRenderer.removeListener(LOGS_IPC.EVENT, listener)
     }
   }
+}
+
+const apiKeysApi: ApiKeysApi = {
+  list: () => ipcRenderer.invoke(API_KEYS_IPC.LIST),
+  add: (request) => ipcRenderer.invoke(API_KEYS_IPC.ADD, request),
+  remove: (id) => ipcRenderer.invoke(API_KEYS_IPC.REMOVE, id),
+  rename: (id, label) => ipcRenderer.invoke(API_KEYS_IPC.RENAME, id, label),
+  setManager: (id) => ipcRenderer.invoke(API_KEYS_IPC.SET_MANAGER, id),
+  test: (id) => ipcRenderer.invoke(API_KEYS_IPC.TEST, id),
+  connectCli: (request) => ipcRenderer.invoke(API_KEYS_IPC.CONNECT_CLI, request)
 }
 
 const authProfilesApi: AuthProfilesApi = {
@@ -789,6 +828,12 @@ const resourcesApi: ResourcesApi = {
   respondCache: (accept) => ipcRenderer.invoke(RESOURCES_IPC.RESPOND_CACHE, accept)
 }
 
+const storageApi: StorageApi = {
+  scan: () => ipcRenderer.invoke(STORAGE_IPC.SCAN),
+  clean: (ids) => ipcRenderer.invoke(STORAGE_IPC.CLEAN, ids),
+  reveal: (id) => ipcRenderer.invoke(STORAGE_IPC.REVEAL, id)
+}
+
 const api: AppApi = {
   platform: process.platform,
   selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),
@@ -800,13 +845,15 @@ const api: AppApi = {
   usage: usageApi,
   logs: logsApi,
   authProfiles: authProfilesApi,
+  apiKeys: apiKeysApi,
   window: windowApi,
   developerIntelligence: developerIntelligenceApi,
   music: musicApi,
   automation: automationApi,
   secretary: secretaryApi,
   notifications: notificationsApi,
-  resources: resourcesApi
+  resources: resourcesApi,
+  storage: storageApi
 }
 
 contextBridge.exposeInMainWorld('api', api)

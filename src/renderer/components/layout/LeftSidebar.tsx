@@ -1,10 +1,13 @@
 import { PanelLeftClose } from 'lucide-react'
 import { AiAccountsPanel } from '@renderer/components/accounts/AiAccountsPanel'
+import { AgentSetupPanel } from '@renderer/components/setup/AgentSetupPanel'
+import { ApiKeysPanel } from '@renderer/components/setup/ApiKeysPanel'
 import { FileExplorerPanel } from '@renderer/components/file-explorer/FileExplorerPanel'
 import { GitChangesPanel } from '@renderer/components/git/GitChangesPanel'
 import { TasksPanel } from '@renderer/components/tasks/TasksPanel'
 import { MemoryManager } from '@renderer/components/profile/MemoryManager'
 import { ProfilePanel } from '@renderer/components/profile/ProfilePanel'
+import { StoragePanel } from '@renderer/components/storage/StoragePanel'
 import { MusicPanel } from '@renderer/components/music/MusicPanel'
 import { TimerPanel } from '@renderer/components/timer/TimerPanel'
 import { SidebarTimerDock } from '@renderer/components/timer/SidebarTimerDock'
@@ -23,9 +26,12 @@ const TITLES: Record<LeftSidebarView, string> = {
   files: 'Files',
   changes: 'Agent Work & Changes',
   accounts: 'CLI accounts',
+  clis: 'CLI setup',
+  apiKeys: 'API keys',
   memory: 'Intelligence',
   tasks: 'Tasks',
   profile: 'Developer Profile',
+  storage: 'Storage & caches',
   music: 'Music',
   timer: 'Timer'
 }
@@ -59,6 +65,12 @@ export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Eleme
         <div className={cn('h-full', view !== 'accounts' && 'hidden')}>
           <AiAccountsPanel />
         </div>
+        <div className={cn('h-full overflow-x-hidden overflow-y-auto p-2.5', view !== 'clis' && 'hidden')}>
+          {view === 'clis' && <AgentSetupPanel compact embedded />}
+        </div>
+        <div className={cn('h-full overflow-x-hidden overflow-y-auto p-2.5', view !== 'apiKeys' && 'hidden')}>
+          {view === 'apiKeys' && <ApiKeysPanel compact embedded />}
+        </div>
         <div className={cn('h-full overflow-x-hidden overflow-y-auto p-2.5', view !== 'memory' && 'hidden')}>
           <MemoryManager
             active={view === 'memory'}
@@ -70,6 +82,9 @@ export function LeftSidebar({ view, onHide }: LeftSidebarProps): React.JSX.Eleme
         </div>
         <div className={cn('h-full', view !== 'profile' && 'hidden')}>
           <ProfilePanel visible={view === 'profile'} />
+        </div>
+        <div className={cn('h-full overflow-x-hidden overflow-y-auto', view !== 'storage' && 'hidden')}>
+          {view === 'storage' && <StoragePanel />}
         </div>
         <div className={cn('h-full', view !== 'music' && 'hidden')}>
           <MusicPanel />

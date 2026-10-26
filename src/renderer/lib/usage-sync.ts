@@ -8,9 +8,15 @@ import { useAiAccountsStore } from '@renderer/stores/ai-accounts-store'
 import { useUsageStore } from '@renderer/stores/usage-store'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import { isDocumentHidden, onDocumentVisibility } from '@renderer/lib/visibility'
+import { isWindowInactive, onWindowActivity } from '@renderer/lib/window-activity'
 
-const CHECK_INTERVAL_MS = 60_000
-const TICK_MS = 5_000
+// Most providers report usage by launching their full CLI (Codex app-server, an
+// interactive Gemini PTY, Antigravity --print), which costs hundreds of MB and
+// seconds of CPU. Quotas move slowly, so refresh every few minutes while the user
+// is looking and rarely otherwise. Sign-ins and manual checks still refresh at once.
+export const USAGE_CHECK_INTERVAL_MS = 5 * 60_000
+export const USAGE_CHECK_INACTIVE_INTERVAL_MS = 15 * 60_000
+const TICK_MS = 15_000
 const START_DELAY_MS = 2_000
 
 let started = false
@@ -24,17 +30,19 @@ export function invalidateAccountUsage(accountId: string): void {
   revisions.set(accountId, (revisions.get(accountId) ?? 0) + 1)
 }
 
+// API-key accounts have no subscription quota to read; their spend is a billing matter.
 function readyAccounts(): AiAccount[] {
-  return useAiAccountsStore.getState().accounts.filter((account) => account.profileReady)
+  return useAiAccountsStore.getState().accounts.filter((account) => account.profileReady && !account.apiKeyId)
 }
 
 function dueAccounts(force = false): AiAccount[] {
   const now = Date.now()
+  const interval = isWindowInactive() ? USAGE_CHECK_INACTIVE_INTERVAL_MS : USAGE_CHECK_INTERVAL_MS
   const checkedAtByAccountId = useUsageStore.getState().checkedAtByAccountId
   return readyAccounts().filter((account) => {
     if (force) return true
     const lastChecked = checkedAtByAccountId[account.id] ?? 0
-    return now - lastChecked >= CHECK_INTERVAL_MS
+    return now - lastChecked >= interval
   })
 }
 
@@ -152,6 +160,9 @@ export function startUsageSync(): () => void {
   const stopVisibility = onDocumentVisibility((hidden) => {
     if (!hidden) tick()
   })
+  const stopActivity = onWindowActivity((inactive) => {
+    if (!inactive) tick()
+  })
 
   startTimer = setTimeout(() => {
     tick(true)
@@ -171,6 +182,7 @@ export function startUsageSync(): () => void {
     window.removeEventListener(AI_ACCOUNT_AUTHENTICATED_EVENT, handleAuthenticated)
     window.removeEventListener(AI_ACCOUNTS_REFRESH_EVENT, onRefresh)
     stopVisibility()
+    stopActivity()
   }
 }
 

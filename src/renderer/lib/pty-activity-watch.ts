@@ -60,7 +60,7 @@ function handleSecretaryEvent(event: SecretaryEvent): void {
     projectName: project.name,
     title: 'Manager',
     outcome: event.type === 'run-report' ? 'done' : 'error'
-  })
+  }, { notify: false }) // The notification feed already announces Manager outcomes.
 }
 
 function handlePtyEvent(event: PtyEvent): void {

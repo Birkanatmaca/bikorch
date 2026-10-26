@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, memo, type ReactNode } from 'react'
 
 function inlineText(text: string): ReactNode[] {
   const nodes: ReactNode[] = []
@@ -39,7 +39,7 @@ function paragraphLines(lines: string[]): ReactNode[] {
 }
 
 /** Render common developer chat formatting as React nodes; never interpret raw HTML. */
-export function ManagerMarkdown({ content }: { content: string }): React.JSX.Element {
+function ManagerMarkdownView({ content }: { content: string }): React.JSX.Element {
   const lines = content.replace(/\r\n?/g, '\n').split('\n')
   const blocks: ReactNode[] = []
   let index = 0
@@ -100,3 +100,7 @@ export function ManagerMarkdown({ content }: { content: string }): React.JSX.Ele
   }
   return <div className="manager-message-content">{blocks}</div>
 }
+
+// Messages never change once shown, so typing in the composer or a terminal status
+// change must not re-parse the markdown of every message in the conversation.
+export const ManagerMarkdown = memo(ManagerMarkdownView)

@@ -26,7 +26,7 @@ import {
   mapProcessStatus
 } from '@renderer/lib/cli-activity'
 import { PromptComposer, isLikelyPrompt } from '@renderer/lib/prompt-capture'
-import { formatMemoryContextInline } from '@renderer/lib/developer-context'
+import { acceptsInlineContext, formatMemoryContextInline } from '@renderer/lib/developer-context'
 import {
   beginAgentSession,
   endAgentSession,
@@ -62,6 +62,8 @@ interface TerminalViewProps {
 }
 
 const PTY_RESIZE_MS = 80
+const SLOW_LOGIN_HINT_MS = 3 * 60_000
+const OUTPUT_ANALYSIS_MS = 120
 
 export function TerminalView({
   sessionId,
@@ -254,6 +256,7 @@ export function TerminalView({
     const composer = cli ? new PromptComposer() : null
     const agentKind = kind as Exclude<PtyKind, 'terminal'>
     let outputTail = ''
+    let cancelOutputAnalysis = (): void => undefined
     let lastInputError: string | null = null
     let authInspectTimer: number | null = null
     let authPollTimer: number | null = null
@@ -334,8 +337,18 @@ export function TerminalView({
     }
 
     if (captureAfterLogin && shouldCaptureAccount) {
+      const loginStartedAt = Date.now()
+      let slowLoginHinted = false
       authPollTimer = window.setInterval(() => {
         if (ptyReadyRef.current) void inspectAuthenticatedProfile()
+        // Keep checking, but tell the user what to do instead of waiting silently.
+        if (!slowLoginHinted && !authCaptured && Date.now() - loginStartedAt > SLOW_LOGIN_HINT_MS) {
+          slowLoginHinted = true
+          terminal.writeln(
+            '\r\n\x1b[33m[Account] Still waiting for sign-in. If no browser window opened, copy the link above into your browser. ' +
+              'To start over, close this panel and choose Sign in again.\x1b[0m'
+          )
+        }
       }, 2000)
     }
 
@@ -402,8 +415,14 @@ export function TerminalView({
       setStatus(sessionId, next)
     }
 
-    const noteOutput = (chunk: string): void => {
-      outputTail = (outputTail + chunk).slice(-8000)
+    // Agent TUIs emit hundreds of tiny chunks a second. Keep the tail current on
+    // every chunk, but publish it and re-infer busy/waiting at most every
+    // OUTPUT_ANALYSIS_MS: store listeners and the ANSI-stripping regexes then run
+    // a few times a second instead of once per chunk.
+    let outputAnalysisTimer: number | null = null
+    const analyzeOutput = (): void => {
+      outputAnalysisTimer = null
+      if (!active) return
       useTerminalStore.getState().setOutputTail(sessionId, outputTail)
       if (!cli) return
       maybeStartAntigravityLogin()
@@ -414,6 +433,16 @@ export function TerminalView({
       }
       if (inferred === 'waiting') {
         applyCliStatus('waiting')
+      }
+    }
+    cancelOutputAnalysis = () => {
+      if (outputAnalysisTimer !== null) window.clearTimeout(outputAnalysisTimer)
+      outputAnalysisTimer = null
+    }
+    const noteOutput = (chunk: string): void => {
+      outputTail = (outputTail + chunk).slice(-8000)
+      if (outputAnalysisTimer === null) {
+        outputAnalysisTimer = window.setTimeout(analyzeOutput, OUTPUT_ANALYSIS_MS)
       }
     }
 
@@ -468,7 +497,9 @@ export function TerminalView({
         if (cli && composer && isPromptSubmit(data)) {
           const peek = composer.peek().trim()
           const isEnterOnly = data === '\r' || data === '\n' || data === '\r\n'
-          if (isEnterOnly && isLikelyPrompt(peek)) {
+          // Never append context to a slash command (/review …), Claude's !bash or # memory
+          // input: the text would become that command's arguments.
+          if (isEnterOnly && isLikelyPrompt(peek) && acceptsInlineContext(peek)) {
             const { settings, settingsLoaded } = useDeveloperIntelligenceStore.getState()
             if (settingsLoaded && settings.includeMemoryInPrompts) {
               try {
@@ -830,6 +861,7 @@ export function TerminalView({
 
     return () => {
       active = false
+      cancelOutputAnalysis()
       disposedRef.current = true
       ptyReadyRef.current = false
       inputQueue?.close()

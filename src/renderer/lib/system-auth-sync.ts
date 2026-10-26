@@ -87,10 +87,12 @@ export async function syncDiscoveredSystemAccounts(): Promise<void> {
 }
 
 export async function importSystemAccountForKind(
-  kind: CliUsageKind
+  kind: CliUsageKind,
+  options: { userRequested?: boolean } = {}
 ): Promise<AiAccount | null> {
   const store = useAiAccountsStore.getState()
-  if (store.suppressSystemImportByKind[kind]) return null
+  // Automatic imports respect a removed account; an explicit click does not.
+  if (store.suppressSystemImportByKind[kind] && !options.userRequested) return null
   const readyAccounts = store.accounts.filter(
     (account) => account.kind === kind && account.profileReady
   )

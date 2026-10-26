@@ -23,10 +23,26 @@ import { TimerHost } from '@renderer/components/timer/TimerHost'
 import { cn } from '@renderer/lib/utils'
 import { isMacOS, isWindows } from '@renderer/lib/electron-api'
 import { useCliDetection } from '@renderer/hooks/use-cli-detection'
+import { useSetupSignInStore } from '@renderer/lib/standalone-sign-in'
+import { NotificationToasts } from '@renderer/components/notifications/Notifications'
+import { startNotificationFeed } from '@renderer/lib/notification-feed'
+
+const SetupSignInDialog = lazy(() => import('@renderer/components/setup/SetupSignInDialog'))
 
 const IdeOverlay = lazy(() =>
   import('@renderer/components/ide/IdeOverlay').then((module) => ({ default: module.IdeOverlay }))
 )
+
+// Loads the terminal chunk only once a sign-in actually starts.
+function SetupSignInHost(): React.JSX.Element | null {
+  const active = useSetupSignInStore((state) => state.active !== null)
+  if (!active) return null
+  return (
+    <Suspense fallback={null}>
+      <SetupSignInDialog />
+    </Suspense>
+  )
+}
 
 export default function App(): React.JSX.Element {
   useCliDetection()
@@ -106,10 +122,12 @@ export default function App(): React.JSX.Element {
     const stopUsage = startUsageSync()
     const stopPtyWatch = startPtyActivityWatch()
     const stopResources = startResourcePolicies()
+    const stopNotifications = startNotificationFeed()
     return () => {
       stopUsage()
       stopPtyWatch()
       stopResources()
+      stopNotifications()
     }
   }, [isReady])
 
@@ -147,6 +165,8 @@ export default function App(): React.JSX.Element {
         <MusicPlayerHost />
         <TimerHost />
         <CommandPalette open={open} onClose={closePalette} />
+        <SetupSignInHost />
+        <NotificationToasts />
       </div>
     </ErrorBoundary>
   )

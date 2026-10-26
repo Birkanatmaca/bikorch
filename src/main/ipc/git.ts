@@ -1,4 +1,9 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { realpathSync } from 'fs'
+import { resolve as resolvePath } from 'path'
+import { initializeGitRepo, inspectGitSetup, installGitTools } from '../git/setup'
+import { listPersistedProjectFolders } from '../persistence/database'
+import { assertTrustedMainWindow } from './trusted-sender'
 import {
   type AgentApplyPhase,
   type GitDiffRequest,
@@ -235,6 +240,40 @@ export function registerGitHandlers(): void {
     }
     const repos = await discoverGitRepos(payload.projectRoot)
     return { repos }
+  })
+
+  // Setup writes to the project (.gitignore, a first commit), so it only accepts a
+  // folder the user opened as a project.
+  const registeredProjectRoot = (payload: unknown): string => {
+    const root = (payload as { projectRoot?: unknown } | null)?.projectRoot
+    if (typeof root !== 'string' || !root.trim()) throw new Error('Invalid project')
+    const real = (path: string): string => {
+      try { return realpathSync(path) } catch { return resolvePath(path) }
+    }
+    const wanted = real(root)
+    if (!listPersistedProjectFolders().some((folder) => real(folder) === wanted)) {
+      throw new Error('Open this folder as a project first')
+    }
+    return wanted
+  }
+
+  ipcMain.handle(GIT_IPC.SETUP_INSPECT, async (event, payload: unknown) => {
+    assertTrustedMainWindow(event)
+    return inspectGitSetup(registeredProjectRoot(payload))
+  })
+
+  ipcMain.handle(GIT_IPC.SETUP_INIT, async (event, payload: unknown) => {
+    assertTrustedMainWindow(event)
+    const body = (payload ?? {}) as { name?: unknown; email?: unknown }
+    return initializeGitRepo(registeredProjectRoot(payload), {
+      ...(typeof body.name === 'string' ? { name: body.name.slice(0, 200) } : {}),
+      ...(typeof body.email === 'string' ? { email: body.email.slice(0, 200) } : {})
+    })
+  })
+
+  ipcMain.handle(GIT_IPC.SETUP_INSTALL_TOOLS, async (event) => {
+    assertTrustedMainWindow(event)
+    return installGitTools()
   })
 
   ipcMain.handle(GIT_IPC.STATUS, async (_event, payload: unknown) => {

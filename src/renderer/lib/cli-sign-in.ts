@@ -7,6 +7,7 @@ import { useCliStore } from '@renderer/stores/cli-store'
 import { invalidateAccountUsage } from './usage-sync'
 import { FOCUS_TERMINAL_EVENT } from './app-events'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
+import { STANDALONE_SIGN_IN_KINDS, useSetupSignInStore } from './standalone-sign-in'
 
 const launches = new Map<string, Promise<void>>()
 
@@ -18,7 +19,7 @@ function assertCurrentProject(projectId: string): void {
 
 function withInstalledCli(kind: CliUsageKind, action: (projectId: string) => void | Promise<void>): Promise<void> {
   const projectId = useWorkspaceStore.getState().activeProjectId
-  if (!projectId || !useWorkspaceStore.getState().getActiveWorkspace()) return Promise.reject(new Error('Open a project before signing in'))
+  if (!projectId || !useWorkspaceStore.getState().getActiveWorkspace()) return Promise.reject(new Error(`Open a project to start ${AI_ACCOUNT_LABELS[kind]}`))
   const key = `${projectId}:${kind}`
   const existing = launches.get(key)
   if (existing) return existing
@@ -55,7 +56,15 @@ function openSignInPanel(kind: CliUsageKind, account?: AiAccount): void {
   workspace.addPanel(kind, 'center', undefined, 'login', accountId, `${AI_ACCOUNT_LABELS[kind]} · Sign in`)
 }
 
-export function openCliSignIn(kind: CliUsageKind, account?: AiAccount): Promise<void> {
+export async function openCliSignIn(kind: CliUsageKind, account?: AiAccount): Promise<void> {
+  // Signing in should not require a project: without one, run the CLI in a setup dialog.
+  if (!useWorkspaceStore.getState().activeProjectId && STANDALONE_SIGN_IN_KINDS.includes(kind)) {
+    if (!await useCliStore.getState().detect(kind)) {
+      throw new Error(useCliStore.getState().errorsByKind[kind] || `${AI_ACCOUNT_LABELS[kind]} is not installed on this computer`)
+    }
+    useSetupSignInStore.getState().start(kind, account)
+    return
+  }
   return withInstalledCli(kind, () => openSignInPanel(kind, account))
 }
 

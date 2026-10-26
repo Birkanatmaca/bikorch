@@ -259,6 +259,9 @@ export function SecretarySettings(): React.JSX.Element {
             />
           </label>
           <p className="secretary-cost-note">
+            Keys saved here also appear under Accounts → API keys, where you can pick any saved OpenAI key with “Use for Manager”.
+          </p>
+          <p className="secretary-cost-note">
             This is only the Manager model. Type the identifier you want, such as gpt-5 or gpt-5.6-luna. Each CLI still uses its own account and model.
           </p>
           <div className="secretary-security-note">

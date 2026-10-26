@@ -403,10 +403,10 @@ function AccountCard({
           >
             {actionLabel}
           </button>
-          <button type="button" onClick={onCheck} disabled={isRemoving || isChecking || !account.profileReady} title="Check this account usage" aria-label={`Check ${accountName} usage`}>
+          <button type="button" onClick={onCheck} disabled={isRemoving || isChecking || !account.profileReady || Boolean(account.apiKeyId)} title={account.apiKeyId ? 'API key accounts have no subscription usage to check' : 'Check this account usage'} aria-label={`Check ${accountName} usage`}>
             <RefreshCw className={cn('h-3 w-3', isChecking && 'animate-spin')} />
           </button>
-          {account.kind === 'cursor' && account.profileReady && (
+          {account.profileReady && (
             <button type="button" onClick={onLogout} disabled={isRemoving} title="Log out" aria-label={`Logout ${accountName}`}>
               <LogOut className="h-3 w-3" />
             </button>

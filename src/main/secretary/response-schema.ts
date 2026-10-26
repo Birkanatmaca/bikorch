@@ -103,8 +103,92 @@ export const SECRETARY_FINAL_REPORT_RESPONSE_FORMAT: SecretaryResponseFormat = {
   }
 }
 
-/** The post-CLI decision may either finish or create one more approval-gated plan. */
+const chatSchema = SECRETARY_CHAT_RESPONSE_FORMAT.schema as {
+  required: string[]
+  properties: Record<string, unknown>
+} & Record<string, unknown>
+
+/**
+ * The post-CLI decision may either finish or create one more approval-gated plan.
+ * It also carries the completion notification the user sees first.
+ */
 export const SECRETARY_FINAL_DECISION_RESPONSE_FORMAT: SecretaryResponseFormat = {
   name: 'secretary_final_decision',
-  schema: SECRETARY_CHAT_RESPONSE_FORMAT.schema
+  schema: {
+    ...chatSchema,
+    required: [...chatSchema.required, 'notification'],
+    properties: {
+      ...chatSchema.properties,
+      notification: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['headline', 'highlights'],
+        properties: {
+          headline: { type: 'string' },
+          highlights: { type: 'array', items: { type: 'string' } }
+        }
+      }
+    }
+  }
+}
+
+const finalSchema = SECRETARY_FINAL_DECISION_RESPONSE_FORMAT.schema as {
+  required: string[]
+  properties: Record<string, unknown>
+} & Record<string, unknown>
+
+/** A goal-mode turn also defines what "done" means and how Bikorch will check it. */
+export const SECRETARY_GOAL_CHAT_RESPONSE_FORMAT: SecretaryResponseFormat = {
+  name: 'secretary_goal_chat',
+  schema: {
+    ...chatSchema,
+    required: [...chatSchema.required, 'goal'],
+    properties: {
+      ...chatSchema.properties,
+      goal: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['objective', 'acceptanceCriteria', 'verifyCommands'],
+        properties: {
+          objective: { type: 'string' },
+          acceptanceCriteria: { type: 'array', items: { type: 'string' } },
+          verifyCommands: { type: 'array', items: { type: 'string' } }
+        }
+      }
+    }
+  }
+}
+
+/** After each goal round: is the goal met, should another round run, or is it blocked? */
+export const SECRETARY_GOAL_FINAL_RESPONSE_FORMAT: SecretaryResponseFormat = {
+  name: 'secretary_goal_decision',
+  schema: {
+    ...finalSchema,
+    required: [...finalSchema.required, 'goalDecision'],
+    properties: {
+      ...finalSchema.properties,
+      goalDecision: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['status', 'criteria', 'summary'],
+        properties: {
+          status: { type: 'string', enum: ['met', 'continue', 'blocked'] },
+          summary: { type: 'string' },
+          criteria: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['criterion', 'met', 'evidence'],
+              properties: {
+                criterion: { type: 'string' },
+                met: { type: 'boolean' },
+                evidence: { type: 'string' }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { ProcessFinishOutcome } from '@renderer/lib/project-activity'
+import { noteCliFinished } from '@renderer/lib/notification-feed'
 
 export interface ProcessNotice {
   id: string
@@ -19,28 +20,14 @@ interface ActivityAttentionStore {
     projectName: string
     title: string
     outcome: ProcessFinishOutcome
-  }) => void
+  }, options?: { notify?: boolean }) => void
   clearProject: (projectId: string) => void
-}
-
-function desktopNotify(notice: ProcessNotice): void {
-  const api = window.api?.notifications
-  if (!api?.showCliTask) return
-  void api
-    .showCliTask({
-      projectId: notice.projectId,
-      panelId: notice.panelId,
-      projectName: notice.projectName,
-      title: notice.title,
-      outcome: notice.outcome
-    })
-    .catch(() => undefined)
 }
 
 export const useActivityAttentionStore = create<ActivityAttentionStore>((set) => ({
   attentionByProject: {},
 
-  noteFinish: (input) => {
+  noteFinish: (input, options = {}) => {
     const at = Date.now()
     const notice: ProcessNotice = {
       id: `${input.panelId}:${at}`,
@@ -60,7 +47,15 @@ export const useActivityAttentionStore = create<ActivityAttentionStore>((set) =>
         }
       }
     })
-    desktopNotify(notice)
+    if (options.notify !== false) {
+      noteCliFinished({
+        projectId: notice.projectId,
+        projectName: notice.projectName,
+        panelId: notice.panelId,
+        title: notice.title,
+        outcome: notice.outcome
+      })
+    }
   },
 
   clearProject: (projectId) => {

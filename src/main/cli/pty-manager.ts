@@ -1,14 +1,17 @@
 import type { IPty } from '@homebridge/node-pty-prebuilt-multiarch'
 import * as pty from '@homebridge/node-pty-prebuilt-multiarch'
-import type { WebContents } from 'electron'
+import { app, type WebContents } from 'electron'
 import {
   type PtyCreateRequest,
   type PtyCreateResponse,
   type PtyEvent,
   type PtySessionStatus,
   type PtySessionSnapshot,
-  PTY_IPC
+  PTY_IPC,
+  SETUP_SIGN_IN_PROJECT_ID
 } from '@shared/contracts/pty'
+import { mkdirSync } from 'fs'
+import { dirname, join } from 'path'
 import { resolveSpawnConfigCandidates, getKindLabel, spawnEnv, terminalUserEnv, cliLaunchArgs, windowsPtySpawnOptions } from './adapters'
 import { isValidSessionId, resolveSafeCwd, resolveWindowsSpawnPath } from './path-validator'
 import {
@@ -26,6 +29,16 @@ import { recordLog } from '../logs'
 import { ptyHostClient } from './pty-host/client'
 import { appendOutputBuffer } from './pty-host/session-store'
 import { appendCliArgs } from './spawn-args'
+import { trustManagedWorktree } from '../accounts/workspace-trust'
+import { managedCliPaths } from './managed-paths'
+
+// Setup-screen sign-ins run in an empty folder of their own, so a CLI that asks
+// whether to trust its working folder never asks about the whole home folder.
+function setupSignInCwd(): string {
+  const dir = join(dirname(managedCliPaths().root), 'sign-in')
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
 
 interface PtySession {
   id: string
@@ -189,7 +202,7 @@ class PtyManager {
       return { sessionId, status: 'error', error: 'Invalid session ID' }
     }
 
-    const cwd = resolveSafeCwd(request.cwd)
+    const cwd = request.projectId === SETUP_SIGN_IN_PROJECT_ID ? setupSignInCwd() : resolveSafeCwd(request.cwd)
     const worktreePath = request.worktreePath?.trim() ? cwd : undefined
     // Rebuild the main-process binding after app restart before preparing account credentials.
     if (!this.sessions.has(sessionId)) {
@@ -365,6 +378,11 @@ class PtyManager {
       if (kind === 'antigravity' && request.launchMode === 'login') {
         profileEnv = {}
       }
+    }
+    // Manager tasks run in fresh worktrees; answer each CLI's folder-trust question
+    // ahead of time so nobody has to click it in a terminal nobody is watching.
+    if (request.launchMode !== 'login' && worktreePath && kind !== 'terminal') {
+      trustManagedWorktree({ kind, cwd, agentRoot: join(app.getPath('userData'), 'agent-worktrees'), profileEnv })
     }
     const launchArgs = cliLaunchArgs(kind, request.launchMode ?? 'normal', request.cliModel)
     const spawnCwd = resolveWindowsSpawnPath(cwd)

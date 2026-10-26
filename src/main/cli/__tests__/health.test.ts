@@ -15,7 +15,7 @@ describe('CLI health', () => {
   it('tries a working launcher after a stale wrapper', async () => {
     mocks.candidates.mockReturnValue([{ command: 'stale', args: [] }, { command: 'node', args: ['agent.js'] }])
     mocks.exec.mockRejectedValueOnce(new Error('broken')).mockResolvedValue({ stdout: 'Agent 1.2.3', stderr: '' })
-    expect(await inspectCli('cursor')).toEqual({ installed: true, command: 'node agent.js' })
+    expect(await inspectCli('cursor')).toEqual({ installed: true, command: 'node agent.js', version: '1.2.3', managed: false })
   })
   it('requires version output and rejects an empty successful command', async () => {
     mocks.exec.mockResolvedValue({ stdout: '', stderr: '' })

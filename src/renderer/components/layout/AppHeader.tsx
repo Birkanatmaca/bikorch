@@ -4,6 +4,7 @@ import { ChatMenu } from './ChatMenu'
 import { AppLogo } from '../brand/AppLogo'
 import { MenuBar } from './MenuBar'
 import { TitleBarControls } from './TitleBarControls'
+import { NotificationCenter } from '../notifications/Notifications'
 import { useWindowChrome } from '@renderer/hooks/use-window-chrome'
 import { cn } from '@renderer/lib/utils'
 import { isMacOS, isWindows } from '@renderer/lib/electron-api'
@@ -73,6 +74,7 @@ export function AppHeader({
       <div className={cn('app-header-actions flex shrink-0 items-center gap-1.5 app-no-drag', isWin ? 'pr-0' : 'pr-1')}>
         {showWorkspaceControls && <AddPanelMenu />}
         {showWorkspaceControls && <ChatMenu />}
+        <NotificationCenter />
         <TitleBarControls />
       </div>
     </header>

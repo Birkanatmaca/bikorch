@@ -1,6 +1,7 @@
 export interface WindowChromeState {
   maximized: boolean
   fullScreen: boolean
+  focused: boolean
 }
 
 export const WINDOW_IPC = {

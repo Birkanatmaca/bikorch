@@ -1,6 +1,6 @@
 import { app, safeStorage } from 'electron'
 import { createHash } from 'crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, join } from 'path'
 import type { AuthProfileIdentity, AuthProfileRequest } from '@shared/contracts/auth-profiles'
@@ -86,8 +86,31 @@ export function cursorExpectedIdentity(accountId: string): CursorTokenIdentity {
   }
 }
 
+/**
+ * On macOS each account gets its own HOME, and Cursor's self-updater then
+ * downloads a full copy of the agent (~580 MB per version) into every profile,
+ * where Bikorch never runs it: it always launches the installed agent. Point
+ * the profile's install folder at the real one so updates land where they are
+ * used and nothing is duplicated. Only Bikorch's own profile folder is touched.
+ */
+export function shareCursorInstall(profileHome: string, realHome: string = homedir()): void {
+  const shared = join(realHome, '.local', 'share', 'cursor-agent')
+  const local = join(profileHome, '.local', 'share', 'cursor-agent')
+  if (!existsSync(shared)) return
+  try {
+    const stat = lstatSync(local, { throwIfNoEntry: false })
+    if (stat?.isSymbolicLink() && readlinkSync(local) === shared) return
+    if (stat) rmSync(local, { recursive: true, force: true })
+    mkdirSync(dirname(local), { recursive: true })
+    symlinkSync(shared, local, 'dir')
+  } catch (error) {
+    console.warn('[cursor] Could not share the Cursor install with this profile:', error instanceof Error ? error.message : error)
+  }
+}
+
 export function cursorProfileEnv(accountId: string): Record<string, string> {
   const paths = cursorProfilePaths(accountId)
+  if (process.platform === 'darwin') shareCursorInstall(paths.home)
   return {
     CURSOR_CONFIG_DIR: dirname(paths.config),
     CURSOR_DATA_DIR: join(paths.root, 'data'),

@@ -192,3 +192,18 @@ export function validateSecretaryPlan(
     approvalRequired: true
   }
 }
+/**
+ * The model may still name a CLI the user does not have. Move such assignments
+ * to a CLI that is ready, so approval never leads to a panel that cannot start.
+ */
+export function retargetPlanToReadyClis(plan: SecretaryPlan, ready: readonly CliUsageKind[]): SecretaryPlan | null {
+  if (ready.length === 0) return null
+  if (plan.assignments.every((assignment) => ready.includes(assignment.kind))) return plan
+  return {
+    ...plan,
+    assignments: plan.assignments.map((assignment) =>
+      ready.includes(assignment.kind) ? assignment : { ...assignment, kind: ready[0], panelId: null }
+    )
+  }
+}
+

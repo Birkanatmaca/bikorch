@@ -2,7 +2,7 @@ import { connect, type Socket } from 'net'
 import { spawn } from 'child_process'
 import { app } from 'electron'
 import type { PtySessionSnapshot } from '@shared/contracts/pty'
-import { hostConnectionToken, hostSocketPath } from './paths'
+import { hostBuildStamp, hostConnectionToken, hostSocketPath } from './paths'
 import { existsSync, mkdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
@@ -34,6 +34,9 @@ class PtyHostClient {
   private seq = 0
   private connecting: Promise<boolean> | null = null
   readonly knownSessions = new Map<string, HostSessionSnapshot>()
+  /** Build of the host we are talking to, from its hello. */
+  private hostBuild: string | null = null
+  private retiring = false
   private listeners = new Set<(message: PtyHostServerMessage) => void>()
 
   paths(): { socketPath: string; pidPath: string; hostScript: string } {
@@ -63,7 +66,11 @@ class PtyHostClient {
   }
 
   private async connectOrSpawn(): Promise<boolean> {
-    if (await this.tryConnect()) return true
+    if (await this.tryConnect()) {
+      // Learn the host's build before any request; replace an idle outdated host.
+      await this.request({ v: 1, id: this.nextId(), type: 'list' }).catch(() => undefined)
+      if (!(await this.retireIfStale())) return true
+    }
     if (!this.spawnHost()) return false
     for (let attempt = 0; attempt < 40; attempt += 1) {
       await delay(50)
@@ -162,6 +169,7 @@ class PtyHostClient {
 
   private dispatch(message: PtyHostServerMessage): void {
     if (message.type === 'hello') {
+      this.hostBuild = message.payload.build ?? 'legacy'
       this.knownSessions.clear()
       for (const session of message.payload.sessions) {
         this.knownSessions.set(session.sessionId, {
@@ -190,6 +198,54 @@ class PtyHostClient {
         if (existing) existing.status = event.status === 'running' ? 'running' : 'stopped'
       }
     }
+    // Only exits and stops can make the host idle; data events never do.
+    if (message.type === 'event' && message.payload.type !== 'data' && this.pending.size === 0) void this.retireIfStale()
+  }
+
+  /**
+   * After an app update the old host keeps running the previous build and holds
+   * its deleted files on disk. Once it has no running session, ask it to exit;
+   * the next terminal starts a host from the current build. Live sessions are
+   * never interrupted.
+   */
+  private ownBuild: string | null = null
+
+  private isStale(): boolean {
+    this.ownBuild ??= hostBuildStamp(this.paths().hostScript)
+    return Boolean(this.hostBuild) && this.hostBuild !== this.ownBuild
+  }
+
+  private hasRunningSessions(): boolean {
+    return [...this.knownSessions.values()].some((session) => session.status === 'running')
+  }
+
+  /** Returns true when the old host was asked to exit (or killed) and is gone. */
+  private async retireIfStale(): Promise<boolean> {
+    if (this.retiring || !this.socket || !this.isStale() || this.hasRunningSessions()) return false
+    this.retiring = true
+    const legacy = this.hostBuild === 'legacy'
+    recordLog('info', `Retiring PTY host from an older build (${this.hostBuild})`, 'pty-host')
+    try {
+      if (legacy) {
+        // Hosts from before build stamps do not know "retire"; stop them by pid.
+        const pid = Number(readFileSync(this.paths().pidPath, 'utf8').trim())
+        if (Number.isInteger(pid) && pid > 0 && pid !== process.pid) process.kill(pid, 'SIGTERM')
+      } else {
+        await this.request({ v: 1, id: this.nextId(), type: 'retire' })
+      }
+    } catch {
+      // Refused (a session started meanwhile) or already gone: keep what works.
+      this.retiring = false
+      return false
+    }
+    this.socket?.destroy()
+    this.socket = null
+    this.hostBuild = null
+    this.knownSessions.clear()
+    // Give the old host a moment to close its socket before a new one is spawned.
+    await delay(150)
+    this.retiring = false
+    return true
   }
 
   private nextId(): string {

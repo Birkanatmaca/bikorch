@@ -270,8 +270,8 @@ function initSchema(database: Database): void {
 }
 
 /**
- * Debounced disk write for high-frequency writers (activity events). The snapshot
- * save path still persists immediately; this only coalesces bursts of small writes.
+ * Debounced disk write: coalesces bursts of writes into one export, at most
+ * MAX_DISK_PERSIST_WAIT_MS after the first unsaved change.
  */
 export function schedulePersistToDisk(delayMs = 800): void {
   if (firstDirtyAt === null) firstDirtyAt = Date.now()
@@ -720,7 +720,8 @@ function parseAccounts(raw: unknown): AiAccount[] {
         lastSeenAt: typeof account.lastSeenAt === 'number' ? account.lastSeenAt : null,
         profileReady: account.profileReady === true,
         lastAuthenticatedAt:
-          typeof account.lastAuthenticatedAt === 'number' ? account.lastAuthenticatedAt : null
+          typeof account.lastAuthenticatedAt === 'number' ? account.lastAuthenticatedAt : null,
+        ...(typeof account.apiKeyId === 'string' && account.apiKeyId ? { apiKeyId: account.apiKeyId } : {})
       }
     ]
   })
@@ -1038,10 +1039,7 @@ export function loadSnapshot(): PersistedSnapshot {
 export function saveSnapshot(snapshot: PersistedSnapshot): void {
   const database = getDb()
   const fingerprint = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex')
-  if (fingerprint === lastSnapshotFingerprint) {
-    persistToDisk()
-    return
-  }
+  if (fingerprint === lastSnapshotFingerprint) return
 
   database.run('BEGIN TRANSACTION')
   let committed = false
@@ -1126,8 +1124,11 @@ export function saveSnapshot(snapshot: PersistedSnapshot): void {
     database.run('COMMIT')
     committed = true
     lastSnapshotFingerprint = fingerprint
-    diskDirty = true
-    persistToDisk()
+    // sql.js re-exports and fsyncs the whole database on every disk write, on the
+    // main thread. Layout drags and usage updates save snapshots in bursts, so
+    // coalesce them: the debounce caps the delay at a few seconds, quit flushes,
+    // and workflow boundaries that cannot lose data call flushPersistenceToDisk().
+    schedulePersistToDisk()
   } catch (error) {
     if (!committed) {
       try {

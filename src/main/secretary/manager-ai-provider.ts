@@ -89,7 +89,8 @@ export function createOpenAiManagerProvider(dependencies: {
           const error = cause instanceof Error && !timedOut && cause.message.startsWith('The Manager ')
             ? cause
             : secretaryNetworkError(timedOut)
-          if (attempt < SECRETARY_MAX_REQUEST_ATTEMPTS && (timedOut || !(cause instanceof Error) || cause.name === 'TypeError')) {
+          // Retry dropped connections, but not timeouts: a second full wait doubles the delay for little gain.
+          if (attempt < SECRETARY_MAX_REQUEST_ATTEMPTS && !timedOut && (!(cause instanceof Error) || cause.name === 'TypeError')) {
             lastNetworkError = error
             await new Promise((resolve) => setTimeout(resolve, Math.min(1_000 * attempt, 2_000)))
             continue

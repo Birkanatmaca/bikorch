@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
-import { isCliInstallationRunning, type CliInstallation, type CliSetupSnapshot } from '@shared/contracts/cli'
+import { CLI_INSTALL_LOG_LINES, isCliInstallationRunning, type CliInstallation, type CliSetupSnapshot } from '@shared/contracts/cli'
 import { managedCliPaths } from './managed-paths'
 
 let loaded = false
@@ -29,7 +29,11 @@ export function getCliSetupSnapshot(): CliSetupSnapshot {
         ['checking', 'runtime', 'installing', 'verifying', 'complete', 'failed', 'interrupted'].includes(stored.phase) &&
         Number.isFinite(stored.startedAt) && Number.isFinite(stored.updatedAt)) {
         installation = { kind: stored.kind, phase: stored.phase, startedAt: stored.startedAt, updatedAt: stored.updatedAt,
-          ...(typeof stored.error === 'string' ? { error: stored.error.slice(0, 4000) } : {}) }
+          ...(stored.mode === 'install' || stored.mode === 'update' ? { mode: stored.mode } : {}),
+          ...(Array.isArray(stored.log)
+            ? { log: stored.log.filter((line: unknown) => typeof line === 'string').slice(-CLI_INSTALL_LOG_LINES) }
+            : {}),
+          ...(typeof stored.error === 'string' ? { error: stored.error.slice(0, 600) } : {}) }
         if (isCliInstallationRunning(installation)) {
           installation = { ...installation!, phase: 'interrupted', updatedAt: Date.now(), error: 'Installation was interrupted. Click download to continue.' }
           save()

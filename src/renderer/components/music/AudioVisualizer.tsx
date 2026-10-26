@@ -49,6 +49,10 @@ function drawPioneer(
   }
 }
 
+// ~30fps is plenty for a level meter and halves the paint work of the display rate.
+const FRAME_INTERVAL_MS = 1000 / 30 - 2
+const HIDDEN_RECHECK_MS = 500
+
 export function AudioVisualizer({
   playing
 }: {
@@ -63,25 +67,53 @@ export function AudioVisualizer({
     const context = canvas.getContext('2d')
     if (!context) return
 
-    let frame = 0
-    const tick = (): void => {
-      if (playing) void resumePlaybackAnalyser()
+    const draw = (): boolean => {
       const { levels, peaks } = readVisualizerState(playing)
       const ratio = window.devicePixelRatio || 1
       const width = canvas.clientWidth
       const height = canvas.clientHeight
-      if (width > 0 && height > 0) {
-        if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
-          canvas.width = Math.round(width * ratio)
-          canvas.height = Math.round(height * ratio)
+      if (width <= 0 || height <= 0) return false
+      if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
+        canvas.width = Math.round(width * ratio)
+        canvas.height = Math.round(height * ratio)
+      }
+      context.setTransform(ratio, 0, 0, ratio, 0, 0)
+      drawPioneer(context, width, height, levels, peaks)
+      return true
+    }
+
+    // Paused or stopped, the meter is a still image: draw it once and redraw only on resize.
+    if (!playing) {
+      draw()
+      const observer = new ResizeObserver(() => draw())
+      observer.observe(canvas)
+      return () => observer.disconnect()
+    }
+
+    let frame = 0
+    let timer = 0
+    let lastDrawAt = 0
+    const tick = (now: number): void => {
+      frame = 0
+      if (now - lastDrawAt >= FRAME_INTERVAL_MS) {
+        void resumePlaybackAnalyser()
+        lastDrawAt = now
+        // A hidden panel has no size; check back occasionally instead of every frame.
+        if (!draw()) {
+          timer = window.setTimeout(() => {
+            timer = 0
+            frame = window.requestAnimationFrame(tick)
+          }, HIDDEN_RECHECK_MS)
+          return
         }
-        context.setTransform(ratio, 0, 0, ratio, 0, 0)
-        drawPioneer(context, width, height, levels, peaks)
       }
       frame = window.requestAnimationFrame(tick)
     }
     frame = window.requestAnimationFrame(tick)
-    return () => window.cancelAnimationFrame(frame)
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame)
+      if (timer) window.clearTimeout(timer)
+    }
   }, [playing])
 
   return <canvas ref={canvasRef} className="music-eq-canvas" aria-hidden />

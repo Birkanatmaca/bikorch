@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatMemoryContextInline } from '../developer-context'
+import { acceptsInlineContext, formatMemoryContextInline } from '../developer-context'
 
 describe('inline CLI memory context', () => {
   it('never emits a newline or terminal control sequence before Enter', () => {
@@ -20,5 +20,15 @@ describe('inline CLI memory context', () => {
       injectionEnabled: false, memories: [{ id: 'm1', scope: 'global', category: 'Workflow', content: 'Private', relevance: 1 }],
       characterCount: 7, tokenEstimate: 2, truncated: false
     })).toBe('')
+  })
+})
+
+describe('acceptsInlineContext', () => {
+  it('skips slash commands, bash mode and memory input', () => {
+    expect(acceptsInlineContext('/review src/app.ts')).toBe(false)
+    expect(acceptsInlineContext('/mode plan')).toBe(false)
+    expect(acceptsInlineContext('!ls -la')).toBe(false)
+    expect(acceptsInlineContext('# always use pnpm')).toBe(false)
+    expect(acceptsInlineContext('fix the login bug')).toBe(true)
   })
 })

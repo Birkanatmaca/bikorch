@@ -22,6 +22,8 @@ function noteCliTaskFinish(sessionId: string, next: PtySessionStatus, prev?: Pty
   const workspace = useWorkspaceStore.getState()
   const owner = findPanelProject(sessionId, workspace.workspaces)
   if (!owner || !isWatchedCliPanel(owner.panel)) return
+  // Panels working for the Manager are summarised in its own completion notice.
+  if (owner.panel.panelRole === 'secretary') return
   const project = workspace.projects.find((item) => item.id === owner.projectId)
   useActivityAttentionStore.getState().noteFinish({
     projectId: owner.projectId,

@@ -1,16 +1,8 @@
 import type { PtyKind, PtySessionStatus } from '@shared/contracts/pty'
 import { looksWorkspaceTrustPrompt } from '@shared/cli-permission'
+import { inferCliActivityFromText } from '@shared/cli-activity-detect'
 
 const ANSI_RE = /\u001b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g
-const SPINNER_RE = /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷◐◓◑◒]/
-const BUSY_WORD_RE = /\b(thinking|generating|searching|analyzing|planning)\b|[✶✻]/i
-// Cursor Agent commonly renders its input caret as `›`; keep the prompt
-// markers broad enough to recognize a ready CLI without treating normal text
-// as idle because the marker must still be the final non-whitespace character.
-const IDLE_PROMPT_RE = /(?:^|\n)\s*(?:>|❯|▶|▸|➤|➜|›|→)\s*$/
-const CURSOR_WELCOME_RE = /(?:^|\n)\s*(?:›|→)\s*(?:plan,\s*search,\s*build anything|ask anything)\s*$/im
-const IDLE_BOX_RE = /(?:ask|message|prompt)\s*(?:the\s+)?(?:agent|model|assistant)?\s*$/i
-
 export function isCliKind(kind: PtyKind): boolean {
   return (
     kind === 'cursor' ||
@@ -47,15 +39,9 @@ export function looksCliSignedIn(kind: PtyKind, buffer: string): boolean {
   return false
 }
 
-export function inferCliActivity(buffer: string): 'waiting' | 'busy' | null {
-  const tail = stripAnsi(buffer).replace(/\r/g, '').slice(-1200)
-  if (!tail.trim()) return null
-  if (looksWorkspaceTrustPrompt(tail)) return null
-  // A prompt at the end is definitive. The same retained terminal tail often still
-  // contains a spinner or a word such as "thinking" from the completed response.
-  if (IDLE_PROMPT_RE.test(tail) || CURSOR_WELCOME_RE.test(tail) || IDLE_BOX_RE.test(tail)) return 'waiting'
-  if (SPINNER_RE.test(tail) || BUSY_WORD_RE.test(tail)) return 'busy'
-  return null
+export function inferCliActivity(buffer: string, options: { screen?: boolean } = {}): 'waiting' | 'busy' | null {
+  // Strip only the recent end: the full buffer can be several KB of escape codes.
+  return inferCliActivityFromText(stripAnsi(buffer.slice(-4000)), options)
 }
 
 export { looksWorkspaceTrustPrompt }

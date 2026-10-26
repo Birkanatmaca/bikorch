@@ -1,5 +1,5 @@
 import { formatCliPaste } from '@shared/cli-prompt'
-import { wrapSecretaryCliInstruction } from '@shared/secretary-result-protocol'
+import { secretaryResultToken, wrapSecretaryCliInstruction } from '@shared/secretary-result-protocol'
 import type {
   SecretaryRun,
   SecretaryRunDispatchRequest,
@@ -221,7 +221,8 @@ export async function dispatchSecretaryRun(payload: unknown): Promise<SecretaryR
         step.sessionId,
         formatCliPaste(wrapSecretaryCliInstruction(step.assignment.instruction, {
           mode: step.assignment.mode,
-          expectedResult: step.assignment.expectedResult
+          expectedResult: step.assignment.expectedResult,
+          resultToken: secretaryResultToken(updated.id, step.assignment.id)
         }))
       )
       await waitForPasteCommit()

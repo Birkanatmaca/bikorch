@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import { CLI_IPC, type PtyKind } from '@shared/contracts/pty'
 import { inspectCli } from '../cli/health'
-import { installCli } from '../cli/install-cli'
+import { cancelCliInstall, installCli, uninstallCli } from '../cli/install-cli'
 import { getCliSetupSnapshot } from '../cli/install-state'
 import { initializeManagedSetup } from '../cli/setup-recovery'
 import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
@@ -24,12 +24,26 @@ export function registerCliHandlers(): void {
     return inspectCli(kind)
   })
 
-  ipcMain.handle(CLI_IPC.INSTALL, async (event, kind: unknown) => {
+  ipcMain.handle(CLI_IPC.INSTALL, async (event, kind: unknown, mode: unknown) => {
     assertTrustedMainWindow(event)
     if (!AI_ACCOUNT_KINDS.includes(kind as CliDetectKind)) {
       return { ok: false, error: 'Unknown CLI provider' }
     }
-    return installCli(kind as CliDetectKind)
+    return installCli(kind as CliDetectKind, mode === 'update' ? 'update' : 'install')
+  })
+
+  ipcMain.handle(CLI_IPC.CANCEL_INSTALL, (event, kind: unknown) => {
+    assertTrustedMainWindow(event)
+    if (!AI_ACCOUNT_KINDS.includes(kind as CliDetectKind)) return false
+    return cancelCliInstall(kind as CliDetectKind)
+  })
+
+  ipcMain.handle(CLI_IPC.UNINSTALL, async (event, kind: unknown) => {
+    assertTrustedMainWindow(event)
+    if (!AI_ACCOUNT_KINDS.includes(kind as CliDetectKind)) {
+      return { ok: false, error: 'Unknown CLI provider' }
+    }
+    return uninstallCli(kind as CliDetectKind)
   })
 
   ipcMain.handle(CLI_IPC.STATUS, (event) => {

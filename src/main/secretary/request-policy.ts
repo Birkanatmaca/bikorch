@@ -1,4 +1,5 @@
-export const SECRETARY_REQUEST_TIMEOUT_MS = 45_000
+// Planning a real change can take a reasoning model well over a minute.
+export const SECRETARY_REQUEST_TIMEOUT_MS = 120_000
 export const SECRETARY_MAX_REQUEST_ATTEMPTS = 2
 
 export function isRetryableSecretaryStatus(status: number): boolean {
@@ -17,20 +18,20 @@ function safeErrorDetail(detail: unknown): string | null {
 
 export function secretaryRequestError(status: number, detail?: unknown): Error {
   if (status === 401 || status === 403) {
-    return new Error('The Secretary API key was rejected. Check it in Profile settings.')
+    return new Error('The Manager API key was rejected. Check it under API keys in the left sidebar.')
   }
   if (status === 429) {
-    return new Error('The Secretary API is rate-limited. Please try again shortly.')
+    return new Error('The Manager API is rate-limited or out of credit. Please try again shortly.')
   }
   if (status >= 500) {
-    return new Error('The Secretary API is temporarily unavailable. Please try again shortly.')
+    return new Error('The Manager API is temporarily unavailable. Please try again shortly.')
   }
   const suffix = safeErrorDetail(detail)
-  return new Error(`The Secretary request could not be completed (${status}).${suffix ? ` ${suffix}` : ''}`)
+  return new Error(`The Manager request could not be completed (${status}).${suffix ? ` ${suffix}` : ''}`)
 }
 
 export function secretaryNetworkError(timedOut: boolean): Error {
   return timedOut
-    ? new Error('The Secretary request timed out. Please try again.')
-    : new Error('The Secretary request could not reach the API. Check your connection and try again.')
+    ? new Error('The Manager took too long to answer. Try a shorter request or try again.')
+    : new Error('The Manager could not reach the API. Check your connection and try again.')
 }

@@ -31,7 +31,7 @@ export async function measureHttpCacheParts(): Promise<Array<{ id: string; label
   })))
 }
 
-async function directoryBytes(root: string): Promise<number> {
+export async function directoryBytes(root: string): Promise<number> {
   let bytes = 0
   const pending = [root]
   while (pending.length) {

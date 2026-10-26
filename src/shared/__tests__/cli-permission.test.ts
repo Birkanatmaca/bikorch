@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cliPermissionResponse, isReadOnlyCliCommand } from '../cli-permission'
+import { cliPermissionResponse, isReadOnlyCliCommand, TRUST_DOWN_THEN_ENTER, permissionKeystrokes } from '../cli-permission'
 
 describe('cli permission prompts', () => {
   it('accepts a read-only command and an Enter pause', () => {
@@ -103,5 +103,54 @@ Yes, I trust this folder
     expect(cliPermissionResponse(prompt)).toBeNull()
     expect(cliPermissionResponse(`custom-deployer is about to modify production.\n\n${prompt}`)).toBeNull()
     expect(cliPermissionResponse(`git status\n${prompt}`)).toBe('\r')
+  })
+})
+
+describe('current folder-trust menus in Bikorch worktrees', () => {
+  const claude = [
+    'Accessing workspace:',
+    '/Users/dev/Library/Application Support/Bikorch/agent-worktrees/abc/claude-1',
+    'Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source',
+    "Claude Code'll be able to read, edit, and execute files here.",
+    '❯ No, exit',
+    '  Yes, I trust this folder',
+    'Enter to confirm · Esc to cancel'
+  ].join('\n')
+  const codex = [
+    '> You are in /Users/dev/Library/Application Support/Bikorch/agent-worktrees/abc/codex-1',
+    '  Do you trust the contents of this directory? Working with untrusted contents comes with higher risk of prompt',
+    '› 1. Yes, continue',
+    '  2. No, quit',
+    '  Press enter to continue'
+  ].join('\n')
+  const gemini = [
+    ' │ Do you trust the files in this folder?                         │',
+    ' │ ● 1. Trust folder (codex-1)                                    │',
+    ' │   2. Trust parent folder (abc)                                 │',
+    " │   3. Don't trust                                               │"
+  ].join('\n')
+
+  it('moves Claude Code from its default "No, exit" to "Yes, I trust this folder"', () => {
+    const keys = cliPermissionResponse(claude, { managedWorktree: true })
+    expect(keys).toBe(TRUST_DOWN_THEN_ENTER)
+    expect(permissionKeystrokes(keys!)).toEqual(['\u001b[B', '\r'])
+  })
+
+  it('confirms once Claude Code shows "Yes" selected', () => {
+    expect(cliPermissionResponse(claude.replace('❯ No, exit', '  No, exit').replace('  Yes, I trust', '❯ Yes, I trust'), { managedWorktree: true })).toBe('\r')
+  })
+
+  it('confirms the preselected "Yes" in Codex and "Trust folder" in Gemini', () => {
+    expect(cliPermissionResponse(codex, { managedWorktree: true })).toBe('\r')
+    expect(cliPermissionResponse(gemini, { managedWorktree: true })).toBe('\r')
+  })
+
+  it('never answers outside a Bikorch worktree', () => {
+    expect(cliPermissionResponse(claude.replace(/\/Users\/dev\/Library\/Application Support\/Bikorch\/agent-worktrees\/abc/g, '/Users/dev/code'), { managedWorktree: false })).toBeNull()
+  })
+
+  it('does not pick "Trust parent folder"', () => {
+    const parentSelected = gemini.replace('● 1. Trust folder', '  1. Trust folder').replace('  2. Trust parent', '● 2. Trust parent')
+    expect(cliPermissionResponse(parentSelected, { managedWorktree: true })).toBeNull()
   })
 })

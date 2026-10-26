@@ -9,7 +9,8 @@ let windowDrag: { windowId: number; dx: number; dy: number } | null = null
 function chromeState(win: BrowserWindow): WindowChromeState {
   return {
     maximized: win.isMaximized(),
-    fullScreen: win.isFullScreen()
+    fullScreen: win.isFullScreen(),
+    focused: win.isFocused() && win.isVisible() && !win.isMinimized()
   }
 }
 
@@ -24,6 +25,12 @@ export function watchWindowChrome(win: BrowserWindow): void {
   win.on('leave-full-screen', emit)
   win.on('maximize', emit)
   win.on('unmaximize', emit)
+  win.on('focus', emit)
+  win.on('blur', emit)
+  win.on('minimize', emit)
+  win.on('restore', emit)
+  win.on('hide', emit)
+  win.on('show', emit)
 }
 
 function windowFromEvent(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): BrowserWindow | null {
@@ -107,7 +114,7 @@ export function registerWindowHandlers(): void {
 
   ipcMain.handle(WINDOW_IPC.GET_STATE, (event) => {
     const win = windowFromEvent(event)
-    return win ? chromeState(win) : { maximized: false, fullScreen: false }
+    return win ? chromeState(win) : { maximized: false, fullScreen: false, focused: true }
   })
 
   ipcMain.on(WINDOW_IPC.DRAG_START, (event) => {

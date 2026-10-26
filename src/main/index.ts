@@ -2,7 +2,7 @@ import { app, BrowserWindow, session, shell } from 'electron'
 import { join, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { ptyManager } from './cli/pty-manager'
-import { loadUserShellEnv } from './cli/shell-env'
+import { loadUserShellEnv, scrubInheritedAgentSession } from './cli/shell-env'
 import { registerIpcHandlers } from './ipc'
 import { watchWindowChrome } from './ipc/window'
 import { installConsoleCapture, recordRendererConsole } from './logs'
@@ -174,6 +174,8 @@ function createWindow(): BrowserWindow {
 
 app.whenReady().then(async () => {
   applyAppBranding()
+  // Started from a Claude Code session? Its markers must not reach our CLI panels.
+  scrubInheritedAgentSession()
   // Dock/Finder launches miss the user's shell PATH; load it before any PTY spawn.
   loadUserShellEnv()
   // PTY host is spawned on first terminal/CLI open (and reconnects if a durable
