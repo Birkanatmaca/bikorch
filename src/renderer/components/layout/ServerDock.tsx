@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Pencil, Plus, Server, Trash2, X } from 'lucide-react'
+import { Pencil, Plus, RefreshCw, Server, Trash2, X } from 'lucide-react'
 import { sshTargetLabel, type RemoteServer, type RemoteServerDraft } from '@shared/contracts/servers'
 import { OPEN_SERVERS_EVENT } from '@renderer/lib/app-events'
 import { useServerStore } from '@renderer/stores/server-store'
+import { useServerHealthStore, watchServerHealth } from '@renderer/stores/server-health-store'
+import { HealthDot, ServerHealthDetails } from '@renderer/components/servers/ServerHealthView'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 
 const OPEN_KEY = 'bikorch.serverDockOpen'
@@ -38,6 +40,11 @@ export function ServerDock(): React.JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState<RemoteServerDraft>(EMPTY_DRAFT)
   const [error, setError] = useState<string | null>(null)
+  const healthById = useServerHealthStore((state) => state.healthById)
+  const checkingIds = useServerHealthStore((state) => state.checkingIds)
+
+  // Health is checked only while the dock is open.
+  useEffect(() => (open ? watchServerHealth() : undefined), [open])
 
   useEffect(() => {
     const show = (): void => setOpen(true)
@@ -76,6 +83,7 @@ export function ServerDock(): React.JSX.Element {
       return
     }
     syncServerPanels(result.server)
+    void useServerHealthStore.getState().check(result.server)
     setDraft(EMPTY_DRAFT)
     setEditingId(null)
     setError(null)
@@ -115,6 +123,11 @@ export function ServerDock(): React.JSX.Element {
         <header className="server-dock-header">
           <Server className="h-4 w-4" aria-hidden />
           <strong>Servers</strong>
+          {servers.length > 0 && (
+            <button type="button" className="server-dock-icon" onClick={() => void useServerHealthStore.getState().checkAll()} aria-label="Check all servers" title="Check all servers">
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          )}
           <button type="button" className="server-dock-icon" onClick={startCreate} aria-label="Add server">
             <Plus className="h-4 w-4" aria-hidden />
           </button>
@@ -191,8 +204,10 @@ export function ServerDock(): React.JSX.Element {
             </div>
           )}
           {servers.map((server) => (
-            <div key={server.id} className="server-dock-row">
-              <button type="button" className="server-dock-open" onClick={() => openRemoteServer(server)}>
+            <div key={server.id} className="server-dock-card">
+            <div className="server-dock-row">
+              <HealthDot health={healthById[server.id]} checking={checkingIds[server.id]} />
+              <button type="button" className="server-dock-open" onClick={() => openRemoteServer(server)} title="Open an SSH terminal">
                 <strong>{server.name}</strong>
                 <small>{sshTargetLabel(server)}</small>
               </button>
@@ -202,6 +217,8 @@ export function ServerDock(): React.JSX.Element {
               <button type="button" className="server-dock-icon" onClick={() => remove(server.id)} aria-label={`Remove ${server.name}`}>
                 <Trash2 className="h-3.5 w-3.5" aria-hidden />
               </button>
+            </div>
+            <ServerHealthDetails health={healthById[server.id]} />
             </div>
           ))}
         </div>

@@ -45,3 +45,15 @@ describe('remote servers', () => {
     ).toEqual([{ id: 'ok', name: 'Lab', user: 'ada', host: 'lab.local', port: 22 }])
   })
 })
+
+describe('server health parsing', async () => {
+  const { parseServerMetrics, healthWarnings } = await import('../server-health')
+  it('reads the remote script output', () => {
+    const metrics = parseServerMetrics('L 0.50 0.40 0.30\nC 4\nM 8000000000 2000000000\nD 100000000000 95000000000\nU 86400\n')
+    expect(metrics).toMatchObject({ load5: 0.4, cpus: 4, memAvailableBytes: 2e9, diskUsedBytes: 95e9, uptimeSeconds: 86400 })
+    expect(healthWarnings(metrics!)).toEqual(['Disk is almost full'])
+  })
+  it('rejects partial output', () => {
+    expect(parseServerMetrics('L 1 1 1\nC 2\n')).toBeNull()
+  })
+})

@@ -5777,3 +5777,30 @@ kbd {
   outline: 2px solid #c4b5ff;
   outline-offset: 2px;
 }
+
+/* Server health */
+.server-dock-card { display: grid; gap: 4px; padding: 4px 4px 10px; border: 1px solid #ba9ed11c; border-radius: 12px; background: #b498e305; }
+.server-dock-card .server-dock-row { padding-left: 8px; }
+.health-dot { width: 8px; height: 8px; flex-shrink: 0; border-radius: 99px; background: #6b6578; }
+.health-dot.is-healthy { background: var(--color-success); box-shadow: 0 0 8px rgb(60 203 127 / 0.7); }
+.health-dot.is-warning { background: var(--color-warning); box-shadow: 0 0 8px rgb(242 184 75 / 0.7); }
+.health-dot.is-reachable { background: var(--color-info); box-shadow: 0 0 8px rgb(78 161 255 / 0.6); }
+.health-dot.is-down { background: var(--color-error); box-shadow: 0 0 8px rgb(240 93 104 / 0.7); }
+.health-dot.is-checking { animation: health-pulse 1s ease-in-out infinite; }
+@keyframes health-pulse { 50% { opacity: 0.35; } }
+.health-details { display: grid; gap: 5px; padding: 0 12px; }
+.health-facts { display: flex; flex-wrap: wrap; gap: 8px; font-family: var(--font-mono); font-size: 10px; color: #8f889c; }
+.health-state { font-family: var(--font-sans); font-weight: 600; }
+.health-state.is-healthy { color: var(--color-success); }
+.health-state.is-warning { color: var(--color-warning); }
+.health-state.is-reachable { color: var(--color-info); }
+.health-state.is-down { color: var(--color-error); }
+.health-meter { display: grid; grid-template-columns: 30px 1fr 32px; align-items: center; gap: 6px; font-size: 10px; color: #aaa0ba; }
+.health-meter-label { font-weight: 500; }
+.health-meter-track { height: 5px; overflow: hidden; border-radius: 99px; background: rgb(255 255 255 / 0.07); }
+.health-meter-track span { display: block; height: 100%; border-radius: inherit; transition: width var(--duration-normal) var(--ease-smooth); }
+.health-meter-track .is-ok { background: linear-gradient(90deg, #5b4bd6, #8b7cf8); }
+.health-meter-track .is-warm { background: linear-gradient(90deg, #d89a2b, #f2b84b); }
+.health-meter-track .is-hot { background: linear-gradient(90deg, #d4414e, #f05d68); }
+.health-meter-value { font-family: var(--font-mono); text-align: right; color: #d6cde3; }
+.health-note { margin: 0; font-size: 10.5px; line-height: 1.4; color: #aaa0ba; }

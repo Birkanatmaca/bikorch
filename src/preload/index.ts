@@ -177,6 +177,7 @@ import {
   type ResourceProcessSnapshot,
   type ResourceProfile
 } from '@shared/contracts/resources'
+import { SERVER_HEALTH_IPC, type ServerHealth } from '@shared/contracts/server-health'
 import { STORAGE_IPC, type StorageCleanResult, type StorageReport } from '@shared/contracts/storage'
 import {
   SIMULATOR_IPC,
@@ -469,6 +470,10 @@ export interface ResourcesApi {
   respondCache: (accept: boolean) => Promise<CacheAnalysis>
 }
 
+export interface ServerHealthApi {
+  check: (serverId: string, target: { user: string; host: string; port: number }) => Promise<ServerHealth>
+}
+
 export interface StorageApi {
   scan: () => Promise<StorageReport>
   clean: (ids: string[]) => Promise<StorageCleanResult[]>
@@ -503,6 +508,7 @@ export interface AppApi {
   notifications: NotificationsApi
   resources: ResourcesApi
   storage: StorageApi
+  serverHealth: ServerHealthApi
   simulator: SimulatorApi
 }
 
@@ -844,6 +850,10 @@ const resourcesApi: ResourcesApi = {
   respondCache: (accept) => ipcRenderer.invoke(RESOURCES_IPC.RESPOND_CACHE, accept)
 }
 
+const serverHealthApi: ServerHealthApi = {
+  check: (serverId, target) => ipcRenderer.invoke(SERVER_HEALTH_IPC.CHECK, serverId, target)
+}
+
 const storageApi: StorageApi = {
   scan: () => ipcRenderer.invoke(STORAGE_IPC.SCAN),
   clean: (ids) => ipcRenderer.invoke(STORAGE_IPC.CLEAN, ids),
@@ -886,6 +896,7 @@ const api: AppApi = {
   notifications: notificationsApi,
   resources: resourcesApi,
   storage: storageApi,
+  serverHealth: serverHealthApi,
   simulator: simulatorApi
 }
 
