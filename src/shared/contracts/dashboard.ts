@@ -54,11 +54,12 @@ export const DASHBOARD_IPC = {
   GIT_ACTIVITY: 'dashboard:git-activity'
 } as const
 
-export const HOME_WIDGETS = ['claude', 'sessions', 'system', 'servers', 'tokens', 'git', 'projects'] as const
+export const HOME_WIDGETS = ['today', 'claude', 'sessions', 'system', 'servers', 'tokens', 'git', 'projects'] as const
 
 export type HomeWidgetId = (typeof HOME_WIDGETS)[number]
 
 export const HOME_WIDGET_COPY: Record<HomeWidgetId, { title: string; description: string }> = {
+  today: { title: 'Today', description: 'Prompts, tokens, commits and your streak at a glance.' },
   claude: { title: 'Claude limits', description: 'Accounts, plan and how much of each limit is used.' },
   sessions: { title: 'Live sessions', description: 'Every open Claude and terminal session across projects.' },
   system: { title: 'This Mac', description: 'CPU, memory, heat and the processes using the most.' },
@@ -68,32 +69,67 @@ export const HOME_WIDGET_COPY: Record<HomeWidgetId, { title: string; description
   projects: { title: 'Projects', description: 'Open a project or start a new one.' }
 }
 
-export interface HomeWidgetLayout {
+/** The Home canvas is a fixed grid that always fits one screen. */
+export const HOME_GRID = { columns: 12, rows: 12 } as const
+
+/** A widget's cell rectangle on the Home grid. */
+export interface HomeWidgetRect {
   id: HomeWidgetId
-  /** Grid columns the widget spans, 1 to 3. */
-  span: 1 | 2 | 3
+  x: number
+  y: number
+  w: number
+  h: number
 }
 
-export const DEFAULT_HOME_LAYOUT: HomeWidgetLayout[] = [
-  { id: 'claude', span: 1 },
-  { id: 'sessions', span: 2 },
-  { id: 'tokens', span: 2 },
-  { id: 'system', span: 1 },
-  { id: 'git', span: 2 },
-  { id: 'servers', span: 1 },
-  { id: 'projects', span: 3 }
+export const HOME_MIN_SIZE = { w: 2, h: 2 } as const
+
+export const DEFAULT_HOME_LAYOUT: HomeWidgetRect[] = [
+  { id: 'today', x: 0, y: 0, w: 12, h: 2 },
+  { id: 'claude', x: 0, y: 2, w: 3, h: 5 },
+  { id: 'sessions', x: 3, y: 2, w: 6, h: 3 },
+  { id: 'system', x: 9, y: 2, w: 3, h: 6 },
+  { id: 'tokens', x: 3, y: 5, w: 6, h: 4 },
+  { id: 'servers', x: 0, y: 7, w: 3, h: 5 },
+  { id: 'git', x: 3, y: 9, w: 6, h: 3 },
+  { id: 'projects', x: 9, y: 8, w: 3, h: 4 }
 ]
 
-export function parseHomeLayout(value: unknown): HomeWidgetLayout[] {
+/** Keeps a rectangle whole and inside the grid. */
+export function clampHomeRect(rect: HomeWidgetRect): HomeWidgetRect {
+  const w = Math.max(HOME_MIN_SIZE.w, Math.min(HOME_GRID.columns, Math.round(rect.w)))
+  const h = Math.max(HOME_MIN_SIZE.h, Math.min(HOME_GRID.rows, Math.round(rect.h)))
+  return {
+    id: rect.id,
+    w,
+    h,
+    x: Math.max(0, Math.min(HOME_GRID.columns - w, Math.round(rect.x))),
+    y: Math.max(0, Math.min(HOME_GRID.rows - h, Math.round(rect.y)))
+  }
+}
+
+export function parseHomeLayout(value: unknown): HomeWidgetRect[] {
   if (!Array.isArray(value)) return DEFAULT_HOME_LAYOUT
   const seen = new Set<string>()
-  const layout: HomeWidgetLayout[] = []
+  const layout: HomeWidgetRect[] = []
   for (const entry of value) {
     if (!entry || typeof entry !== 'object') continue
-    const { id, span } = entry as Record<string, unknown>
+    const { id, x, y, w, h } = entry as Record<string, unknown>
     if (typeof id !== 'string' || !(HOME_WIDGETS as readonly string[]).includes(id) || seen.has(id)) continue
+    if (![x, y, w, h].every((value) => typeof value === 'number' && Number.isFinite(value))) continue
     seen.add(id)
-    layout.push({ id: id as HomeWidgetId, span: span === 1 || span === 2 || span === 3 ? span : 1 })
+    layout.push(clampHomeRect({ id: id as HomeWidgetId, x: x as number, y: y as number, w: w as number, h: h as number }))
   }
   return layout
+}
+
+/** First free spot for a widget of this size, scanning rows top to bottom. */
+export function findHomeSpot(layout: HomeWidgetRect[], w: number, h: number): { x: number; y: number } {
+  const taken = (x: number, y: number): boolean =>
+    layout.some((rect) => x < rect.x + rect.w && x + w > rect.x && y < rect.y + rect.h && y + h > rect.y)
+  for (let y = 0; y + h <= HOME_GRID.rows; y += 1) {
+    for (let x = 0; x + w <= HOME_GRID.columns; x += 1) {
+      if (!taken(x, y)) return { x, y }
+    }
+  }
+  return { x: 0, y: 0 }
 }

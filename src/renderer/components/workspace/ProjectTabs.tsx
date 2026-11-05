@@ -6,7 +6,7 @@ import { useOpenProject } from '@renderer/hooks/use-open-project'
 import { summarizeProjectTabActivity, type ProjectTabActivity } from '@renderer/lib/project-activity'
 import { focusWorkspacePanel } from '@renderer/lib/app-events'
 import { cn, formatProjectName } from '@renderer/lib/utils'
-import { FolderOpen, Plus, X } from 'lucide-react'
+import { FolderOpen, House, Plus, X } from 'lucide-react'
 import type { Project } from '@shared/types'
 
 function TabFace({
@@ -38,6 +38,8 @@ function TabFace({
 export function ProjectTabs(): React.JSX.Element {
   const projects = useWorkspaceStore((s) => s.projects)
   const activeProjectId = useWorkspaceStore((s) => s.activeProjectId)
+  const homeVisible = useWorkspaceStore((s) => s.homeVisible)
+  const showHome = useWorkspaceStore((s) => s.showHome)
   const workspaces = useWorkspaceStore((s) => s.workspaces)
   const setActiveProject = useWorkspaceStore((s) => s.setActiveProject)
   const removeProject = useWorkspaceStore((s) => s.removeProject)
@@ -121,8 +123,26 @@ export function ProjectTabs(): React.JSX.Element {
       role="tablist"
       aria-label="Open projects"
     >
+      <button
+        type="button"
+        role="tab"
+        aria-selected={homeVisible}
+        className={cn('project-home-tab app-no-drag', homeVisible && 'is-active')}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return
+          event.stopPropagation()
+          showHome()
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') showHome()
+        }}
+        title="Home"
+        aria-label="Home"
+      >
+        <House className="h-4 w-4" aria-hidden />
+      </button>
       {projects.map((project) => {
-        const isActive = project.id === activeProjectId
+        const isActive = !homeVisible && project.id === activeProjectId
         const activity = activityFor(project.id)
         const tabTitle = [project.folderPath || project.name, activity.label].filter(Boolean).join(' · ')
 

@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
-  Check,
+  CalendarDays,
   Cpu,
   FolderKanban,
   GitBranch,
-  GripVertical,
-  LayoutGrid,
   Plus,
   RotateCcw,
   Server,
@@ -17,13 +15,17 @@ import {
 } from 'lucide-react'
 import {
   DEFAULT_HOME_LAYOUT,
+  HOME_GRID,
   HOME_WIDGETS,
   HOME_WIDGET_COPY,
+  clampHomeRect,
+  findHomeSpot,
   parseHomeLayout,
+  type ClaudeActivity,
+  type GitActivity,
   type HomeWidgetId,
-  type HomeWidgetLayout
+  type HomeWidgetRect
 } from '@shared/contracts/dashboard'
-import { useAiAccountsStore } from '@renderer/stores/ai-accounts-store'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { cn } from '@renderer/lib/utils'
 import { compactNumber, dayKey, streaks } from './charts'
@@ -39,9 +41,10 @@ import {
   useGitActivity
 } from './widgets'
 
-const LAYOUT_KEY = 'bikorch.home.layout'
+const LAYOUT_KEY = 'bikorch.home.canvas'
 
 const WIDGET_ICON: Record<HomeWidgetId, LucideIcon> = {
+  today: CalendarDays,
   claude: Sparkles,
   sessions: TerminalSquare,
   system: Cpu,
@@ -52,6 +55,7 @@ const WIDGET_ICON: Record<HomeWidgetId, LucideIcon> = {
 }
 
 const WIDGET_TONE: Record<HomeWidgetId, string> = {
+  today: 'tone-violet',
   claude: 'tone-coral',
   sessions: 'tone-green',
   system: 'tone-teal',
@@ -61,7 +65,19 @@ const WIDGET_TONE: Record<HomeWidgetId, string> = {
   projects: 'tone-amber'
 }
 
-function readLayout(): HomeWidgetLayout[] {
+/** Default size when a hidden widget is added back. */
+const ADD_SIZE: Record<HomeWidgetId, { w: number; h: number }> = {
+  today: { w: 12, h: 2 },
+  claude: { w: 3, h: 5 },
+  sessions: { w: 6, h: 3 },
+  system: { w: 3, h: 6 },
+  servers: { w: 3, h: 4 },
+  tokens: { w: 6, h: 4 },
+  git: { w: 6, h: 3 },
+  projects: { w: 3, h: 4 }
+}
+
+function readLayout(): HomeWidgetRect[] {
   try {
     const raw = window.localStorage.getItem(LAYOUT_KEY)
     return raw ? parseHomeLayout(JSON.parse(raw)) : DEFAULT_HOME_LAYOUT
@@ -70,56 +86,16 @@ function readLayout(): HomeWidgetLayout[] {
   }
 }
 
-function writeLayout(layout: HomeWidgetLayout[]): void {
+function writeLayout(layout: HomeWidgetRect[]): void {
   try {
     window.localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout))
   } catch {
-    // The dashboard still works; the layout just is not remembered.
+    // The canvas still works; the arrangement just is not remembered.
   }
 }
 
-/** "birkan.atmaca@x.com" or "Birkan Atmaca" → "Birkan". */
-function firstName(value: string | undefined): string | null {
-  const word = value?.split(/[\s@._-]/).find(Boolean)
-  return word ? word.charAt(0).toUpperCase() + word.slice(1) : null
-}
-
-function greeting(): string {
-  const hour = new Date().getHours()
-  if (hour < 5) return 'Working late'
-  if (hour < 12) return 'Good morning'
-  if (hour < 18) return 'Good afternoon'
-  return 'Good evening'
-}
-
-/** The first screen: everything about your work at a glance, arranged your way. */
-export function HomeDashboard(): React.JSX.Element {
-  const [layout, setLayoutState] = useState<HomeWidgetLayout[]>(readLayout)
-  const [editing, setEditing] = useState(false)
-  const [dragId, setDragId] = useState<HomeWidgetId | null>(null)
-  const [overId, setOverId] = useState<HomeWidgetId | null>(null)
-  const activity = useClaudeActivity()
-  const git = useGitActivity()
-  const accounts = useAiAccountsStore((state) => state.accounts)
+function TodayWidget({ activity, git }: { activity: ClaudeActivity | null; git: GitActivity | null }): React.JSX.Element {
   const sessions = useTerminalStore((state) => state.sessions)
-  const scrollRef = useRef<HTMLDivElement>(null)
-
-  const setLayout = (next: HomeWidgetLayout[]): void => {
-    setLayoutState(next)
-    writeLayout(next)
-  }
-
-  useEffect(() => {
-    if (!editing) return
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setEditing(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [editing])
-
-  const hidden = HOME_WIDGETS.filter((id) => !layout.some((item) => item.id === id))
-  const name = firstName(accounts.find((account) => account.kind === 'claude')?.name)
   const today = activity?.days.find((day) => day.date === dayKey(new Date()))
   const working = Object.values(sessions).filter((status) => status === 'busy' || status === 'starting').length
   const weekCommits = useMemo(() => {
@@ -136,19 +112,87 @@ export function HomeDashboard(): React.JSX.Element {
     () => streaks(Object.fromEntries((activity?.days ?? []).map((day) => [day.date, day.prompts]))).current,
     [activity]
   )
+  return (
+    <div className="home-today">
+      <div className="home-stat tone-violet"><small>Prompts today</small><strong>{today?.prompts ?? 0}</strong></div>
+      <div className="home-stat tone-coral"><small>Output tokens today</small><strong>{compactNumber(today?.outputTokens ?? 0)}</strong></div>
+      <div className="home-stat tone-green"><small>Commits this week</small><strong>{weekCommits}</strong></div>
+      <div className="home-stat tone-amber"><small>Prompt streak</small><strong>{promptStreak}<em>days</em></strong></div>
+      <div className="home-stat tone-teal"><small>Working now</small><strong>{working}<em>sessions</em></strong></div>
+    </div>
+  )
+}
 
-  const move = (id: HomeWidgetId, target: HomeWidgetId): void => {
-    if (id === target) return
-    const next = layout.filter((item) => item.id !== id)
-    const index = next.findIndex((item) => item.id === target)
-    const moved = layout.find((item) => item.id === id)
-    if (!moved || index < 0) return
-    next.splice(index, 0, moved)
-    setLayout(next)
+type Gesture = { id: HomeWidgetId; kind: 'move' | 'resize'; startX: number; startY: number; origin: HomeWidgetRect }
+
+/**
+ * Home is a one-screen canvas of widgets on a 12×12 grid. Drag a widget by its
+ * header, resize it from the corner, hide it with ×; the arrangement is saved.
+ */
+export function HomeDashboard(): React.JSX.Element {
+  const [layout, setLayoutState] = useState<HomeWidgetRect[]>(readLayout)
+  const [gesture, setGesture] = useState<Gesture | null>(null)
+  const [addOpen, setAddOpen] = useState(false)
+  const canvasRef = useRef<HTMLDivElement>(null)
+  const activity = useClaudeActivity()
+  const git = useGitActivity()
+
+  const setLayout = (next: HomeWidgetRect[]): void => {
+    setLayoutState(next)
+    writeLayout(next)
   }
+
+  // Pointer moves update the layout live; the result is saved on release.
+  useEffect(() => {
+    if (!gesture) return
+    const onMove = (event: PointerEvent): void => {
+      const box = canvasRef.current?.getBoundingClientRect()
+      if (!box) return
+      const dx = Math.round((event.clientX - gesture.startX) / (box.width / HOME_GRID.columns))
+      const dy = Math.round((event.clientY - gesture.startY) / (box.height / HOME_GRID.rows))
+      const { origin } = gesture
+      const next = gesture.kind === 'move'
+        ? clampHomeRect({ ...origin, x: origin.x + dx, y: origin.y + dy })
+        : clampHomeRect({
+          ...origin,
+          w: Math.min(HOME_GRID.columns - origin.x, origin.w + dx),
+          h: Math.min(HOME_GRID.rows - origin.y, origin.h + dy)
+        })
+      setLayoutState((current) => current.map((rect) => (rect.id === gesture.id ? next : rect)))
+    }
+    const onUp = (): void => {
+      setGesture(null)
+      setLayoutState((current) => {
+        writeLayout(current)
+        return current
+      })
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+  }, [gesture])
+
+  const begin = (event: React.PointerEvent, id: HomeWidgetId, kind: Gesture['kind']): void => {
+    if (event.button !== 0) return
+    if (kind === 'move' && (event.target as HTMLElement).closest('button, input, select, a')) return
+    event.preventDefault()
+    const origin = layout.find((rect) => rect.id === id)
+    if (!origin) return
+    // The touched widget comes to the front.
+    setLayoutState([...layout.filter((rect) => rect.id !== id), origin])
+    setGesture({ id, kind, startX: event.clientX, startY: event.clientY, origin })
+  }
+
+  const hidden = HOME_WIDGETS.filter((id) => !layout.some((rect) => rect.id === id))
 
   const renderWidget = (id: HomeWidgetId): React.JSX.Element => {
     switch (id) {
+      case 'today': return <TodayWidget activity={activity} git={git} />
       case 'claude': return <ClaudeLimitsWidget />
       case 'sessions': return <SessionsWidget />
       case 'system': return <SystemWidget />
@@ -160,64 +204,70 @@ export function HomeDashboard(): React.JSX.Element {
   }
 
   return (
-    <div ref={scrollRef} className={cn('home-dashboard', editing && 'is-editing')}>
+    <div className={cn('home-dashboard', gesture && 'is-arranging')}>
       <div className="home-aurora" aria-hidden />
-      <div className="home-inner">
-        <header className="home-hero">
-          <div className="home-hero-text">
-            <span className="home-eyebrow">
-              {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
-            </span>
-            <h1>
-              {greeting()}
-              {name ? <>, <span className="home-gradient-text">{name}</span></> : null}
-            </h1>
-            <p>
-              {working > 0
-                ? `${working} session${working === 1 ? ' is' : 's are'} working right now.`
-                : 'Everything is quiet. Pick up where you left off.'}
-            </p>
-          </div>
-          <div className="home-hero-actions">
-            {editing && (
-              <button type="button" className="home-ghost" onClick={() => setLayout(DEFAULT_HOME_LAYOUT)}>
-                <RotateCcw className="h-3.5 w-3.5" aria-hidden /> Reset
-              </button>
-            )}
-            <button type="button" className={cn('home-ghost', editing && 'is-on')} onClick={() => setEditing(!editing)}>
-              {editing ? <Check className="h-3.5 w-3.5" aria-hidden /> : <LayoutGrid className="h-3.5 w-3.5" aria-hidden />}
-              {editing ? 'Done' : 'Customize'}
-            </button>
-          </div>
-        </header>
+      <div ref={canvasRef} className="home-canvas">
+        {gesture && <div className="home-canvas-grid" aria-hidden />}
+        {layout.map((rect) => {
+          const Icon = WIDGET_ICON[rect.id]
+          const active = gesture?.id === rect.id
+          return (
+            <article
+              key={rect.id}
+              className={cn('home-widget', WIDGET_TONE[rect.id], active && 'is-active', `w-${rect.w}`, `h-${rect.h}`)}
+              style={{
+                left: `${(rect.x / HOME_GRID.columns) * 100}%`,
+                top: `${(rect.y / HOME_GRID.rows) * 100}%`,
+                width: `${(rect.w / HOME_GRID.columns) * 100}%`,
+                height: `${(rect.h / HOME_GRID.rows) * 100}%`
+              }}
+            >
+              <div className="home-widget-card">
+                <header className="home-widget-head" onPointerDown={(event) => begin(event, rect.id, 'move')} title="Drag to move">
+                  <span className="home-widget-icon"><Icon className="h-3.5 w-3.5" aria-hidden /></span>
+                  <h2 title={HOME_WIDGET_COPY[rect.id].description}>{HOME_WIDGET_COPY[rect.id].title}</h2>
+                  <button
+                    type="button"
+                    className="home-icon-button home-widget-hide"
+                    aria-label={`Hide ${HOME_WIDGET_COPY[rect.id].title}`}
+                    title="Hide"
+                    onClick={() => setLayout(layout.filter((item) => item.id !== rect.id))}
+                  >
+                    <X className="h-3.5 w-3.5" aria-hidden />
+                  </button>
+                </header>
+                <div className="home-widget-body">{renderWidget(rect.id)}</div>
+                <span
+                  className="home-resize"
+                  onPointerDown={(event) => begin(event, rect.id, 'resize')}
+                  title="Drag to resize"
+                  aria-hidden
+                />
+              </div>
+            </article>
+          )
+        })}
+        {layout.length === 0 && <p className="home-empty home-canvas-empty">Every widget is hidden. Add them back with the + button.</p>}
+      </div>
 
-        <section className="home-stats" aria-label="Today">
-          <div className="home-stat tone-violet">
-            <small>Prompts today</small>
-            <strong>{today?.prompts ?? 0}</strong>
-          </div>
-          <div className="home-stat tone-coral">
-            <small>Output tokens today</small>
-            <strong>{compactNumber(today?.outputTokens ?? 0)}</strong>
-          </div>
-          <div className="home-stat tone-green">
-            <small>Commits this week</small>
-            <strong>{weekCommits}</strong>
-          </div>
-          <div className="home-stat tone-amber">
-            <small>Prompt streak</small>
-            <strong>{promptStreak}<em>days</em></strong>
-          </div>
-        </section>
-
-        {editing && hidden.length > 0 && (
-          <div className="home-add-row">
-            <span>Add a widget</span>
+      <div className="home-dock">
+        {addOpen && hidden.length > 0 && (
+          <div className="home-dock-menu" role="menu">
             {hidden.map((id) => {
               const Icon = WIDGET_ICON[id]
               return (
-                <button key={id} type="button" className="home-add-chip" onClick={() => setLayout([...layout, { id, span: id === 'projects' ? 3 : 1 }])}>
-                  <Plus className="h-3 w-3" aria-hidden />
+                <button
+                  key={id}
+                  type="button"
+                  role="menuitem"
+                  className="home-add-chip"
+                  onClick={() => {
+                    const size = ADD_SIZE[id]
+                    const spot = findHomeSpot(layout, size.w, size.h)
+                    setLayout([...layout, clampHomeRect({ id, ...size, ...spot })])
+                    if (hidden.length === 1) setAddOpen(false)
+                  }}
+                >
                   <Icon className="h-3 w-3" aria-hidden />
                   {HOME_WIDGET_COPY[id].title}
                 </button>
@@ -225,68 +275,29 @@ export function HomeDashboard(): React.JSX.Element {
             })}
           </div>
         )}
-
-        <div className="home-grid">
-          {layout.map(({ id, span }) => {
-            const Icon = WIDGET_ICON[id]
-            return (
-              <article
-                key={id}
-                className={cn('home-widget', WIDGET_TONE[id], `span-${span}`, dragId === id && 'is-dragging', overId === id && dragId !== id && 'is-drop')}
-                draggable={editing}
-                onDragStart={(event) => {
-                  setDragId(id)
-                  event.dataTransfer.effectAllowed = 'move'
-                }}
-                onDragOver={(event) => {
-                  if (!dragId) return
-                  event.preventDefault()
-                  setOverId(id)
-                }}
-                onDrop={(event) => {
-                  event.preventDefault()
-                  if (dragId) move(dragId, id)
-                  setDragId(null)
-                  setOverId(null)
-                }}
-                onDragEnd={() => {
-                  setDragId(null)
-                  setOverId(null)
-                }}
-              >
-                <header className="home-widget-head">
-                  {editing && <GripVertical className="home-grip h-3.5 w-3.5" aria-hidden />}
-                  <span className="home-widget-icon"><Icon className="h-3.5 w-3.5" aria-hidden /></span>
-                  <h2 title={HOME_WIDGET_COPY[id].description}>{HOME_WIDGET_COPY[id].title}</h2>
-                  {editing && (
-                    <span className="home-widget-tools">
-                      <span className="home-segment is-small" role="group" aria-label="Width">
-                        {([1, 2, 3] as const).map((value) => (
-                          <button
-                            key={value}
-                            type="button"
-                            className={cn(span === value && 'is-on')}
-                            onClick={() => setLayout(layout.map((item) => (item.id === id ? { ...item, span: value } : item)))}
-                            aria-label={`${value} column${value === 1 ? '' : 's'} wide`}
-                          >
-                            {value === 1 ? 'S' : value === 2 ? 'M' : 'L'}
-                          </button>
-                        ))}
-                      </span>
-                      <button type="button" className="home-icon-button" aria-label={`Hide ${HOME_WIDGET_COPY[id].title}`} onClick={() => setLayout(layout.filter((item) => item.id !== id))}>
-                        <X className="h-3.5 w-3.5" aria-hidden />
-                      </button>
-                    </span>
-                  )}
-                </header>
-                <div className="home-widget-body">{renderWidget(id)}</div>
-              </article>
-            )
-          })}
-        </div>
-        {layout.length === 0 && (
-          <p className="home-empty">All widgets are hidden. Use Customize to add them back.</p>
-        )}
+        <button
+          type="button"
+          className={cn('home-dock-button', addOpen && 'is-on')}
+          disabled={hidden.length === 0}
+          onClick={() => setAddOpen(!addOpen)}
+          title={hidden.length === 0 ? 'All widgets are on Home' : 'Add a widget'}
+          aria-label="Add a widget"
+        >
+          <Plus className="h-3.5 w-3.5" aria-hidden />
+          {hidden.length > 0 && <span>{hidden.length}</span>}
+        </button>
+        <button
+          type="button"
+          className="home-dock-button"
+          onClick={() => {
+            setLayout(DEFAULT_HOME_LAYOUT)
+            setAddOpen(false)
+          }}
+          title="Reset the layout"
+          aria-label="Reset the layout"
+        >
+          <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+        </button>
       </div>
     </div>
   )
