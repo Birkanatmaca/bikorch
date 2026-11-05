@@ -1,7 +1,7 @@
-import { desktopCapturer, type WebContents } from 'electron'
+import type { WebContents } from 'electron'
 import { parseKey, parsePointer, SIMULATOR_IPC, type SimulatorFeed, type SimulatorStatus } from '@shared/contracts/simulator'
-import { sendSimulatorInput, startInputBridge, stopInputBridge } from './bridge'
-import { pickSimulatorWindow, SimulatorUnavailable } from './devices'
+import { sendSimulatorInput, startInputBridge, startWindowStream, stopInputBridge, type StreamEvent } from './bridge'
+import { SimulatorUnavailable } from './devices'
 import { bootSimulator, captureSimulatorScreen, ensureIphone, openSimulatorApp, resolveSimctl } from './simctl'
 
 interface ActiveDevice {
@@ -13,7 +13,8 @@ class SimulatorSession {
   private refs = 0
   private epoch = 0
   private running = false
-  private lastWindowFrame = 0
+  /** True while ScreenCaptureKit streams the window; screenshots are only a fallback. */
+  private streaming = false
   private sender: WebContents | null = null
   private device: ActiveDevice | null = null
   private simctl: string | null = null
@@ -47,7 +48,7 @@ class SimulatorSession {
     this.device = null
     this.mode = null
     this.inputReady = null
-    this.lastWindowFrame = 0
+    this.streaming = false
     stopInputBridge()
   }
 
@@ -93,6 +94,7 @@ class SimulatorSession {
           return
         }
         if (this.mode) sendSimulatorInput({ op: 'mode', content: this.mode === 'screen' })
+        startWindowStream(device.name, (event) => this.onStream(epoch, event))
       })
       this.publish({ phase: 'starting', message: `Waiting for ${device.name}…`, deviceName: device.name })
       this.startPump(epoch)
@@ -110,61 +112,41 @@ class SimulatorSession {
 
   private startPump(epoch: number): void {
     void this.screenLoop(epoch)
-    void this.windowLoop(epoch)
   }
 
+  private onStream(epoch: number, event: StreamEvent): void {
+    if (this.stale(epoch)) return
+    if (event.type === 'frame') {
+      this.streaming = true
+      this.publishFrame(event.jpeg, 'window')
+    } else if (event.type === 'streaming') {
+      this.streaming = true
+    } else {
+      // Permission missing or window gone: screenshots keep the panel alive.
+      this.streaming = false
+      if (event.type === 'error') console.error('Simulator window stream:', event.message)
+    }
+  }
+
+  /**
+   * Fallback when the window cannot be streamed (no Screen Recording permission,
+   * window hidden). Each screenshot starts a simctl process, so it runs slowly.
+   */
   private async screenLoop(epoch: number): Promise<void> {
     while (!this.stale(epoch)) {
-      if (this.mode === 'window' && Date.now() - this.lastWindowFrame < 900) {
-        await delay(200)
+      if (this.streaming) {
+        await delay(500)
         continue
       }
       if (!this.device || !this.simctl) return
       try {
         const screen = await captureSimulatorScreen(this.simctl, this.device.udid)
         if (this.stale(epoch)) return
-        if (!screen) {
-          await delay(300)
-          continue
-        }
-        if (this.mode === 'window' && Date.now() - this.lastWindowFrame < 900) continue
-        this.publishFrame(screen, 'screen')
+        if (screen && !this.streaming) this.publishFrame(screen, 'screen')
       } catch (error) {
         console.error('Simulator frame failed:', error)
-        await delay(400)
       }
-    }
-  }
-
-  private async windowLoop(epoch: number): Promise<void> {
-    while (!this.stale(epoch)) {
-      const frame = await this.captureWindow(this.device?.name ?? '')
-      if (this.stale(epoch)) return
-      if (frame) {
-        this.lastWindowFrame = Date.now()
-        this.publishFrame(frame, 'window')
-        await delay(90)
-        continue
-      }
-      await delay(1_200)
-    }
-  }
-
-  private async captureWindow(deviceName: string): Promise<Buffer | null> {
-    try {
-      const sources = await desktopCapturer.getSources({
-        types: ['window'],
-        thumbnailSize: { width: 720, height: 1560 },
-        fetchWindowIcons: false
-      })
-      const source = pickSimulatorWindow(sources, deviceName)
-      if (!source || source.thumbnail.isEmpty()) return null
-      const size = source.thumbnail.getSize()
-      if (size.width < 8 || size.height < 8) return null
-      return source.thumbnail.toJPEG(74)
-    } catch (error) {
-      console.error('Simulator window capture failed:', error)
-      return null
+      await delay(this.status.phase === 'live' ? 450 : 300)
     }
   }
 

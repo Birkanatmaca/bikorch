@@ -10,6 +10,8 @@ type WireMessage =
   | { op: 'focus'; name: string }
   | { op: 'mode'; content: boolean }
   | { op: 'ping' }
+  | { op: 'stream'; name: string; fps: number }
+  | { op: 'unstream' }
   | { op: 'down' | 'move' | 'up'; x: number; y: number }
   | { op: 'key'; key?: string; text?: string }
 
@@ -17,6 +19,14 @@ let child: ChildProcessWithoutNullStreams | null = null
 let starting: Promise<boolean> | null = null
 let binaryPath: string | null = null
 let readyHandler: ((trusted: boolean) => void) | null = null
+let streamHandler: ((event: StreamEvent) => void) | null = null
+
+/** What the helper reports about the Simulator window stream. */
+export type StreamEvent =
+  | { type: 'frame'; jpeg: Buffer }
+  | { type: 'streaming' }
+  | { type: 'stopped'; message?: string }
+  | { type: 'error'; message: string }
 let stdoutBuffer = ''
 
 function bridgeSourcePath(): string | null {
@@ -94,8 +104,18 @@ async function launch(deviceName: string): Promise<boolean> {
     for (const line of lines) {
       if (!line.trim()) continue
       try {
-        const message = JSON.parse(line) as { op?: string; trusted?: boolean }
-        if (message.op === 'ready' || message.op === 'pong') readyHandler?.(message.trusted === true)
+        const message = JSON.parse(line) as { op?: string; trusted?: boolean; data?: string; message?: string }
+        if (message.op === 'frame' && typeof message.data === 'string') {
+          streamHandler?.({ type: 'frame', jpeg: Buffer.from(message.data, 'base64') })
+        } else if (message.op === 'streaming') {
+          streamHandler?.({ type: 'streaming' })
+        } else if (message.op === 'stream-stopped') {
+          streamHandler?.({ type: 'stopped', ...(message.message ? { message: message.message } : {}) })
+        } else if (message.op === 'stream-error') {
+          streamHandler?.({ type: 'error', message: message.message ?? 'Screen capture failed' })
+        } else if (message.op === 'ready' || message.op === 'pong') {
+          readyHandler?.(message.trusted === true)
+        }
       } catch {
         // Status lines are optional. Input does not depend on them.
       }
@@ -106,7 +126,10 @@ async function launch(deviceName: string): Promise<boolean> {
     if (text) console.error('Simulator input bridge:', text)
   })
   next.on('exit', () => {
-    if (child === next) child = null
+    if (child === next) {
+      child = null
+      streamHandler?.({ type: 'stopped', message: 'The simulator helper stopped' })
+    }
   })
   send({ op: 'focus', name: deviceName })
   return true
@@ -136,12 +159,22 @@ export function startInputBridge(
   return starting
 }
 
+/**
+ * Streams the Simulator window through ScreenCaptureKit in the helper. Frames
+ * arrive only when the window's pixels change.
+ */
+export function startWindowStream(deviceName: string, onEvent: (event: StreamEvent) => void, fps = 30): void {
+  streamHandler = onEvent
+  send({ op: 'stream', name: deviceName, fps })
+}
+
 export function sendSimulatorInput(message: WireMessage): void {
   send(message)
 }
 
 export function stopInputBridge(): void {
   readyHandler = null
+  streamHandler = null
   stdoutBuffer = ''
   const current = child
   child = null

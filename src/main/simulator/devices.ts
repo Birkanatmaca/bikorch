@@ -136,19 +136,3 @@ export function chooseSimulator(input: {
   }
   return { action: 'create', name: BIKORCH_IPHONE_NAME, deviceType, runtime: runtime.identifier }
 }
-
-export function pickSimulatorWindow<T extends { name: string }>(
-  windows: readonly T[],
-  deviceName: string
-): T | null {
-  const needle = deviceName.trim().toLowerCase()
-  if (needle) {
-    const named = windows.find((window) => window.name.toLowerCase().includes(needle))
-    if (named) return named
-  }
-  return (
-    windows.find((window) => /iphone/i.test(window.name)) ??
-    windows.find((window) => /simulator/i.test(window.name)) ??
-    null
-  )
-}

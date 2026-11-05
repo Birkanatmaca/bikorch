@@ -4,8 +4,7 @@ import {
   chooseSimulator,
   parseDeviceList,
   parseDeviceTypes,
-  parseRuntimes,
-  pickSimulatorWindow
+  parseRuntimes
 } from '../devices'
 
 const IPHONE = '11111111-1111-1111-1111-111111111111'
@@ -75,17 +74,6 @@ describe('simulator device selection', () => {
 
   it('ignores malformed device rows', () => {
     expect(parseDeviceList({ devices: { runtime: [{ name: 'iPhone' }, null, 'nope'] } })).toEqual([])
-  })
-
-  it('matches the simulator window by device name', () => {
-    const picked = pickSimulatorWindow(
-      [
-        { id: 'menu', name: 'Simulator' },
-        { id: 'phone', name: 'Bikorch iPhone — iOS 26.1' }
-      ],
-      'Bikorch iPhone'
-    )
-    expect(picked?.id).toBe('phone')
   })
 })
 

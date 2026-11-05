@@ -4,6 +4,8 @@ import type { SimulatorStatus } from '@shared/contracts/simulator'
 import { CanvasDeviceInteractionContext } from '@renderer/components/mobile-preview/canvas-device-context'
 import { normalizeContainedPointer } from '@renderer/components/mobile-preview/simulator-geometry'
 import { Button } from '@renderer/components/ui/Button'
+import { onDocumentVisibility } from '@renderer/lib/visibility'
+import { cn } from '@renderer/lib/utils'
 
 const STARTING: SimulatorStatus = {
   phase: 'starting',
@@ -52,6 +54,24 @@ export function IosSimulatorScreen(): React.JSX.Element {
     }
   }, [])
 
+  // A hidden window needs no frames: let the capture stop until it is visible again.
+  useEffect(() => {
+    const api = window.api?.simulator
+    if (!api) return
+    let paused = false
+    const stop = onDocumentVisibility((hidden) => {
+      if (hidden && !paused) {
+        paused = true
+        void api.detach()
+      } else if (!hidden && paused) {
+        paused = false
+        void api.attach().then(setStatus).catch(() => undefined)
+      }
+    })
+    // The mount effect's detach ends the session; refs never go below zero.
+    return stop
+  }, [])
+
   const retry = (): void => {
     const api = window.api?.simulator
     if (!api) return
@@ -84,7 +104,7 @@ export function IosSimulatorScreen(): React.JSX.Element {
       <div className="mobile-preview-stage">
         <section className="mobile-device mobile-device-ios is-canvas-device" aria-label={status.deviceName ? `${status.deviceName} simulator` : 'iOS Simulator'}>
           <div className="mobile-device-content">
-            <div className="mobile-device-frame">
+            <div className={cn('mobile-device-frame', status.mode === 'window' && 'is-window-feed')}>
               {lcd ? <span className="mobile-ios-island" aria-hidden /> : null}
               <div
                 ref={screenRef}
@@ -127,7 +147,13 @@ export function IosSimulatorScreen(): React.JSX.Element {
               >
                 {frame ? <img ref={imageRef} className="mobile-sim-feed" src={frame} alt="" draggable={false} /> : null}
                 {status.phase === 'live' && status.inputReady === false ? (
-                  <p className="mobile-sim-hint">Allow “Bikorch Simulator” in Accessibility to tap and type.</p>
+                  <div className="mobile-sim-hint">
+                    <span>Allow Bikorch in Accessibility to tap and type.</span>
+                    <span className="mobile-sim-hint-actions">
+                      <button type="button" onClick={() => void window.api?.simulator?.openAccessibility()}>Open settings</button>
+                      <button type="button" onClick={retry}>Check again</button>
+                    </span>
+                  </div>
                 ) : null}
                 {showStatus ? (
                   <div className="mobile-sim-status">

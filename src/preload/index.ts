@@ -492,6 +492,7 @@ export interface SimulatorApi {
   detach: () => Promise<void>
   pointer: (event: SimulatorPointer) => Promise<void>
   key: (event: SimulatorKey) => Promise<void>
+  openAccessibility: () => Promise<void>
   onEvent: (callback: (event: SimulatorClientEvent) => void) => () => void
 }
 
@@ -879,6 +880,7 @@ const simulatorApi: SimulatorApi = {
   detach: () => ipcRenderer.invoke(SIMULATOR_IPC.DETACH),
   pointer: (event) => ipcRenderer.invoke(SIMULATOR_IPC.POINTER, event),
   key: (event) => ipcRenderer.invoke(SIMULATOR_IPC.KEY, event),
+  openAccessibility: () => ipcRenderer.invoke(SIMULATOR_IPC.OPEN_ACCESSIBILITY),
   onEvent: (callback) => {
     const listener = (_event: IpcRendererEvent, payload: SimulatorClientEvent): void => {
       callback(payload)

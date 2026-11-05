@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { ipcMain, shell } from 'electron'
 import { SIMULATOR_IPC } from '@shared/contracts/simulator'
 import { simulatorSession } from '../simulator/session'
 import { assertTrustedMainWindow } from './trusted-sender'
@@ -22,5 +22,11 @@ export function registerSimulatorHandlers(): void {
   ipcMain.handle(SIMULATOR_IPC.KEY, (event, raw: unknown) => {
     assertTrustedMainWindow(event)
     simulatorSession.key(raw)
+  })
+
+  // Taps and typing need Accessibility for the simulator helper; open that pane.
+  ipcMain.handle(SIMULATOR_IPC.OPEN_ACCESSIBILITY, async (event) => {
+    assertTrustedMainWindow(event)
+    await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility')
   })
 }

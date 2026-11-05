@@ -3,6 +3,7 @@ export const SIMULATOR_IPC = {
   DETACH: 'simulator:detach',
   POINTER: 'simulator:pointer',
   KEY: 'simulator:key',
+  OPEN_ACCESSIBILITY: 'simulator:open-accessibility',
   EVENT: 'simulator:event'
 } as const
 
