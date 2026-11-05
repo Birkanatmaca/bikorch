@@ -182,6 +182,7 @@ import { SERVER_HEALTH_IPC, type ServerHealth } from '@shared/contracts/server-h
 import { STORAGE_IPC, type StorageCleanResult, type StorageReport } from '@shared/contracts/storage'
 import {
   SIMULATOR_IPC,
+  type SimulatorButton,
   type SimulatorClientEvent,
   type SimulatorKey,
   type SimulatorPointer,
@@ -492,6 +493,7 @@ export interface SimulatorApi {
   detach: () => Promise<void>
   pointer: (event: SimulatorPointer) => Promise<void>
   key: (event: SimulatorKey) => Promise<void>
+  button: (button: SimulatorButton) => Promise<void>
   openAccessibility: () => Promise<void>
   onEvent: (callback: (event: SimulatorClientEvent) => void) => () => void
 }
@@ -880,6 +882,7 @@ const simulatorApi: SimulatorApi = {
   detach: () => ipcRenderer.invoke(SIMULATOR_IPC.DETACH),
   pointer: (event) => ipcRenderer.invoke(SIMULATOR_IPC.POINTER, event),
   key: (event) => ipcRenderer.invoke(SIMULATOR_IPC.KEY, event),
+  button: (button) => ipcRenderer.invoke(SIMULATOR_IPC.BUTTON, button),
   openAccessibility: () => ipcRenderer.invoke(SIMULATOR_IPC.OPEN_ACCESSIBILITY),
   onEvent: (callback) => {
     const listener = (_event: IpcRendererEvent, payload: SimulatorClientEvent): void => {

@@ -3,13 +3,17 @@ export const SIMULATOR_IPC = {
   DETACH: 'simulator:detach',
   POINTER: 'simulator:pointer',
   KEY: 'simulator:key',
+  BUTTON: 'simulator:button',
   OPEN_ACCESSIBILITY: 'simulator:open-accessibility',
   EVENT: 'simulator:event'
 } as const
 
 export type SimulatorPhase = 'starting' | 'live' | 'unavailable'
 
-export type SimulatorFeed = 'window' | 'screen'
+/** window: Simulator.app window stream; screen: simctl screenshots; device: headless framebuffer. */
+export type SimulatorFeed = 'window' | 'screen' | 'device'
+
+export type SimulatorButton = 'home' | 'lock'
 
 export interface SimulatorStatus {
   phase: SimulatorPhase
@@ -73,4 +77,8 @@ export function parseKey(raw: unknown): SimulatorKey | null {
   const text = Array.from(record.text).slice(0, 8).join('')
   if (!text || Array.from(text).some((char) => char.charCodeAt(0) < 32)) return null
   return { text }
+}
+
+export function parseButton(raw: unknown): SimulatorButton | null {
+  return raw === 'home' || raw === 'lock' ? raw : null
 }

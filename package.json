@@ -52,6 +52,10 @@
       {
         "from": "src/main/simulator/bridge.swift",
         "to": "simulator/bridge.swift"
+      },
+      {
+        "from": "src/main/simulator/headless.swift",
+        "to": "simulator/headless.swift"
       }
     ],
     "mac": {

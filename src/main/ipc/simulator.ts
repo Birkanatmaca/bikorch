@@ -24,6 +24,11 @@ export function registerSimulatorHandlers(): void {
     simulatorSession.key(raw)
   })
 
+  ipcMain.handle(SIMULATOR_IPC.BUTTON, (event, raw: unknown) => {
+    assertTrustedMainWindow(event)
+    simulatorSession.button(raw)
+  })
+
   // Taps and typing need Accessibility for the simulator helper; open that pane.
   ipcMain.handle(SIMULATOR_IPC.OPEN_ACCESSIBILITY, async (event) => {
     assertTrustedMainWindow(event)

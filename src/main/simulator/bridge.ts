@@ -29,15 +29,16 @@ export type StreamEvent =
   | { type: 'error'; message: string }
 let stdoutBuffer = ''
 
-function bridgeSourcePath(): string | null {
-  const candidates = [join(process.cwd(), 'src/main/simulator/bridge.swift')]
+/** Finds a Swift helper source in the repo (dev) or the app's resources (packaged). */
+export function helperSourcePath(file: string): string | null {
+  const candidates = [join(process.cwd(), 'src/main/simulator', file)]
   try {
-    candidates.push(join(process.resourcesPath, 'simulator/bridge.swift'))
+    candidates.push(join(process.resourcesPath, 'simulator', file))
   } catch {
     // resourcesPath is missing in some test hosts
   }
   try {
-    candidates.push(join(app.getAppPath(), 'src/main/simulator/bridge.swift'))
+    candidates.push(join(app.getAppPath(), 'src/main/simulator', file))
   } catch {
     // app is unavailable outside Electron
   }
@@ -52,12 +53,13 @@ function cacheDirectory(): string {
   }
 }
 
-function compileBridge(sourcePath: string): Promise<string> {
+/** Compiles a helper once per source version and caches the binary in userData. */
+export function compileHelper(sourcePath: string, binaryName: string): Promise<string> {
   const source = readFileSync(sourcePath)
   const hash = createHash('sha256').update(source).digest('hex').slice(0, 16)
   const directory = cacheDirectory()
   mkdirSync(directory, { recursive: true })
-  const output = join(directory, 'Bikorch Simulator')
+  const output = join(directory, binaryName)
   const stamp = `${output}.sha`
   if (existsSync(output) && existsSync(stamp) && readFileSync(stamp, 'utf8') === hash) return Promise.resolve(output)
   const staging = `${output}.next`
@@ -68,7 +70,7 @@ function compileBridge(sourcePath: string): Promise<string> {
       { timeout: 120_000, maxBuffer: 8 * 1024 * 1024 },
       (error, _stdout, stderr) => {
         if (error || !existsSync(staging)) {
-          reject(new Error(String(stderr || error || 'Could not compile the simulator input bridge')))
+          reject(new Error(String(stderr || error || `Could not compile ${binaryName}`)))
           return
         }
         try {
@@ -90,9 +92,9 @@ function send(message: WireMessage): void {
 }
 
 async function launch(deviceName: string): Promise<boolean> {
-  const source = bridgeSourcePath()
+  const source = helperSourcePath('bridge.swift')
   if (!source) return false
-  const binary = binaryPath && existsSync(binaryPath) ? binaryPath : await compileBridge(source)
+  const binary = binaryPath && existsSync(binaryPath) ? binaryPath : await compileHelper(source, 'Bikorch Simulator')
   binaryPath = binary
   const next = spawn(binary, [], { stdio: ['pipe', 'pipe', 'pipe'] })
   child = next

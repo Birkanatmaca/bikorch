@@ -1,5 +1,5 @@
 import { useContext, useEffect, useRef, useState } from 'react'
-import { Loader2, X } from 'lucide-react'
+import { Circle, Loader2, X } from 'lucide-react'
 import type { SimulatorStatus } from '@shared/contracts/simulator'
 import { CanvasDeviceInteractionContext } from '@renderer/components/mobile-preview/canvas-device-context'
 import { normalizeContainedPointer } from '@renderer/components/mobile-preview/simulator-geometry'
@@ -9,7 +9,7 @@ import { cn } from '@renderer/lib/utils'
 
 const STARTING: SimulatorStatus = {
   phase: 'starting',
-  message: 'Opening Xcode Simulator…'
+  message: 'Starting the iOS Simulator…'
 }
 
 export function IosSimulatorScreen(): React.JSX.Element {
@@ -20,6 +20,7 @@ export function IosSimulatorScreen(): React.JSX.Element {
   const [status, setStatus] = useState<SimulatorStatus>(STARTING)
   const [frame, setFrame] = useState<string | null>(null)
   const frameRef = useRef<string | null>(null)
+  const [aspect, setAspect] = useState<number | null>(null)
 
   useEffect(() => {
     const api = window.api?.simulator
@@ -97,14 +98,26 @@ export function IosSimulatorScreen(): React.JSX.Element {
   }
 
   const showStatus = status.phase !== 'live' || !frame
-  const lcd = status.mode !== 'window'
+  // The headless feed already carries the real island and home indicator.
+  const lcd = status.mode === 'screen'
+  const canPressHome = status.phase === 'live' && status.mode === 'device'
+  const pressHome = (): void => {
+    void window.api?.simulator?.button('home')
+  }
 
   return (
     <div className="mobile-preview-workbench mobile-canvas-device">
       <div className="mobile-preview-stage">
         <section className="mobile-device mobile-device-ios is-canvas-device" aria-label={status.deviceName ? `${status.deviceName} simulator` : 'iOS Simulator'}>
           <div className="mobile-device-content">
-            <div className={cn('mobile-device-frame', status.mode === 'window' && 'is-window-feed')}>
+            <div
+              className={cn(
+                'mobile-device-frame',
+                status.mode === 'window' && 'is-window-feed',
+                status.mode === 'device' && aspect && 'is-device-feed'
+              )}
+              style={aspect ? ({ '--sim-aspect': String(aspect) } as React.CSSProperties) : undefined}
+            >
               {lcd ? <span className="mobile-ios-island" aria-hidden /> : null}
               <div
                 ref={screenRef}
@@ -130,6 +143,13 @@ export function IosSimulatorScreen(): React.JSX.Element {
                   pressed.current = false
                 }}
                 onKeyDown={(event) => {
+                  // ⌘⇧H goes home, as in Simulator.app.
+                  if (event.metaKey && event.shiftKey && event.key.toLowerCase() === 'h') {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    pressHome()
+                    return
+                  }
                   if (event.metaKey || event.ctrlKey || event.altKey) return
                   const key = event.key
                   if (key === 'Enter' || key === 'Backspace' || key === 'Escape' || key === 'Tab' || key === ' ' || key.startsWith('Arrow')) {
@@ -145,7 +165,20 @@ export function IosSimulatorScreen(): React.JSX.Element {
                   void window.api?.simulator?.key({ text: key })
                 }}
               >
-                {frame ? <img ref={imageRef} className="mobile-sim-feed" src={frame} alt="" draggable={false} /> : null}
+                {frame ? <img
+                    ref={imageRef}
+                    className="mobile-sim-feed"
+                    src={frame}
+                    alt=""
+                    draggable={false}
+                    onLoad={(event) => {
+                      const { naturalWidth, naturalHeight } = event.currentTarget
+                      if (naturalWidth && naturalHeight) {
+                        const next = Math.round((naturalWidth / naturalHeight) * 1000) / 1000
+                        setAspect((current) => (current === next ? current : next))
+                      }
+                    }}
+                  /> : null}
                 {status.phase === 'live' && status.inputReady === false ? (
                   <div className="mobile-sim-hint">
                     <span>Allow Bikorch in Accessibility to tap and type.</span>
@@ -167,11 +200,18 @@ export function IosSimulatorScreen(): React.JSX.Element {
                 ) : null}
               </div>
               {lcd ? <span className="mobile-device-home" aria-hidden /> : null}
-              {canvas?.onClose ? (
+              {canvas?.onClose || canPressHome ? (
                 <div className="mobile-device-actions is-overlay">
-                  <button type="button" className="browser-icon-btn" onClick={canvas.onClose} aria-label="Close device" title="Close device">
-                    <X className="h-3.5 w-3.5" />
-                  </button>
+                  {canPressHome ? (
+                    <button type="button" className="browser-icon-btn" onClick={pressHome} aria-label="Home" title="Home (⌘⇧H)">
+                      <Circle className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
+                  {canvas?.onClose ? (
+                    <button type="button" className="browser-icon-btn" onClick={canvas.onClose} aria-label="Close device" title="Close device">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </div>

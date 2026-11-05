@@ -5805,6 +5805,25 @@ kbd {
 .health-meter-value { font-family: var(--font-mono); text-align: right; color: #d6cde3; }
 .health-note { margin: 0; font-size: 10.5px; line-height: 1.4; color: #aaa0ba; }
 
+/* Headless device feed: the bezel hugs the real screen, so there are no black
+   bands. The screen takes the largest size of its aspect ratio that fits the
+   panel both ways (26px = the frame's padding and border). */
+.mobile-canvas-device .mobile-device-content:has(.is-device-feed) {
+  container-type: size;
+  justify-content: center;
+}
+.mobile-canvas-device .mobile-device-frame.is-device-feed {
+  display: flex;
+  width: auto;
+  height: auto;
+  margin: 0 auto;
+}
+.mobile-device-frame.is-device-feed .mobile-sim-screen {
+  width: min(calc(100cqw - 26px), calc((100cqh - 26px) * var(--sim-aspect)));
+  height: auto;
+  aspect-ratio: var(--sim-aspect);
+  border-radius: 34px;
+}
 /* Live Simulator window: its own bezel and toolbar, so no fake phone around it. */
 .mobile-device-frame.is-window-feed {
   padding: 0;

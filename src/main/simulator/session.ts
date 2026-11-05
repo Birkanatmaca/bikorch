@@ -1,7 +1,8 @@
 import type { WebContents } from 'electron'
-import { parseKey, parsePointer, SIMULATOR_IPC, type SimulatorFeed, type SimulatorStatus } from '@shared/contracts/simulator'
+import { parseButton, parseKey, parsePointer, SIMULATOR_IPC, type SimulatorFeed, type SimulatorStatus } from '@shared/contracts/simulator'
 import { sendSimulatorInput, startInputBridge, startWindowStream, stopInputBridge, type StreamEvent } from './bridge'
 import { SimulatorUnavailable } from './devices'
+import { sendHeadless, startHeadless, stopHeadless } from './headless'
 import { bootSimulator, captureSimulatorScreen, ensureIphone, openSimulatorApp, resolveSimctl, shutdownSimulator } from './simctl'
 
 /** How long a simulator Bikorch booted stays up after its panel closes. */
@@ -18,6 +19,8 @@ class SimulatorSession {
   private running = false
   /** True while ScreenCaptureKit streams the window; screenshots are only a fallback. */
   private streaming = false
+  /** True while the headless helper drives the device (no Simulator.app window). */
+  private headless = false
   /** A device Bikorch booted itself; it is shut down again when nobody watches it. */
   private bootedByUs: { simctl: string; udid: string } | null = null
   private shutdownTimer: ReturnType<typeof setTimeout> | null = null
@@ -28,7 +31,7 @@ class SimulatorSession {
   private inputReady: boolean | null = null
   private status: SimulatorStatus = {
     phase: 'starting',
-    message: 'Opening Xcode Simulator…'
+    message: 'Starting the iOS Simulator…'
   }
 
   attach(sender: WebContents): SimulatorStatus {
@@ -59,6 +62,8 @@ class SimulatorSession {
     this.mode = null
     this.inputReady = null
     this.streaming = false
+    this.headless = false
+    stopHeadless()
     stopInputBridge()
     this.scheduleShutdown()
   }
@@ -87,18 +92,25 @@ class SimulatorSession {
   pointer(raw: unknown): void {
     const event = parsePointer(raw)
     if (!event) return
-    sendSimulatorInput({ op: event.phase, x: event.x, y: event.y })
+    if (this.headless) sendHeadless({ op: event.phase, x: event.x, y: event.y })
+    else sendSimulatorInput({ op: event.phase, x: event.x, y: event.y })
+  }
+
+  button(raw: unknown): void {
+    const button = parseButton(raw)
+    if (button && this.headless) sendHeadless({ op: 'button', button })
   }
 
   key(raw: unknown): void {
     const event = parseKey(raw)
     if (!event) return
-    sendSimulatorInput({ op: 'key', key: event.key, text: event.text })
+    if (this.headless) sendHeadless({ op: 'key', key: event.key, text: event.text })
+    else sendSimulatorInput({ op: 'key', key: event.key, text: event.text })
   }
 
   private async start(): Promise<void> {
     const epoch = ++this.epoch
-    this.publish({ phase: 'starting', message: 'Opening Xcode Simulator…' })
+    this.publish({ phase: 'starting', message: 'Starting the iOS Simulator…' })
     try {
       if (process.platform !== 'darwin') {
         throw new SimulatorUnavailable('The iOS Simulator runs on a Mac with Xcode.')
@@ -111,6 +123,12 @@ class SimulatorSession {
       this.device = { udid: device.udid, name: device.name }
       this.publish({ phase: 'starting', message: `Starting ${device.name}…`, deviceName: device.name })
       if (await bootSimulator(simctl, device.udid)) this.bootedByUs = { simctl, udid: device.udid }
+      if (this.stale(epoch)) return
+      if (await this.startHeadless(epoch, device.udid)) {
+        this.publish({ phase: 'starting', message: `Waiting for ${device.name}…`, deviceName: device.name })
+        this.startPump(epoch)
+        return
+      }
       if (this.stale(epoch)) return
       await openSimulatorApp(device.udid)
       if (this.stale(epoch)) return
@@ -136,6 +154,38 @@ class SimulatorSession {
       this.running = false
       this.publish({ phase: 'unavailable', message })
     }
+  }
+
+  /**
+   * Runs the device with no Simulator.app window. Resolves false when this Xcode
+   * cannot do that, so the caller falls back to streaming the Simulator window.
+   */
+  private startHeadless(epoch: number, udid: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      let settled = false
+      const settle = (value: boolean): void => {
+        if (settled) return
+        settled = true
+        resolve(value)
+      }
+      void startHeadless(udid, (event) => {
+        if (this.stale(epoch)) return settle(false)
+        if (event.type === 'ready') {
+          this.headless = true
+          this.inputReady = true
+          settle(true)
+        } else if (event.type === 'frame') {
+          this.streaming = true
+          this.publishFrame(event.jpeg, 'device')
+        } else {
+          if (!settled) console.error('Headless simulator unavailable:', event.message)
+          // Lost after it worked: simctl screenshots keep the panel alive.
+          this.headless = false
+          this.streaming = false
+          settle(false)
+        }
+      })
+    })
   }
 
   private stale(epoch: number): boolean {
@@ -185,7 +235,7 @@ class SimulatorSession {
   private publishFrame(jpeg: Buffer, mode: SimulatorFeed): void {
     if (this.mode !== mode) {
       this.mode = mode
-      sendSimulatorInput({ op: 'mode', content: mode === 'screen' })
+      if (!this.headless) sendSimulatorInput({ op: 'mode', content: mode === 'screen' })
     }
     if (this.status.phase !== 'live' || this.status.mode !== mode) {
       this.publish({

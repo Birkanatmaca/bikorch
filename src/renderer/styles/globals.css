@@ -1205,11 +1205,15 @@ button:focus-visible,
 }
 
 /* Decorative motion is only for an app the user is looking at. When the window
-   is blurred or hidden, freeze every animation so the compositor can sleep. */
+   is blurred or hidden, every animation jumps to its end and stops, so the
+   compositor can sleep. Pausing instead would freeze entrance animations at
+   their first frame and leave new panels invisible on a second screen. */
 :root[data-window-inactive] *,
 :root[data-window-inactive] *::before,
 :root[data-window-inactive] *::after {
-  animation-play-state: paused !important;
+  animation-delay: 0s !important;
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
 }
 
 /* Agent setup — first-run checklist and CLI manager */
