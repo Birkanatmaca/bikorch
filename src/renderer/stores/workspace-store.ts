@@ -301,7 +301,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   activeProjectId: null,
   workspaces: {},
   isHydrated: false,
-  homeVisible: false,
+  // Home is the first screen on every launch.
+  homeVisible: true,
   showHome: () => set({ homeVisible: true }),
   // Every launch starts at 100%; a zoom change lasts for this session only.
   workspaceScale: WORKSPACE_SCALE_DEFAULT,

@@ -7,6 +7,7 @@ import '../styles/globals.css'
 import '../styles/workstation.css'
 import '../styles/studio.css'
 import '../styles/manager.css'
+import '../styles/home.css'
 
 const root = document.getElementById('root')
 

@@ -3,7 +3,7 @@ import { AppWindowEdge } from '@renderer/components/layout/AppWindowEdge'
 import { AppHeader } from '@renderer/components/layout/AppHeader'
 import { StatusBar } from '@renderer/components/layout/StatusBar'
 import { WorkspaceLayout } from '@renderer/components/layout/WorkspaceLayout'
-import { WelcomeScreen } from '@renderer/components/welcome/WelcomeScreen'
+import { HomeDashboard } from '@renderer/components/home/HomeDashboard'
 import { CommandPalette } from '@renderer/components/command/CommandPalette'
 import { ErrorBoundary } from '@renderer/components/ui/ErrorBoundary'
 import { LoadingSplash } from '@renderer/components/ui/LoadingSplash'
@@ -160,7 +160,7 @@ export default function App(): React.JSX.Element {
             ) : null}
           </div>
         )}
-        {(projects.length === 0 || homeVisible) && <WelcomeScreen />}
+        {(projects.length === 0 || homeVisible) && <HomeDashboard />}
         <StatusBar />
         <MusicPlayerHost />
         <TimerHost />

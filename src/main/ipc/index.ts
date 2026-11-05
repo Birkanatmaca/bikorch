@@ -15,6 +15,7 @@ import { registerNotificationHandlers } from './notifications'
 import { registerResourceHandlers } from './resources'
 import { registerStorageHandlers } from './storage'
 import { registerServerHandlers } from './servers'
+import { registerDashboardHandlers } from './dashboard'
 import { registerSecretaryHandlers } from './secretary'
 import { registerApiKeyHandlers } from './api-keys'
 import { registerSimulatorHandlers } from './simulator'
@@ -36,6 +37,7 @@ export function registerIpcHandlers(): void {
   registerResourceHandlers()
   registerStorageHandlers()
   registerServerHandlers()
+  registerDashboardHandlers()
   registerSecretaryHandlers()
   registerApiKeyHandlers()
   registerSimulatorHandlers()

@@ -177,6 +177,7 @@ import {
   type ResourceProcessSnapshot,
   type ResourceProfile
 } from '@shared/contracts/resources'
+import { DASHBOARD_IPC, type ClaudeActivity, type GitActivity, type SystemMetrics } from '@shared/contracts/dashboard'
 import { SERVER_HEALTH_IPC, type ServerHealth } from '@shared/contracts/server-health'
 import { STORAGE_IPC, type StorageCleanResult, type StorageReport } from '@shared/contracts/storage'
 import {
@@ -470,6 +471,12 @@ export interface ResourcesApi {
   respondCache: (accept: boolean) => Promise<CacheAnalysis>
 }
 
+export interface DashboardApi {
+  system: () => Promise<SystemMetrics>
+  claudeActivity: () => Promise<ClaudeActivity>
+  gitActivity: (force?: boolean) => Promise<GitActivity>
+}
+
 export interface ServerHealthApi {
   check: (serverId: string, target: { user: string; host: string; port: number }) => Promise<ServerHealth>
 }
@@ -509,6 +516,7 @@ export interface AppApi {
   resources: ResourcesApi
   storage: StorageApi
   serverHealth: ServerHealthApi
+  dashboard: DashboardApi
   simulator: SimulatorApi
 }
 
@@ -850,6 +858,12 @@ const resourcesApi: ResourcesApi = {
   respondCache: (accept) => ipcRenderer.invoke(RESOURCES_IPC.RESPOND_CACHE, accept)
 }
 
+const dashboardApi: DashboardApi = {
+  system: () => ipcRenderer.invoke(DASHBOARD_IPC.SYSTEM),
+  claudeActivity: () => ipcRenderer.invoke(DASHBOARD_IPC.CLAUDE_ACTIVITY),
+  gitActivity: (force) => ipcRenderer.invoke(DASHBOARD_IPC.GIT_ACTIVITY, force === true)
+}
+
 const serverHealthApi: ServerHealthApi = {
   check: (serverId, target) => ipcRenderer.invoke(SERVER_HEALTH_IPC.CHECK, serverId, target)
 }
@@ -897,6 +911,7 @@ const api: AppApi = {
   resources: resourcesApi,
   storage: storageApi,
   serverHealth: serverHealthApi,
+  dashboard: dashboardApi,
   simulator: simulatorApi
 }
 
