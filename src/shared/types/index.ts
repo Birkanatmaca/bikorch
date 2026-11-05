@@ -147,7 +147,7 @@ export function parseCanvasMode(value: unknown): WorkspaceCanvasMode {
   if (typeof value === 'string' && (WORKSPACE_CANVAS_MODES as readonly string[]).includes(value)) {
     return value as WorkspaceCanvasMode
   }
-  return 'free'
+  return 'tiled'
 }
 
 export const WORKSPACE_CANVAS_MODE_LABELS: Record<WorkspaceCanvasMode, string> = {
@@ -265,7 +265,7 @@ export const DEFAULT_LAYOUT: WorkspaceLayout = {
   mainVerticalSize: 100,
   leftCollapsed: false,
   leftSidebarView: 'files',
-  canvasMode: 'free',
+  canvasMode: 'tiled',
   centerGrid: null
 }
 

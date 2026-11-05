@@ -158,10 +158,10 @@ describe('layout presets', () => {
     expect(buildLayoutGrid(['a', 'b'], 'free')).toBeNull()
   })
 
-  it('parses known canvas modes and falls back to free', () => {
+  it('parses known canvas modes and falls back to auto tile', () => {
     expect(parseCanvasMode('cols-4')).toBe('cols-4')
     expect(parseCanvasMode('rows-4')).toBe('rows-4')
-    expect(parseCanvasMode('nope')).toBe('free')
-    expect(parseCanvasMode(undefined)).toBe('free')
+    expect(parseCanvasMode('nope')).toBe('tiled')
+    expect(parseCanvasMode(undefined)).toBe('tiled')
   })
 })

@@ -28,6 +28,7 @@ import {
   type OrchestratorRect,
   type TiledSplitSide,
   type WorkspaceCanvasMode,
+  parseCanvasMode,
   type WorkspaceGridNode
 } from '@shared/types'
 import {
@@ -39,7 +40,10 @@ import {
   tiledCenterPanelIds,
   updateGridSizes,
   buildLayoutGrid,
+  buildEqualGrid,
+  collectGridIds,
   emptyGridCellId,
+  isEmptyGridCellId,
   layoutCellCount
 } from '@shared/workspace-grid'
 import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
@@ -67,10 +71,32 @@ const AGENT_WORKTREE_TYPES = new Set<PanelType>([
   'codex'
 ])
 
+const TILES_MIGRATION_KEY = 'bikorch.layout.tilesByDefault'
+
+/**
+ * Terminals used to open as small floating windows. Move saved workspaces to
+ * auto tiles once; a user who picks Free again afterwards keeps it.
+ */
+function shouldMoveFreeLayoutsToTiles(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    if (window.localStorage.getItem(TILES_MIGRATION_KEY) === '1') return false
+    window.localStorage.setItem(TILES_MIGRATION_KEY, '1')
+    return true
+  } catch {
+    return false
+  }
+}
+
 function pruneCenterGrid(
   node: WorkspaceGridNode | null | undefined,
-  removedIds: Set<string>
+  removedIds: Set<string>,
+  mode?: WorkspaceCanvasMode
 ): WorkspaceGridNode | null {
+  // Auto tile has no fixed cells: the remaining panels share the space evenly.
+  if (parseCanvasMode(mode) === 'tiled') {
+    return buildEqualGrid(collectGridIds(node).filter((id) => !removedIds.has(id) && !isEmptyGridCellId(id)))
+  }
   const replaceRemoved = (current: WorkspaceGridNode | null): WorkspaceGridNode | null => {
     if (!current) return null
     if (current.type === 'leaf') {
@@ -140,26 +166,6 @@ interface WorkspaceSnapshot {
   projects: Project[]
   activeProjectId: string | null
   workspaces: Record<string, ProjectWorkspaceState>
-}
-
-const WORKSPACE_SCALE_STORAGE_KEY = 'bikorch.workspaceScale'
-
-function readStoredWorkspaceScale(): number {
-  if (typeof window === 'undefined') return WORKSPACE_SCALE_DEFAULT
-  try {
-    return clampWorkspaceScale(Number(window.localStorage.getItem(WORKSPACE_SCALE_STORAGE_KEY)))
-  } catch {
-    return WORKSPACE_SCALE_DEFAULT
-  }
-}
-
-function persistWorkspaceScale(scale: number): void {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(WORKSPACE_SCALE_STORAGE_KEY, String(scale))
-  } catch {
-    // Ignore quota / private-mode failures.
-  }
 }
 
 interface WorkspaceStore extends WorkspaceSnapshot {
@@ -297,18 +303,28 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   isHydrated: false,
   homeVisible: false,
   showHome: () => set({ homeVisible: true }),
-  workspaceScale: readStoredWorkspaceScale(),
+  // Every launch starts at 100%; a zoom change lasts for this session only.
+  workspaceScale: WORKSPACE_SCALE_DEFAULT,
 
   hydrate: (snapshot) => {
+    const moveToTiles = shouldMoveFreeLayoutsToTiles()
     const workspaces = Object.fromEntries(
       Object.entries(snapshot.workspaces).map(([projectId, workspace]) => {
         const panels = sanitizeWorkspacePanels(workspace.panels)
+        const mode = parseCanvasMode(workspace.layout.canvasMode)
+        const savedIds = collectGridIds(workspace.layout.centerGrid)
+        const layout = moveToTiles && mode === 'free'
+          ? { ...workspace.layout, canvasMode: 'tiled' as const, centerGrid: buildEqualGrid(tiledCenterPanelIds(panels)) }
+          : mode === 'tiled' && savedIds.some(isEmptyGridCellId)
+            // Auto tile keeps no placeholder cells; older saves may have some.
+            ? { ...workspace.layout, centerGrid: buildEqualGrid(savedIds.filter((id) => !isEmptyGridCellId(id))) }
+            : workspace.layout
         return [
           projectId,
           {
             ...workspace,
             panels,
-            layout: normalizeLayoutForPanels(workspace.layout, panels)
+            layout: normalizeLayoutForPanels(layout, panels)
           }
         ]
       })
@@ -666,7 +682,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         layout: {
           ...workspace.layout,
           centerPanelRects,
-          centerGrid: pruneCenterGrid(workspace.layout.centerGrid, removedIds)
+          centerGrid: pruneCenterGrid(workspace.layout.centerGrid, removedIds, workspace.layout.canvasMode)
         }
       }
     }
@@ -759,7 +775,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           {
             ...workspace.layout,
             centerPanelRects,
-            centerGrid: pruneCenterGrid(workspace.layout.centerGrid, removedIds)
+            centerGrid: pruneCenterGrid(workspace.layout.centerGrid, removedIds, workspace.layout.canvasMode)
           },
           nextPanels
         )
@@ -796,7 +812,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           layout: {
             ...workspace.layout,
             centerPanelRects: restRects,
-            centerGrid: pruneCenterGrid(workspace.layout.centerGrid, new Set([panelId]))
+            centerGrid: pruneCenterGrid(workspace.layout.centerGrid, new Set([panelId]), workspace.layout.canvasMode)
           }
         }
       }
@@ -840,7 +856,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         layout: {
           ...workspace.layout,
           centerPanelRects,
-          centerGrid: pruneCenterGrid(workspace.layout.centerGrid, removedIds)
+          centerGrid: pruneCenterGrid(workspace.layout.centerGrid, removedIds, workspace.layout.canvasMode)
         }
       }
     }
@@ -884,7 +900,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         layout: {
           ...workspace.layout,
           centerPanelRects,
-          centerGrid: pruneCenterGrid(workspace.layout.centerGrid, removedIds)
+          centerGrid: pruneCenterGrid(workspace.layout.centerGrid, removedIds, workspace.layout.canvasMode)
         }
       }
     }
@@ -936,7 +952,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     if (zone !== 'center') {
       nextLayout = {
         ...nextLayout,
-        centerGrid: pruneCenterGrid(nextLayout.centerGrid, new Set([panelId]))
+        centerGrid: pruneCenterGrid(nextLayout.centerGrid, new Set([panelId]), nextLayout.canvasMode)
       }
     }
     if (zone === 'right' && !hadRight) {
@@ -1288,7 +1304,6 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   setWorkspaceScale: (scale) => {
     const next = clampWorkspaceScale(scale)
     if (next === get().workspaceScale) return
-    persistWorkspaceScale(next)
     set({ workspaceScale: next })
     if (typeof window !== 'undefined') {
       window.requestAnimationFrame(() => {

@@ -21,12 +21,8 @@ const LAUNCHERS: Array<{
   label: string
   hint: string
 }> = [
-  { type: 'terminal', label: 'Terminal', hint: 'Shell' },
-  { type: 'claude', label: 'Claude', hint: 'Code' },
-  { type: 'cursor', label: 'Cursor', hint: 'Agent' },
-  { type: 'gemini', label: 'Gemini', hint: 'CLI' },
-  { type: 'antigravity', label: 'Antigravity', hint: 'CLI' },
-  { type: 'codex', label: 'Codex', hint: 'CLI' }
+  { type: 'claude', label: 'Claude Code', hint: 'Code' },
+  { type: 'terminal', label: 'Terminal', hint: 'Shell' }
 ]
 
 function LaunchRow({

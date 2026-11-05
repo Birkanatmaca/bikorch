@@ -21,6 +21,8 @@ export function isEmptyGridCellId(id: string): boolean {
 
 export function layoutCellCount(mode: WorkspaceCanvasMode): number {
   const parsed = parseCanvasMode(mode)
+  // Free and auto tile have no placeholder cells.
+  if (parsed === 'free' || parsed === 'tiled') return 0
   if (parsed === 'cols-2' || parsed === 'rows-2') return 2
   if (parsed === 'cols-3' || parsed === 'rows-3') return 3
   return 4

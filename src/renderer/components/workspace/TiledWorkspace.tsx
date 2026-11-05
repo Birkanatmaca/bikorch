@@ -35,12 +35,8 @@ const LIVE_PANEL_TYPES: PanelType[] = [
 
 const TILE_DRAG = 'application/x-bikorch-tile'
 
-const EMPTY_CELL_LAUNCHERS: Array<{ type: Extract<PanelType, 'terminal' | 'claude' | 'cursor' | 'gemini' | 'antigravity' | 'codex'>; label: string }> = [
-  { type: 'cursor', label: 'Cursor' },
+const EMPTY_CELL_LAUNCHERS: Array<{ type: Extract<PanelType, 'terminal' | 'claude'>; label: string }> = [
   { type: 'claude', label: 'Claude' },
-  { type: 'codex', label: 'Codex' },
-  { type: 'gemini', label: 'Gemini' },
-  { type: 'antigravity', label: 'Antigravity' },
   { type: 'terminal', label: 'Terminal' }
 ]
 
@@ -48,7 +44,7 @@ function TiledEmptyCell(): React.JSX.Element {
   const addPanel = useWorkspaceStore((state) => state.addPanel)
   return (
     <div className="tiled-empty-cell">
-      <p>Open a CLI</p>
+      <p>Open here</p>
       <div>
         {EMPTY_CELL_LAUNCHERS.map(({ type, label }) => {
           const logo = type === 'terminal' ? null : getCliLogo(type)

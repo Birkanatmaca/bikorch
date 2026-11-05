@@ -135,6 +135,9 @@ function createWindow(): BrowserWindow {
     () => quitRequested
   )
 
+  // Chromium remembers page zoom per origin; Bikorch always opens at 100%.
+  mainWindow.webContents.on('did-finish-load', () => mainWindow.webContents.setZoomFactor(1))
+
   mainWindow.on('ready-to-show', () => {
     // A `--background` launch (login start) initializes services and the
     // tray without flashing the workspace window (spec §5).
