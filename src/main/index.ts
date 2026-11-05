@@ -12,8 +12,6 @@ import { loadResourceProfile } from './resources/settings'
 import { pruneOversizedBrowserCaches } from './resources/disk'
 import { APP_DISPLAY_NAME, applyAppBranding, resolveAppIconPath } from './app-branding'
 import { initDeveloperIntelligence } from './developer-intelligence/service'
-import { initSecretaryService } from './secretary/service'
-import { initSecretaryResultCollector } from './secretary/result-collector'
 import { registerMusicSchemes, registerMusicProtocol } from './music/protocol'
 import { initMusic } from './music/service'
 import { disposeDownloadManager, initDownloadManager } from './music/downloader/service'
@@ -185,8 +183,6 @@ app.whenReady().then(async () => {
     await initPersistenceDatabase()
     loadResourceProfile()
     initDeveloperIntelligence()
-    initSecretaryService()
-    initSecretaryResultCollector()
     initMusic()
     await initDownloadManager()
     try {

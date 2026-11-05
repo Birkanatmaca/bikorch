@@ -75,11 +75,6 @@ export function PrivacySettings(): React.JSX.Element {
             checked={settings.useGitActivity}
             onChange={(value) => void updateSettings({ useGitActivity: value })}
           />
-          <Toggle
-            label="Memory in prompts"
-            checked={settings.includeMemoryInPrompts}
-            onChange={(value) => void updateSettings({ includeMemoryInPrompts: value })}
-          />
         </div>
       </SectionCard>
 

@@ -26,18 +26,15 @@ import {
   looksCliSignedIn,
   mapProcessStatus
 } from '@renderer/lib/cli-activity'
-import { PromptComposer, isLikelyPrompt } from '@renderer/lib/prompt-capture'
-import { acceptsInlineContext, formatMemoryContextInline } from '@renderer/lib/developer-context'
+import { PromptComposer } from '@renderer/lib/prompt-capture'
 import {
   beginAgentSession,
   endAgentSession,
   finalizeAgentSession,
   notePromptInSession,
-  noteSessionContext,
   recordPromptSent,
   resumeAgentSession
 } from '@renderer/lib/developer-events'
-import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import {
   TERMINAL_FIT_SETTLE_MS,
   measureTerminalGrid,
@@ -495,46 +492,6 @@ export function TerminalView({
     inputQueue = new TerminalInputQueue(
       async (data) => {
         if (!active || !ptyReadyRef.current) return
-        if (cli && composer && isPromptSubmit(data)) {
-          const peek = composer.peek().trim()
-          const isEnterOnly = data === '\r' || data === '\n' || data === '\r\n'
-          // Never append context to a slash command (/review …), Claude's !bash or # memory
-          // input: the text would become that command's arguments.
-          if (isEnterOnly && isLikelyPrompt(peek) && acceptsInlineContext(peek)) {
-            const { settings, settingsLoaded } = useDeveloperIntelligenceStore.getState()
-            if (settingsLoaded && settings.includeMemoryInPrompts) {
-              try {
-                let timer: number | null = null
-                const context = await Promise.race([
-                  window.api.developerIntelligence.getContext({
-                    ...(projectIdAtMount ? { projectId: projectIdAtMount } : {}),
-                    query: peek,
-                    limit: 5
-                  }),
-                  new Promise<null>((resolve) => {
-                    timer = window.setTimeout(() => resolve(null), 250)
-                  })
-                ]).finally(() => {
-                  if (timer !== null) window.clearTimeout(timer)
-                })
-                const inline = context ? formatMemoryContextInline(context) : ''
-                if (inline && active && ptyReadyRef.current && context) {
-                  noteSessionContext(
-                    sessionId,
-                    context.memories.map((memory) => ({
-                      category: memory.category,
-                      preview: memory.content.slice(0, 160)
-                    }))
-                  )
-                  await window.api.pty.write({ sessionId, data: inline })
-                }
-              } catch {
-                // Injection is best-effort; never block the prompt.
-              }
-            }
-          }
-        }
-
         if (!active || !ptyReadyRef.current) return
         await window.api.pty.write({ sessionId, data })
         if (!cli) return

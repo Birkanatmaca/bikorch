@@ -7,7 +7,7 @@ import {
   type PromptSource,
   type WorkCategory
 } from '@shared/contracts/developer-intelligence'
-import { AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
+import { ENABLED_AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
 import { useDeveloperIntelligenceStore } from '@renderer/stores/developer-intelligence-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { buttonStyles } from '@renderer/components/ui/Button'
@@ -164,7 +164,7 @@ export function PromptHistory(): React.JSX.Element {
             aria-label="Filter by provider"
           >
             <option value="">All providers</option>
-            {AI_ACCOUNT_KINDS.map((kind) => (
+            {ENABLED_AI_ACCOUNT_KINDS.map((kind) => (
               <option key={kind} value={kind}>{providerLabel(kind)}</option>
             ))}
           </select>

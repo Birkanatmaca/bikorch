@@ -17,8 +17,8 @@ describe('CLI setup state', () => {
   it('keeps unverified CLIs unavailable if detection fails', async () => {
     detect.mockRejectedValue(new Error('IPC unavailable'))
     await useCliStore.getState().refresh()
-    expect(useCliStore.getState().installedByKind.cursor).toBeUndefined()
-    expect(useCliStore.getState().errorsByKind.cursor).toBe('IPC unavailable')
+    expect(useCliStore.getState().installedByKind.claude).toBeUndefined()
+    expect(useCliStore.getState().errorsByKind.claude).toBe('IPC unavailable')
     expect(install).not.toHaveBeenCalled()
   })
 

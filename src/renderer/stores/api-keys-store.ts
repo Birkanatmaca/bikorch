@@ -8,7 +8,6 @@ import {
 } from '@shared/contracts/api-keys'
 import { AI_ACCOUNTS_REFRESH_EVENT } from '@renderer/lib/app-events'
 import { useAiAccountsStore } from './ai-accounts-store'
-import { useSecretaryStore } from './secretary-store'
 
 interface ApiKeysStore {
   keys: ApiKeyRecord[]
@@ -56,7 +55,6 @@ export const useApiKeysStore = create<ApiKeysStore>((set, get) => {
     },
     add: async (request) => {
       const ok = await run(() => window.api.apiKeys.add(request))
-      if (ok && request.useForManager) void useSecretaryStore.getState().load()
       return ok
     },
     remove: async (id) => {
@@ -67,13 +65,11 @@ export const useApiKeysStore = create<ApiKeysStore>((set, get) => {
       for (const account of accounts.accounts.filter((item) => item.apiKeyId === id)) {
         accounts.markAccountLoggedOut(account.id)
       }
-      void useSecretaryStore.getState().load()
       return true
     },
     rename: (id, label) => run(() => window.api.apiKeys.rename(id, label)),
     setManager: async (id) => {
       const ok = await run(() => window.api.apiKeys.setManager(id))
-      if (ok) void useSecretaryStore.getState().load()
       return ok
     },
     test: async (id) => {

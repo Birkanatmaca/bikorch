@@ -8,6 +8,9 @@ export const AI_ACCOUNT_KINDS: CliUsageKind[] = [
   'codex'
 ]
 
+/** The CLIs Bikorch offers. Bikorch is Claude-only; the others stay supported underneath. */
+export const ENABLED_AI_ACCOUNT_KINDS: CliUsageKind[] = ['claude']
+
 export const AI_ACCOUNT_LABELS: Record<CliUsageKind, string> = {
   claude: 'Claude Code',
   cursor: 'Cursor CLI',

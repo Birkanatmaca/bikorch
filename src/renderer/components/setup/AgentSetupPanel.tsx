@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, ChevronDown, Download, LoaderCircle, LogIn, RefreshCw, Trash2, X } from 'lucide-react'
-import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
+import { ENABLED_AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
 import type { SystemAuthDiscovery } from '@shared/contracts/auth-profiles'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import { useCliStore } from '@renderer/stores/cli-store'
@@ -280,7 +280,7 @@ export function AgentSetupPanel({
 
   const readyCount = useMemo(
     () =>
-      AI_ACCOUNT_KINDS.filter(
+      ENABLED_AI_ACCOUNT_KINDS.filter(
         (kind) => installedByKind[kind] && accounts.some((account) => account.kind === kind && account.profileReady)
       ).length,
     [accounts, installedByKind]
@@ -309,7 +309,7 @@ export function AgentSetupPanel({
         </Button>
       </div>
       <ul className="agent-setup-list">
-        {AI_ACCOUNT_KINDS.map((kind) => (
+        {ENABLED_AI_ACCOUNT_KINDS.map((kind) => (
           <AgentRow
             key={kind}
             kind={kind}

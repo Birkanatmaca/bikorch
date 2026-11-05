@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
+import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS, ENABLED_AI_ACCOUNT_KINDS } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import { isCliInstallationRunning, type CliInstallation, type CliInstallMode } from '@shared/contracts/cli'
 
@@ -89,7 +89,7 @@ export const useCliStore = create<CliStore>((set, get) => ({
     if (!refreshInFlight) {
       refreshInFlight = (async () => {
         await get().syncStatus()
-        await Promise.all(AI_ACCOUNT_KINDS.filter((kind) => kind !== get().installingKind).map((kind) => get().detect(kind)))
+        await Promise.all(ENABLED_AI_ACCOUNT_KINDS.filter((kind) => kind !== get().installingKind).map((kind) => get().detect(kind)))
       })().finally(() => { refreshInFlight = null })
     }
     await refreshInFlight

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import {
   AI_ACCOUNT_KINDS,
+  ENABLED_AI_ACCOUNT_KINDS,
   AI_ACCOUNT_LABELS,
   type AiAccount
 } from '@shared/contracts/accounts'
@@ -49,7 +50,7 @@ function CliKindPicker({
 }): React.JSX.Element {
   return (
     <div className="cli-kind-picker">
-      {AI_ACCOUNT_KINDS.map((kind) => {
+      {ENABLED_AI_ACCOUNT_KINDS.map((kind) => {
         const count = accounts.filter((account) => account.kind === kind).length
         const installed = installedByKind[kind]
         const adding = addingKind === kind
@@ -499,7 +500,7 @@ export function AiAccountsPanel(): React.JSX.Element {
 
   const accountsByKind = useMemo(
     () =>
-      AI_ACCOUNT_KINDS.map((kind) => ({
+      ENABLED_AI_ACCOUNT_KINDS.map((kind) => ({
         kind,
         accounts: accounts.filter((account) => account.kind === kind)
       })).filter((group) => group.accounts.length > 0),

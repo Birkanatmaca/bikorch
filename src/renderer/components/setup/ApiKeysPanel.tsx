@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, KeyRound, LoaderCircle, Plus, Terminal, Trash2, X, XCircle } from 'lucide-react'
 import {
-  API_KEY_PROVIDERS,
   API_KEY_PROVIDER_CLI,
   API_KEY_PROVIDER_LABELS,
-  MANAGER_API_KEY_PROVIDERS,
   looksLikeProviderKey,
   type ApiKeyProvider,
   type ApiKeyRecord
@@ -24,12 +22,11 @@ const KEY_PLACEHOLDER: Record<ApiKeyProvider, string> = {
 
 function AddKeyForm({ onDone }: { onDone: () => void }): React.JSX.Element {
   const add = useApiKeysStore((state) => state.add)
-  const [provider, setProvider] = useState<ApiKeyProvider>('anthropic')
+  // Bikorch is Claude-only, so keys are Anthropic keys.
+  const provider: ApiKeyProvider = 'anthropic'
   const [label, setLabel] = useState('')
   const [secret, setSecret] = useState('')
-  const [useForManager, setUseForManager] = useState(false)
   const [busy, setBusy] = useState(false)
-  const managerAllowed = MANAGER_API_KEY_PROVIDERS.includes(provider)
   const shapeOk = !secret.trim() || looksLikeProviderKey(provider, secret)
 
   const submit = async (event: React.FormEvent): Promise<void> => {
@@ -39,7 +36,7 @@ function AddKeyForm({ onDone }: { onDone: () => void }): React.JSX.Element {
       provider,
       label: label || `${API_KEY_PROVIDER_LABELS[provider]} key`,
       secret,
-      useForManager: managerAllowed && useForManager
+      useForManager: false
     })
     setBusy(false)
     if (ok) {
@@ -51,18 +48,6 @@ function AddKeyForm({ onDone }: { onDone: () => void }): React.JSX.Element {
   return (
     <form className="api-key-form" onSubmit={(event) => void submit(event)}>
       <div className="api-key-form-row">
-        <select
-          value={provider}
-          onChange={(event) => setProvider(event.target.value as ApiKeyProvider)}
-          aria-label="Provider"
-          className="api-key-input"
-        >
-          {API_KEY_PROVIDERS.map((item) => (
-            <option key={item} value={item}>
-              {API_KEY_PROVIDER_LABELS[item]}
-            </option>
-          ))}
-        </select>
         <input
           className="api-key-input flex-1"
           value={label}
@@ -85,16 +70,6 @@ function AddKeyForm({ onDone }: { onDone: () => void }): React.JSX.Element {
       {!shapeOk && (
         <p className="api-key-form-hint is-error">This does not look like a {API_KEY_PROVIDER_LABELS[provider]} key.</p>
       )}
-      <label className={cn('api-key-check', !managerAllowed && 'is-disabled')}>
-        <input
-          type="checkbox"
-          checked={managerAllowed && useForManager}
-          disabled={!managerAllowed}
-          onChange={(event) => setUseForManager(event.target.checked)}
-        />
-        Use for Manager
-        {!managerAllowed && <span className="api-key-form-hint">· the Manager runs on OpenAI</span>}
-      </label>
       <p className="api-key-form-hint">
         Stored encrypted with your system keychain. Bikorch never shows the full key again.
       </p>
@@ -118,7 +93,6 @@ function KeyRow({ record }: { record: ApiKeyRecord }): React.JSX.Element {
   const [confirmRemove, setConfirmRemove] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const usedBy = useMemo(() => accounts.filter((account) => account.apiKeyId === record.id), [accounts, record.id])
-  const managerAllowed = MANAGER_API_KEY_PROVIDERS.includes(record.provider)
   const cli = API_KEY_PROVIDER_CLI[record.provider]
 
   const connect = async (): Promise<void> => {
@@ -163,15 +137,6 @@ function KeyRow({ record }: { record: ApiKeyRecord }): React.JSX.Element {
       </div>
 
       <div className="api-key-uses">
-        <label className={cn('api-key-check', !managerAllowed && 'is-disabled')} title={managerAllowed ? '' : 'The Manager runs on OpenAI'}>
-          <input
-            type="checkbox"
-            checked={record.useForManager}
-            disabled={!managerAllowed}
-            onChange={(event) => void useApiKeysStore.getState().setManager(event.target.checked ? record.id : null)}
-          />
-          Use for Manager
-        </label>
         <Button size="sm" variant="secondary" disabled={connecting} onClick={() => void connect()}>
           {connecting ? <LoaderCircle className="h-3 w-3 animate-spin" aria-hidden /> : <Terminal className="h-3 w-3" aria-hidden />}
           Use with {AI_ACCOUNT_LABELS[cli]}
@@ -188,8 +153,8 @@ function KeyRow({ record }: { record: ApiKeyRecord }): React.JSX.Element {
         <ConfirmDialog
           title={`Remove ${record.label}?`}
           message={
-            usedBy.length || record.useForManager
-              ? `It is in use${record.useForManager ? ' by the Manager' : ''}${usedBy.length ? `${record.useForManager ? ' and' : ''} by ${usedBy.length} CLI account(s)` : ''}. They stop working until you add a key again. The key itself is not revoked at the provider.`
+            usedBy.length
+              ? `It is in use by ${usedBy.length} Claude account(s). They stop working until you add a key again. The key itself is not revoked at the provider.`
               : 'Bikorch forgets this key. It is not revoked at the provider.'
           }
           confirmLabel="Remove"

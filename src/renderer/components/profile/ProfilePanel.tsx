@@ -1,6 +1,5 @@
 import { useEffect } from 'react'
 import {
-  Bot,
   Gauge,
   History,
   LayoutDashboard,
@@ -24,7 +23,6 @@ import { PromptHistory } from './PromptHistory'
 import { SessionTimeline } from './SessionTimeline'
 import { PrivacySettings } from './PrivacySettings'
 import { RuntimePanel } from './RuntimePanel'
-import { SecretarySettings } from './SecretarySettings'
 import { SectionCard } from './ProfilePrimitives'
 
 const PROFILE_SECTIONS: Array<{ id: ProfileSection; label: string; icon: LucideIcon }> = [
@@ -36,7 +34,6 @@ const PROFILE_SECTIONS: Array<{ id: ProfileSection; label: string; icon: LucideI
 
 const SETTINGS_SECTIONS: Array<{ id: ProfileSection; label: string; icon: LucideIcon }> = [
   { id: 'general', label: 'General', icon: Settings },
-  { id: 'secretary', label: 'Manager', icon: Bot },
   { id: 'cli-accounts', label: 'CLI Accounts', icon: Terminal },
   { id: 'privacy', label: 'Privacy', icon: ShieldCheck },
   { id: 'runtime', label: 'Runtime', icon: Gauge }
@@ -147,7 +144,6 @@ export function ProfilePanel({ visible = true }: ProfilePanelProps): React.JSX.E
         {section === 'prompts' && <PromptHistory />}
         {section === 'sessions' && <SessionTimeline />}
         {section === 'general' && <GeneralSettings />}
-        {section === 'secretary' && <SecretarySettings />}
         {section === 'cli-accounts' && <CliAccountsSettings />}
         {section === 'privacy' && <PrivacySettings />}
         {section === 'runtime' && <RuntimePanel />}
@@ -158,7 +154,7 @@ export function ProfilePanel({ visible = true }: ProfilePanelProps): React.JSX.E
 
 function GeneralSettings(): React.JSX.Element {
   return (
-    <SectionCard title="General" description="One Manager for the workspace. Choose how it thinks in Manager settings.">
+    <SectionCard title="General" description="Bikorch runs Claude Code in your workspaces.">
       <p className="secretary-cost-note">The interface stays in English. Dates follow this computer.</p>
     </SectionCard>
   )
@@ -170,7 +166,7 @@ function CliAccountsSettings(): React.JSX.Element {
   return (
     <SectionCard
       title="CLI accounts"
-      description="Coding agents use these profiles. A Manager CLI session, when it is available, stays separate from those coding sessions."
+      description="Claude Code sessions sign in with these profiles."
     >
       <button
         type="button"

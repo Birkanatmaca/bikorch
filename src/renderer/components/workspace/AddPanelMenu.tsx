@@ -32,7 +32,7 @@ const PANEL_MENU_LABELS: Partial<Record<PanelType, string>> = {
 }
 
 const PANEL_GROUPS: Array<{ label: string; types: PanelType[] }> = [
-  { label: 'Agents & terminal', types: ['terminal', 'claude', 'cursor', 'gemini', 'antigravity', 'codex', 'chatgpt', 'claude-chat'] },
+  { label: 'Agents & terminal', types: ['terminal', 'claude', 'claude-chat'] },
   { label: 'Workspace', types: ['file-explorer', 'git-changes', 'diff', 'logs', 'browser', 'ios-preview', 'android-preview'] },
   { label: 'Tools', types: ['player', 'timer'] }
 ]
