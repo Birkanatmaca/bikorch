@@ -123,6 +123,11 @@ function TodayWidget({ activity, git }: { activity: ClaudeActivity | null; git: 
   )
 }
 
+/** Below this, a 12×12 canvas gets too cramped to read; widgets stack and scroll. */
+const CANVAS_MIN = { width: 980, height: 560 }
+
+type Layout = 'canvas' | 'stack'
+
 type Gesture = { id: HomeWidgetId; kind: 'move' | 'resize'; startX: number; startY: number; origin: HomeWidgetRect }
 
 /**
@@ -134,6 +139,21 @@ export function HomeDashboard(): React.JSX.Element {
   const [gesture, setGesture] = useState<Gesture | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const canvasRef = useRef<HTMLDivElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [mode, setMode] = useState<Layout>('canvas')
+
+  useEffect(() => {
+    const node = rootRef.current
+    if (!node) return
+    const measure = (): void => {
+      const { width, height } = node.getBoundingClientRect()
+      setMode(width >= CANVAS_MIN.width && height >= CANVAS_MIN.height ? 'canvas' : 'stack')
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
   const activity = useClaudeActivity()
   const git = useGitActivity()
 
@@ -203,50 +223,59 @@ export function HomeDashboard(): React.JSX.Element {
     }
   }
 
-  return (
-    <div className={cn('home-dashboard', gesture && 'is-arranging')}>
-      <div className="home-aurora" aria-hidden />
-      <div ref={canvasRef} className="home-canvas">
-        {gesture && <div className="home-canvas-grid" aria-hidden />}
-        {layout.map((rect) => {
-          const Icon = WIDGET_ICON[rect.id]
-          const active = gesture?.id === rect.id
-          return (
-            <article
-              key={rect.id}
-              className={cn('home-widget', WIDGET_TONE[rect.id], active && 'is-active', `w-${rect.w}`, `h-${rect.h}`)}
-              style={{
-                left: `${(rect.x / HOME_GRID.columns) * 100}%`,
-                top: `${(rect.y / HOME_GRID.rows) * 100}%`,
-                width: `${(rect.w / HOME_GRID.columns) * 100}%`,
-                height: `${(rect.h / HOME_GRID.rows) * 100}%`
-              }}
+  const renderCard = (rect: HomeWidgetRect, onCanvas: boolean): React.JSX.Element => {
+    const Icon = WIDGET_ICON[rect.id]
+    const active = gesture?.id === rect.id
+    return (
+      <article
+        key={rect.id}
+        className={cn('home-widget', WIDGET_TONE[rect.id], active && 'is-active', onCanvas ? 'is-placed' : `is-stacked stack-${rect.id}`)}
+        style={onCanvas ? {
+          left: `${(rect.x / HOME_GRID.columns) * 100}%`,
+          top: `${(rect.y / HOME_GRID.rows) * 100}%`,
+          width: `${(rect.w / HOME_GRID.columns) * 100}%`,
+          height: `${(rect.h / HOME_GRID.rows) * 100}%`
+        } : undefined}
+      >
+        <div className="home-widget-card">
+          <header
+            className="home-widget-head"
+            onPointerDown={onCanvas ? (event) => begin(event, rect.id, 'move') : undefined}
+            title={onCanvas ? 'Drag to move' : undefined}
+          >
+            <span className="home-widget-icon"><Icon className="h-3.5 w-3.5" aria-hidden /></span>
+            <h2 title={HOME_WIDGET_COPY[rect.id].description}>{HOME_WIDGET_COPY[rect.id].title}</h2>
+            <button
+              type="button"
+              className="home-icon-button home-widget-hide"
+              aria-label={`Hide ${HOME_WIDGET_COPY[rect.id].title}`}
+              title="Hide"
+              onClick={() => setLayout(layout.filter((item) => item.id !== rect.id))}
             >
-              <div className="home-widget-card">
-                <header className="home-widget-head" onPointerDown={(event) => begin(event, rect.id, 'move')} title="Drag to move">
-                  <span className="home-widget-icon"><Icon className="h-3.5 w-3.5" aria-hidden /></span>
-                  <h2 title={HOME_WIDGET_COPY[rect.id].description}>{HOME_WIDGET_COPY[rect.id].title}</h2>
-                  <button
-                    type="button"
-                    className="home-icon-button home-widget-hide"
-                    aria-label={`Hide ${HOME_WIDGET_COPY[rect.id].title}`}
-                    title="Hide"
-                    onClick={() => setLayout(layout.filter((item) => item.id !== rect.id))}
-                  >
-                    <X className="h-3.5 w-3.5" aria-hidden />
-                  </button>
-                </header>
-                <div className="home-widget-body">{renderWidget(rect.id)}</div>
-                <span
-                  className="home-resize"
-                  onPointerDown={(event) => begin(event, rect.id, 'resize')}
-                  title="Drag to resize"
-                  aria-hidden
-                />
-              </div>
-            </article>
-          )
-        })}
+              <X className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          </header>
+          <div className="home-widget-body">{renderWidget(rect.id)}</div>
+          {onCanvas && (
+            <span className="home-resize" onPointerDown={(event) => begin(event, rect.id, 'resize')} title="Drag to resize" aria-hidden />
+          )}
+        </div>
+      </article>
+    )
+  }
+
+  // Stacked order follows the canvas: top to bottom, then left to right.
+  const stacked = [...layout].sort((a, b) => a.y - b.y || a.x - b.x)
+
+  return (
+    <div ref={rootRef} className={cn('home-dashboard', gesture && 'is-arranging', `is-${mode}`)}>
+      <div className="home-aurora" aria-hidden />
+      {mode === 'stack' && (
+        <div className="home-stack">{stacked.map((rect) => renderCard(rect, false))}</div>
+      )}
+      <div ref={canvasRef} className="home-canvas" hidden={mode !== 'canvas'}>
+        {gesture && <div className="home-canvas-grid" aria-hidden />}
+        {mode === 'canvas' && layout.map((rect) => renderCard(rect, true))}
         {layout.length === 0 && <p className="home-empty home-canvas-empty">Every widget is hidden. Add them back with the + button.</p>}
       </div>
 

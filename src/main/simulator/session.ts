@@ -2,7 +2,10 @@ import type { WebContents } from 'electron'
 import { parseKey, parsePointer, SIMULATOR_IPC, type SimulatorFeed, type SimulatorStatus } from '@shared/contracts/simulator'
 import { sendSimulatorInput, startInputBridge, startWindowStream, stopInputBridge, type StreamEvent } from './bridge'
 import { SimulatorUnavailable } from './devices'
-import { bootSimulator, captureSimulatorScreen, ensureIphone, openSimulatorApp, resolveSimctl } from './simctl'
+import { bootSimulator, captureSimulatorScreen, ensureIphone, openSimulatorApp, resolveSimctl, shutdownSimulator } from './simctl'
+
+/** How long a simulator Bikorch booted stays up after its panel closes. */
+const SHUTDOWN_GRACE_MS = 2 * 60_000
 
 interface ActiveDevice {
   udid: string
@@ -15,6 +18,9 @@ class SimulatorSession {
   private running = false
   /** True while ScreenCaptureKit streams the window; screenshots are only a fallback. */
   private streaming = false
+  /** A device Bikorch booted itself; it is shut down again when nobody watches it. */
+  private bootedByUs: { simctl: string; udid: string } | null = null
+  private shutdownTimer: ReturnType<typeof setTimeout> | null = null
   private sender: WebContents | null = null
   private device: ActiveDevice | null = null
   private simctl: string | null = null
@@ -28,6 +34,10 @@ class SimulatorSession {
   attach(sender: WebContents): SimulatorStatus {
     this.sender = sender
     this.refs += 1
+    if (this.shutdownTimer) {
+      clearTimeout(this.shutdownTimer)
+      this.shutdownTimer = null
+    }
     if (!this.running) {
       this.running = true
       void this.start()
@@ -50,6 +60,28 @@ class SimulatorSession {
     this.inputReady = null
     this.streaming = false
     stopInputBridge()
+    this.scheduleShutdown()
+  }
+
+  /** Simulators the user booted themselves are left running. */
+  private scheduleShutdown(): void {
+    const booted = this.bootedByUs
+    if (!booted || this.shutdownTimer) return
+    this.shutdownTimer = setTimeout(() => {
+      this.shutdownTimer = null
+      if (this.refs > 0 || this.bootedByUs !== booted) return
+      this.bootedByUs = null
+      void shutdownSimulator(booted.simctl, booted.udid)
+    }, SHUTDOWN_GRACE_MS)
+  }
+
+  /** App quit: shut down at once what Bikorch started. */
+  shutdownNow(): void {
+    if (this.shutdownTimer) clearTimeout(this.shutdownTimer)
+    this.shutdownTimer = null
+    const booted = this.bootedByUs
+    this.bootedByUs = null
+    if (booted) void shutdownSimulator(booted.simctl, booted.udid)
   }
 
   pointer(raw: unknown): void {
@@ -78,7 +110,7 @@ class SimulatorSession {
       if (this.stale(epoch)) return
       this.device = { udid: device.udid, name: device.name }
       this.publish({ phase: 'starting', message: `Starting ${device.name}…`, deviceName: device.name })
-      await bootSimulator(simctl, device.udid)
+      if (await bootSimulator(simctl, device.udid)) this.bootedByUs = { simctl, udid: device.udid }
       if (this.stale(epoch)) return
       await openSimulatorApp(device.udid)
       if (this.stale(epoch)) return
@@ -181,6 +213,7 @@ export const simulatorSession = new SimulatorSession()
 
 export function stopSimulatorSession(): void {
   simulatorSession.stop()
+  simulatorSession.shutdownNow()
 }
 
 function delay(ms: number): Promise<void> {

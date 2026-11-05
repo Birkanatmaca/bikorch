@@ -88,11 +88,12 @@ export async function ensureIphone(simctl: string): Promise<{ udid: string; name
   return { udid, name: BIKORCH_IPHONE_NAME, state: 'Shutdown' }
 }
 
-export async function bootSimulator(simctl: string, udid: string): Promise<void> {
+/** Boots the device; true when this call started it, false when it was already running. */
+export async function bootSimulator(simctl: string, udid: string): Promise<boolean> {
   const result = await run(simctl, ['boot', udid], 180_000)
-  if (result.code === 0) return
+  if (result.code === 0) return true
   const detail = `${result.stderr}\n${result.stdout}`
-  if (/current state: Booted/i.test(detail)) return
+  if (/current state: Booted/i.test(detail)) return false
   throw new SimulatorUnavailable(result.stderr.trim() || 'Could not boot the iOS Simulator')
 }
 
@@ -121,4 +122,9 @@ export async function captureSimulatorScreen(simctl: string, udid: string): Prom
   } catch {
     return null
   }
+}
+
+/** Shuts the device down. A booted iOS simulator runs hundreds of processes. */
+export async function shutdownSimulator(simctl: string, udid: string): Promise<void> {
+  await run(simctl, ['shutdown', udid], 60_000).catch(() => undefined)
 }

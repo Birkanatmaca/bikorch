@@ -370,7 +370,6 @@ export function TokensWidget({ activity }: { activity: ClaudeActivity | null }):
       <StackedBars
         data={data}
         series={[{ name: 'Output', className: 'series-a' }, { name: 'Input', className: 'series-b' }]}
-        height={130}
       />
       <div className="home-tokens-foot">
         <span>Today: <b>{today?.prompts ?? 0}</b> prompts · <b>{compactNumber(today?.outputTokens ?? 0)}</b> output tokens</span>

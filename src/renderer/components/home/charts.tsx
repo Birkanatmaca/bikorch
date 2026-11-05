@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@renderer/lib/utils'
 
 export function compactNumber(value: number): string {
@@ -35,25 +35,27 @@ export function Ring({
   tone?: 'violet' | 'teal' | 'amber' | 'rose' | 'sky'
 }): React.JSX.Element {
   const clamped = Math.max(0, Math.min(100, value))
-  const stroke = 7
-  const radius = (size - stroke) / 2
+  // Drawn on a fixed 100-unit box; CSS sizes the ring to its widget.
+  const box = 100
+  const stroke = 8
+  const radius = (box - stroke) / 2
   const circumference = 2 * Math.PI * radius
   const hot = clamped >= 90 ? 'rose' : clamped >= 75 ? 'amber' : tone
   return (
-    <div className={cn('home-ring', `tone-${hot}`)} style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
-        <circle className="home-ring-track" cx={size / 2} cy={size / 2} r={radius} strokeWidth={stroke} fill="none" />
+    <div className={cn('home-ring', `tone-${hot}`)} style={{ ['--ring-size' as string]: `${size}px` }}>
+      <svg width="100%" height="100%" viewBox={`0 0 ${box} ${box}`} aria-hidden>
+        <circle className="home-ring-track" cx={box / 2} cy={box / 2} r={radius} strokeWidth={stroke} fill="none" />
         <circle
           className="home-ring-value"
-          cx={size / 2}
-          cy={size / 2}
+          cx={box / 2}
+          cy={box / 2}
           r={radius}
           strokeWidth={stroke}
           fill="none"
           strokeLinecap="round"
           strokeDasharray={circumference}
           strokeDashoffset={circumference * (1 - clamped / 100)}
-          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          transform={`rotate(-90 ${box / 2} ${box / 2})`}
         />
       </svg>
       <span className="home-ring-text">
@@ -73,18 +75,16 @@ export interface BarDatum {
 /** Stacked daily bars with a hover readout. */
 export function StackedBars({
   data,
-  series,
-  height = 120
+  series
 }: {
   data: BarDatum[]
   series: Array<{ name: string; className: string }>
-  height?: number
 }): React.JSX.Element {
   const [hover, setHover] = useState<number | null>(null)
   const max = Math.max(1, ...data.map((item) => item.values.reduce((a, b) => a + b, 0)))
   const active = hover !== null ? data[hover] : null
   return (
-    <div className="home-bars" style={{ height }} onMouseLeave={() => setHover(null)}>
+    <div className="home-bars" onMouseLeave={() => setHover(null)}>
       <div className="home-bars-plot">
         {data.map((item, index) => {
           const total = item.values.reduce((a, b) => a + b, 0)
@@ -128,9 +128,32 @@ export function StackedBars({
 }
 
 /** GitHub-style contribution map for the last 53 weeks, Monday first. */
+/** Weeks that fit `width` with cells no smaller than `minCell` px. */
+export function weeksThatFit(width: number, minCell = 9, gap = 3): number {
+  return Math.max(8, Math.min(53, Math.floor((width + gap) / (minCell + gap))))
+}
+
 export function ContributionMap({ days, unit = 'commit' }: { days: Record<string, number>; unit?: string }): React.JSX.Element {
   const [hover, setHover] = useState<{ date: string; count: number } | null>(null)
-  const weeks = useMemo(() => {
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [fit, setFit] = useState({ weeks: 53, cell: 12 })
+  // Narrow widgets show the most recent weeks instead of shrinking cells to dots;
+  // short widgets size cells by height so the map never overflows.
+  useEffect(() => {
+    const node = rootRef.current
+    if (!node) return
+    const measure = (): void => {
+      const { width, height } = node.getBoundingClientRect()
+      const byHeight = Math.max(6, Math.floor((height - 40 - 6 * 3) / 7))
+      const cell = Math.min(16, byHeight)
+      setFit({ weeks: weeksThatFit(width, Math.min(cell, 12)), cell })
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+  const allWeeks = useMemo(() => {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     const start = new Date(today)
@@ -147,6 +170,7 @@ export function ContributionMap({ days, unit = 'commit' }: { days: Record<string
     }
     return columns
   }, [days])
+  const weeks = allWeeks.slice(-fit.weeks)
   const max = Math.max(1, ...Object.values(days))
   const level = (count: number): number => (count === 0 ? 0 : Math.min(4, Math.ceil((count / max) * 4)))
   const months = weeks.map((week, index) => {
@@ -155,11 +179,11 @@ export function ContributionMap({ days, unit = 'commit' }: { days: Record<string
     return !previous || previous.getMonth() !== first.getMonth() ? first.toLocaleString(undefined, { month: 'short' }) : ''
   })
   return (
-    <div className="home-map" onMouseLeave={() => setHover(null)}>
-      <div className="home-map-months" style={{ gridTemplateColumns: `repeat(${weeks.length}, 1fr)` }}>
+    <div ref={rootRef} className="home-map" style={{ ['--cell' as string]: `${fit.cell}px` }} onMouseLeave={() => setHover(null)}>
+      <div className="home-map-months" style={{ gridTemplateColumns: `repeat(${weeks.length}, minmax(0, var(--cell)))` }}>
         {months.map((month, index) => <span key={index}>{month}</span>)}
       </div>
-      <div className="home-map-grid" style={{ gridTemplateColumns: `repeat(${weeks.length}, 1fr)` }}>
+      <div className="home-map-grid" style={{ gridTemplateColumns: `repeat(${weeks.length}, minmax(0, var(--cell)))` }}>
         {weeks.map((week, column) => (
           <div key={column} className="home-map-week">
             {week.map((day) => (

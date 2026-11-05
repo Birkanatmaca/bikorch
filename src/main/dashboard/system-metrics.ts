@@ -10,6 +10,10 @@ import type { SystemMetrics, SystemProcess } from '@shared/contracts/dashboard'
  */
 
 let lastTimes: { idle: number; total: number } | null = null
+// Under heavy load vm_stat or ps can time out; reuse the last good reading
+// instead of a misleading fallback (os.freemem counts only free pages on macOS).
+let lastMemoryUsed: number | null = null
+let lastProcesses: SystemProcess[] = []
 
 function run(command: string, args: string[]): Promise<string> {
   return new Promise((resolve) => {
@@ -76,17 +80,21 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
     statfs(homedir()).catch(() => null)
   ])
   const swapMatch = /used\s*=\s*([\d.]+)M/.exec(swap)
+  const memoryUsed = mac ? parseVmStat(vm, total) ?? lastMemoryUsed : total - freemem()
+  if (memoryUsed !== null) lastMemoryUsed = memoryUsed
+  const processes = parseTopProcesses(ps, 15)
+  if (processes.length > 0) lastProcesses = processes
   const battery = /(\d+)%;\s*(charging|discharging|charged|finishing charge|AC attached)/i.exec(batt)
   return {
     collectedAt: Date.now(),
     cpuPercent: cpuPercent(),
     cpus: cpus().length,
     load1: loadavg()[0],
-    memory: { totalBytes: total, usedBytes: (mac ? parseVmStat(vm, total) : null) ?? total - freemem() },
+    memory: { totalBytes: total, usedBytes: memoryUsed ?? total - freemem() },
     swapUsedBytes: swapMatch ? Math.round(Number(swapMatch[1]) * 1024 * 1024) : null,
     disk: disk ? { totalBytes: disk.blocks * disk.bsize, freeBytes: disk.bavail * disk.bsize } : null,
     thermal: thermalState(),
     battery: battery ? { percent: Number(battery[1]), charging: !/discharging/i.test(battery[2]) } : null,
-    topProcesses: parseTopProcesses(ps, 15)
+    topProcesses: lastProcesses
   }
 }
