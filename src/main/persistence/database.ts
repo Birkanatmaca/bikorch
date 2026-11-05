@@ -52,6 +52,7 @@ import {
   type ActiveAccountByKind
 } from '@shared/contracts/accounts'
 import { parseTaskStatus, type ProjectTask, type TaskPriority } from '@shared/contracts/tasks'
+import { parseRemoteServers, parseSshTarget, type RemoteServer } from '@shared/contracts/servers'
 import { initMusicSchema } from '../music/store'
 import { initDownloadSchema } from '../music/downloader/job-store'
 import { initAutomationSchema } from '../automation/store'
@@ -408,6 +409,7 @@ function parsePanels(raw: unknown): PanelDefinition[] {
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue
     const panel = item as PanelDefinition
+    const remote = parseSshTarget(panel.remote)
     if (
       typeof panel.id === 'string' &&
       typeof panel.title === 'string' &&
@@ -444,7 +446,11 @@ function parsePanels(raw: unknown): PanelDefinition[] {
         panel.agentRunId.length >= 8 &&
         panel.agentRunId.length <= 80
           ? { agentRunId: panel.agentRunId }
-          : {})
+          : {}),
+        ...(typeof panel.serverId === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(panel.serverId)
+          ? { serverId: panel.serverId }
+          : {}),
+        ...(remote ? { remote } : {})
       })
     }
   }
@@ -863,7 +869,18 @@ export function createDefaultSnapshot(): PersistedSnapshot {
     suppressedSystemAuthKinds: [],
     tasksByProject: {},
     usage: createEmptyUsageSnapshot(),
-    subscriptions: []
+    subscriptions: [],
+    servers: []
+  }
+}
+
+function readRemoteServers(database: Database): RemoteServer[] {
+  const result = database.exec("SELECT value FROM meta WHERE key = 'remote_servers'")
+  if (result.length === 0 || result[0]?.values.length === 0) return []
+  try {
+    return parseRemoteServers(JSON.parse(result[0].values[0][0] as string))
+  } catch {
+    return []
   }
 }
 
@@ -874,8 +891,10 @@ export function loadSnapshot(): PersistedSnapshot {
     'SELECT id, name, folder_path, sort_order FROM projects ORDER BY sort_order ASC'
   )
 
+  const servers = readRemoteServers(database)
+
   if (projectResult.length === 0 || projectResult[0]?.values.length === 0) {
-    const defaultSnapshot = createDefaultSnapshot()
+    const defaultSnapshot = { ...createDefaultSnapshot(), servers }
     saveSnapshot(defaultSnapshot)
     return defaultSnapshot
   }
@@ -1032,7 +1051,8 @@ export function loadSnapshot(): PersistedSnapshot {
     suppressedSystemAuthKinds,
     tasksByProject,
     usage,
-    subscriptions
+    subscriptions,
+    servers
   }
 }
 
@@ -1064,6 +1084,10 @@ export function saveSnapshot(snapshot: PersistedSnapshot): void {
     database.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [
       'subscriptions',
       JSON.stringify(snapshot.subscriptions ?? [])
+    ])
+    database.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [
+      'remote_servers',
+      JSON.stringify(snapshot.servers ?? [])
     ])
     database.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [
       'active_project_id',

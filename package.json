@@ -48,6 +48,10 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "src/main/simulator/bridge.swift",
+        "to": "simulator/bridge.swift"
       }
     ],
     "mac": {

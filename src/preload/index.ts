@@ -178,6 +178,13 @@ import {
   type ResourceProfile
 } from '@shared/contracts/resources'
 import { STORAGE_IPC, type StorageCleanResult, type StorageReport } from '@shared/contracts/storage'
+import {
+  SIMULATOR_IPC,
+  type SimulatorClientEvent,
+  type SimulatorKey,
+  type SimulatorPointer,
+  type SimulatorStatus
+} from '@shared/contracts/simulator'
 
 export interface MusicApi {
   library: {
@@ -468,6 +475,14 @@ export interface StorageApi {
   reveal: (id: string) => Promise<void>
 }
 
+export interface SimulatorApi {
+  attach: () => Promise<SimulatorStatus>
+  detach: () => Promise<void>
+  pointer: (event: SimulatorPointer) => Promise<void>
+  key: (event: SimulatorKey) => Promise<void>
+  onEvent: (callback: (event: SimulatorClientEvent) => void) => () => void
+}
+
 export interface AppApi {
   platform: NodeJS.Platform
   selectFolder: () => Promise<string | null>
@@ -488,6 +503,7 @@ export interface AppApi {
   notifications: NotificationsApi
   resources: ResourcesApi
   storage: StorageApi
+  simulator: SimulatorApi
 }
 
 const ptyApi: PtyApi = {
@@ -834,6 +850,22 @@ const storageApi: StorageApi = {
   reveal: (id) => ipcRenderer.invoke(STORAGE_IPC.REVEAL, id)
 }
 
+const simulatorApi: SimulatorApi = {
+  attach: () => ipcRenderer.invoke(SIMULATOR_IPC.ATTACH),
+  detach: () => ipcRenderer.invoke(SIMULATOR_IPC.DETACH),
+  pointer: (event) => ipcRenderer.invoke(SIMULATOR_IPC.POINTER, event),
+  key: (event) => ipcRenderer.invoke(SIMULATOR_IPC.KEY, event),
+  onEvent: (callback) => {
+    const listener = (_event: IpcRendererEvent, payload: SimulatorClientEvent): void => {
+      callback(payload)
+    }
+    ipcRenderer.on(SIMULATOR_IPC.EVENT, listener)
+    return () => {
+      ipcRenderer.removeListener(SIMULATOR_IPC.EVENT, listener)
+    }
+  }
+}
+
 const api: AppApi = {
   platform: process.platform,
   selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),
@@ -853,7 +885,8 @@ const api: AppApi = {
   secretary: secretaryApi,
   notifications: notificationsApi,
   resources: resourcesApi,
-  storage: storageApi
+  storage: storageApi,
+  simulator: simulatorApi
 }
 
 contextBridge.exposeInMainWorld('api', api)

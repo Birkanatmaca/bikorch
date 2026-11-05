@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Bell, CheckCircle2, ClipboardList, MessageCircleQuestion, X } from 'lucide-react'
 import { useNotificationStore, type AppNotice, type AppNoticeKind } from '@renderer/stores/notification-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
-import { focusWorkspacePanel, OPEN_MANAGER_EVENT } from '@renderer/lib/app-events'
+import { focusWorkspacePanel } from '@renderer/lib/app-events'
 import { cn } from '@renderer/lib/utils'
 
 const KIND_LABEL: Record<AppNoticeKind, string> = {
@@ -45,7 +45,8 @@ function useNoticeActions(): {
   return {
     openManager: (notice) => {
       go(notice)
-      window.setTimeout(() => window.dispatchEvent(new Event(OPEN_MANAGER_EVENT)), 60)
+      const panelId = notice.panelIds[0]
+      if (panelId) window.setTimeout(() => focusWorkspacePanel(panelId), 60)
     },
     reviewChanges: (notice) => {
       go(notice)

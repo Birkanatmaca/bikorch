@@ -45,6 +45,11 @@ const MobilePreviewPanel = lazy(() =>
     default: m.MobilePreviewPanel
   }))
 )
+const IosSimulatorScreen = lazy(() =>
+  import('@renderer/components/mobile-preview/IosSimulatorScreen').then((m) => ({
+    default: m.IosSimulatorScreen
+  }))
+)
 
 interface PanelContentProps {
   panelId: string
@@ -187,7 +192,7 @@ export function PanelContent({ panelId, type, launchMode, accountId, cliModel }:
     case 'ios-preview':
       return (
         <Suspense fallback={<PanelLoading />}>
-          <MobilePreviewPanel panelId={panelId} deviceId="ios" />
+          <IosSimulatorScreen />
         </Suspense>
       )
     case 'android-preview':

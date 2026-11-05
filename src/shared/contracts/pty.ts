@@ -32,6 +32,12 @@ export interface PtyCreateRequest {
   accountId?: string
   /** Optional model for this CLI session. Currently supported by Cursor. */
   cliModel?: string
+  /** Present for a terminal that signs in to a saved server. */
+  remote?: {
+    user: string
+    host: string
+    port: number
+  }
 }
 
 export type PtyErrorCode = 'CLI_MISSING' | 'ACCOUNT_REQUIRED'

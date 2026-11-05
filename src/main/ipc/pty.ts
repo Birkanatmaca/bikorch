@@ -6,6 +6,7 @@ import {
   type PtyWriteRequest,
   PTY_IPC
 } from '@shared/contracts/pty'
+import { parseSshTarget } from '@shared/contracts/servers'
 import { isValidSessionId } from '../cli/path-validator'
 import { assertTrustedMainWindow } from './trusted-sender'
 import { ptyManager } from '../cli/pty-manager'
@@ -49,6 +50,7 @@ function validateCreateRequest(payload: unknown): payload is PtyCreateRequest {
       (typeof req.accountId === 'string' && req.accountId.length > 0 && req.accountId.length <= 200)) &&
     (req.cliModel === undefined ||
       (req.kind === 'cursor' && /^[a-zA-Z0-9._-]{2,100}$/.test(req.cliModel))) &&
+    (req.remote === undefined || (req.kind === 'terminal' && parseSshTarget(req.remote) !== null)) &&
     (
       req.kind === 'terminal' ||
       req.kind === 'claude' ||

@@ -16,6 +16,7 @@ import { registerResourceHandlers } from './resources'
 import { registerStorageHandlers } from './storage'
 import { registerSecretaryHandlers } from './secretary'
 import { registerApiKeyHandlers } from './api-keys'
+import { registerSimulatorHandlers } from './simulator'
 
 export function registerIpcHandlers(): void {
   registerPtyHandlers()
@@ -35,6 +36,7 @@ export function registerIpcHandlers(): void {
   registerStorageHandlers()
   registerSecretaryHandlers()
   registerApiKeyHandlers()
+  registerSimulatorHandlers()
 
   ipcMain.handle('dialog:selectFolder', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)

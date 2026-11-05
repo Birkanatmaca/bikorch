@@ -38,6 +38,14 @@ export interface PanelDefinition {
   panelRole?: 'agent' | 'resolver' | 'secretary'
   cwdOverride?: string
   agentRunId?: string
+  /** Saved server this terminal signs in to. */
+  serverId?: string
+  /** Structured SSH target. The main process builds the command from these fields. */
+  remote?: {
+    user: string
+    host: string
+    port: number
+  }
 }
 
 export type PanelZone = 'left' | 'center' | 'right' | 'bottom'

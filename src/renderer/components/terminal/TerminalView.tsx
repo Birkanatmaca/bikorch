@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import type { AgentWorktreeKind } from '@shared/contracts/git'
 import { AGENT_WORKTREE_KINDS } from '@shared/contracts/git'
 import type { PtyCreateResponse, PtyEvent, PtyKind, PtyLaunchMode } from '@shared/contracts/pty'
+import { sshTargetLabel } from '@shared/contracts/servers'
 import { cleanCliLabel, stripAnsi } from '@shared/terminal-text'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
@@ -702,6 +703,10 @@ export function TerminalView({
       }
       if (!active) return
       const launchGrid = { cols: term.cols, rows: term.rows }
+      const remote = panelAtLaunch?.remote
+      if (!liveSession && remote) {
+        term.writeln(`\x1b[90m[Bikorch] Connecting to ${sshTargetLabel(remote)}…\x1b[0m`)
+      }
       let result: PtyCreateResponse
       try {
         result = await window.api.pty.create({
@@ -714,7 +719,8 @@ export function TerminalView({
           launchMode: nextLaunchMode,
           ...(resumeLogin ? { resumeLogin: true } : {}),
           accountId,
-          ...(cliModel ? { cliModel } : {})
+          ...(cliModel ? { cliModel } : {}),
+          ...(remote ? { remote } : {})
         })
       } catch (error) {
         if (!active) return

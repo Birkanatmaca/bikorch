@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs'
 import { homedir } from 'os'
 import { join, resolve, sep } from 'path'
 import { type PtyKind } from '@shared/contracts/pty'
+import { sshCommandArgs, type SshTarget } from '@shared/contracts/servers'
 import { managedCliPaths } from './managed-paths'
 
 export interface SpawnConfig {
@@ -130,6 +131,18 @@ function findOnDisk(names: string[]): string | null {
   }
 
   return null
+}
+
+export function sshSpawnConfig(target: SshTarget): SpawnConfig | null {
+  const windowsSsh = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'OpenSSH', 'ssh.exe')
+  const command =
+    process.platform === 'win32'
+      ? findOnDisk(['ssh.exe']) ?? (existsSync(windowsSsh) ? windowsSsh : null)
+      : existsSync('/usr/bin/ssh')
+        ? '/usr/bin/ssh'
+        : findOnDisk(['ssh'])
+  if (!command) return null
+  return { command, args: sshCommandArgs(target) }
 }
 
 export function getDefaultShell(): SpawnConfig {

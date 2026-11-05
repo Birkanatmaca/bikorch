@@ -21,7 +21,7 @@ import { useGitStatusBar } from '@renderer/stores/git-store'
 import { selectIsolationState, useIsolationStore } from '@renderer/stores/isolation-store'
 import { WorkspaceCenterEmpty } from '@renderer/components/workspace/WorkspaceCenterEmpty'
 import { OrchestratorZone } from '@renderer/components/workspace/OrchestratorZone'
-import { DeveloperSecretary } from '@renderer/components/workspace/DeveloperSecretary'
+import { ServerDock } from '@renderer/components/layout/ServerDock'
 import { lockTerminalLayout, unlockTerminalLayout } from '@renderer/lib/app-events'
 import { cn } from '@renderer/lib/utils'
 
@@ -586,7 +586,7 @@ export function WorkspaceLayout(): React.JSX.Element {
         )}
         </div>
       </div>
-      {project ? <DeveloperSecretary project={project} panels={panels} /> : null}
+      {project ? <ServerDock /> : null}
     </div>
   )
 }

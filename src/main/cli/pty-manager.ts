@@ -12,7 +12,8 @@ import {
 } from '@shared/contracts/pty'
 import { mkdirSync } from 'fs'
 import { dirname, join } from 'path'
-import { resolveSpawnConfigCandidates, getKindLabel, spawnEnv, terminalUserEnv, cliLaunchArgs, windowsPtySpawnOptions } from './adapters'
+import { resolveSpawnConfigCandidates, getKindLabel, spawnEnv, terminalUserEnv, cliLaunchArgs, windowsPtySpawnOptions, sshSpawnConfig } from './adapters'
+import { parseSshTarget } from '@shared/contracts/servers'
 import { isValidSessionId, resolveSafeCwd, resolveWindowsSpawnPath } from './path-validator'
 import {
   getAuthProfileEnv,
@@ -306,8 +307,27 @@ class PtyManager {
       }
     }
 
-    const candidates = resolveSpawnConfigCandidates(kind)
+    let candidates = resolveSpawnConfigCandidates(kind)
     let lastError: string | null = null
+
+    if (kind === 'terminal' && request.remote) {
+      const target = parseSshTarget(request.remote)
+      const ssh = target ? sshSpawnConfig(target) : null
+      if (!ssh) {
+        const message = target
+          ? 'OpenSSH is not installed on this computer.'
+          : 'This server address is not valid.'
+        this.emit(webContents, {
+          type: 'status',
+          sessionId,
+          status: 'error',
+          error: message,
+          kind
+        })
+        return { sessionId, status: 'error', error: message, kind }
+      }
+      candidates = [ssh]
+    }
 
     if (kind !== 'terminal' && candidates.length === 0) {
       const message = `${getKindLabel(kind)} is not installed on this computer.`

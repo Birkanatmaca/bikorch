@@ -6,6 +6,7 @@ import { useAiAccountsStore } from '@renderer/stores/ai-accounts-store'
 import { useTasksStore } from '@renderer/stores/tasks-store'
 import { useUsageStore } from '@renderer/stores/usage-store'
 import { useSubscriptionStore } from '@renderer/stores/subscription-store'
+import { useServerStore } from '@renderer/stores/server-store'
 import { AI_ACCOUNTS_REFRESH_EVENT } from './app-events'
 import { trackProjectPersistence } from './project-filesystem'
 
@@ -24,6 +25,7 @@ export function buildPersistedSnapshot(): PersistedSnapshot {
   const tasks = useTasksStore.getState().getSnapshot()
   const usage = useUsageStore.getState().getSnapshot()
   const subscriptions = useSubscriptionStore.getState().getSnapshot()
+  const servers = useServerStore.getState().servers
 
   return {
     projects: workspace.projects,
@@ -35,7 +37,8 @@ export function buildPersistedSnapshot(): PersistedSnapshot {
     suppressedSystemAuthKinds: accounts.suppressedSystemAuthKinds,
     tasksByProject: tasks.tasksByProject,
     usage,
-    subscriptions
+    subscriptions,
+    servers
   }
 }
 
@@ -61,6 +64,7 @@ export async function hydrateFromDisk(signal?: AbortSignal): Promise<void> {
     useTasksStore.getState().hydrate({ tasksByProject: snapshot.tasksByProject ?? {} })
     useUsageStore.getState().hydrate(snapshot.usage)
     useSubscriptionStore.getState().hydrate(snapshot.subscriptions)
+    useServerStore.getState().hydrate(snapshot.servers ?? [])
   } finally {
     isHydrating = false
   }
@@ -193,6 +197,11 @@ export function startPersistenceSync(): void {
 
   useSubscriptionStore.subscribe((state, prevState) => {
     if (state.subscriptions === prevState.subscriptions) return
+    scheduleSave()
+  })
+
+  useServerStore.subscribe((state, prevState) => {
+    if (state.servers === prevState.servers) return
     scheduleSave()
   })
 }

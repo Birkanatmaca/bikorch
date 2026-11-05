@@ -28,6 +28,7 @@ import {
 } from './lifecycle/background'
 import { disposeTray, initTray } from './lifecycle/tray'
 import { closeAllNotifications } from './notifications'
+import { stopSimulatorSession } from './simulator/session'
 
 const isDev = !app.isPackaged
 const isBackgroundStart = process.argv.includes('--background')
@@ -243,6 +244,7 @@ app.on('before-quit', () => {
   closeAllNotifications()
   // Keep durable host sessions alive so updates/restarts can reattach.
   ptyManager.releaseForAppQuit()
+  stopSimulatorSession()
 })
 
 app.on('will-quit', () => {

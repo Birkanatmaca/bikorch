@@ -7,7 +7,8 @@ const states = vi.hoisted(() => ({
   accounts: { hydrate: vi.fn(), syncAuthProfiles: vi.fn() },
   tasks: { hydrate: vi.fn() },
   usage: { hydrate: vi.fn() },
-  subscription: { hydrate: vi.fn() }
+  subscription: { hydrate: vi.fn() },
+  servers: { hydrate: vi.fn() }
 }))
 vi.mock('../../stores/workspace-store', () => ({ useWorkspaceStore: { getState: () => states.workspace } }))
 vi.mock('../../stores/editor-store', () => ({ useEditorStore: { getState: () => states.editor } }))
@@ -15,6 +16,7 @@ vi.mock('../../stores/ai-accounts-store', () => ({ useAiAccountsStore: { getStat
 vi.mock('../../stores/tasks-store', () => ({ useTasksStore: { getState: () => states.tasks } }))
 vi.mock('../../stores/usage-store', () => ({ useUsageStore: { getState: () => states.usage } }))
 vi.mock('../../stores/subscription-store', () => ({ useSubscriptionStore: { getState: () => states.subscription } }))
+vi.mock('../../stores/server-store', () => ({ useServerStore: { getState: () => states.servers } }))
 vi.mock('../../stores/git-store', () => ({ useGitStore: {}, selectGitBundle: vi.fn(), selectGitChanges: vi.fn() }))
 import { hydrateFromDisk } from '../persistence-sync'
 
@@ -24,7 +26,7 @@ it('loads the workspace without waiting for account verification and applies pro
   let resolveProfiles!: (profiles: AuthProfileSummary[]) => void
   const waiting = new Promise<AuthProfileSummary[]>((resolve) => { resolveProfiles = resolve })
   const snapshot = { projects: [{ id: 'saved-project' }], activeProjectId: 'saved-project', workspaces: {},
-    editor: {}, accounts: [], activeAccountByKind: {}, usage: {}, subscriptions: [] }
+    editor: {}, accounts: [], activeAccountByKind: {}, usage: {}, subscriptions: [], servers: [] }
   const dispatchEvent = vi.fn()
   vi.stubGlobal('window', { dispatchEvent, api: {
     persistence: { load: vi.fn(async () => snapshot) }, authProfiles: { list: vi.fn(() => waiting) }

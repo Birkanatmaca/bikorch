@@ -1,8 +1,8 @@
-import { Bot, ChevronRight, Command, RefreshCw, Terminal } from 'lucide-react'
+import { ChevronRight, Command, RefreshCw, Server, Terminal } from 'lucide-react'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { getCliLogo } from '@renderer/lib/cli-logos'
 import type { PanelType, PanelZone } from '@shared/types'
-import { ADD_PANEL_MENU_EVENT, COMMAND_PALETTE_EVENT, OPEN_MANAGER_EVENT } from '@renderer/lib/app-events'
+import { ADD_PANEL_MENU_EVENT, COMMAND_PALETTE_EVENT, OPEN_SERVERS_EVENT } from '@renderer/lib/app-events'
 import { ContextMenu } from '@renderer/components/ui/ContextMenu'
 import { useOrchestratorContextMenu } from '@renderer/components/workspace/use-orchestrator-context-menu'
 import { useRef, useState } from 'react'
@@ -141,10 +141,10 @@ export function WorkspaceCenterEmpty(): React.JSX.Element {
         <button
           type="button"
           className="studio-manager-launch"
-          onClick={() => window.dispatchEvent(new Event(OPEN_MANAGER_EVENT))}
+          onClick={() => window.dispatchEvent(new Event(OPEN_SERVERS_EVENT))}
         >
-          <span className="studio-manager-launch-icon"><Bot className="h-4 w-4" aria-hidden /></span>
-          <span><strong>Manager</strong><small>Let Bikorch coordinate your agents for you.</small></span>
+          <span className="studio-manager-launch-icon"><Server className="h-4 w-4" aria-hidden /></span>
+          <span><strong>Servers</strong><small>Sign in to a server and keep working in this workspace.</small></span>
           <ChevronRight className="h-4 w-4" aria-hidden />
         </button>
 

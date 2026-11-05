@@ -3,6 +3,7 @@ import type { Project, ProjectWorkspaceState } from '../types'
 import type { AiAccount, ActiveAccountByKind } from './accounts'
 import type { ProjectTask } from './tasks'
 import type { CliUsageInfo, CliUsageKind, CliUsageStatus } from './usage'
+import type { RemoteServer } from './servers'
 
 export interface UsageSnapshotRecord {
   identityVerified?: boolean
@@ -72,6 +73,7 @@ export interface PersistedSnapshot {
   tasksByProject: Record<string, ProjectTask[]>
   usage: PersistedUsageSnapshot
   subscriptions: SubscriptionRecord[]
+  servers: RemoteServer[]
 }
 
 export const PERSISTENCE_IPC = {

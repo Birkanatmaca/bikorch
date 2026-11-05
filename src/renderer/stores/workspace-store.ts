@@ -45,6 +45,8 @@ import {
 import { AI_ACCOUNT_KINDS, AI_ACCOUNT_LABELS } from '@shared/contracts/accounts'
 import type { CliUsageKind } from '@shared/contracts/usage'
 import type { WorkspaceIsolation } from '@shared/contracts/git'
+import type { RemoteServer } from '@shared/contracts/servers'
+import { focusTerminal } from '@renderer/lib/app-events'
 import { useAiAccountsStore } from './ai-accounts-store'
 import { endAgentSession, finalizeAgentSession, recordDeveloperEvent } from '@renderer/lib/developer-events'
 
@@ -194,8 +196,13 @@ interface WorkspaceStore extends WorkspaceSnapshot {
       cwdOverride?: string
       workspaceIsolation?: WorkspaceIsolation
       cliModel?: string
+      serverId?: string
+      remote?: PanelDefinition['remote']
     }
   ) => string
+  openRemoteServer: (server: RemoteServer) => string
+  syncServerPanels: (server: RemoteServer) => void
+  closeServerPanels: (serverId: string) => void
   openResolverPanel: (kind: PanelType, title: string, cwdOverride: string) => string
   reopenAgentRun: (runId: string, kind: PanelType, title: string) => string
   renamePanel: (panelId: string, title: string) => void
@@ -519,7 +526,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       ...(isolation ? { workspaceIsolation: isolation } : {}),
       ...(options?.panelRole ? { panelRole: options.panelRole } : {}),
       ...(options?.cwdOverride ? { cwdOverride: options.cwdOverride } : {}),
-      ...(options?.id && AGENT_WORKTREE_TYPES.has(type) ? { agentRunId: options.id } : {})
+      ...(options?.id && AGENT_WORKTREE_TYPES.has(type) ? { agentRunId: options.id } : {}),
+      ...(options?.serverId ? { serverId: options.serverId } : {}),
+      ...(options?.remote ? { remote: options.remote } : {})
     }
 
     const panels = [...workspace.panels, newPanel]
@@ -593,6 +602,75 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     })
 
     return newPanel.id
+  },
+
+  openRemoteServer: (server) => {
+    const { activeProjectId, workspaces } = get()
+    if (!activeProjectId) return ''
+    const workspace = workspaces[activeProjectId]
+    if (!workspace) return ''
+    if (get().homeVisible) set({ homeVisible: false })
+    get().syncServerPanels(server)
+
+    const existing = get().workspaces[activeProjectId]?.panels.find((panel) => panel.serverId === server.id)
+    if (existing) {
+      window.dispatchEvent(new CustomEvent('bikorch:focus-panel', { detail: existing.id }))
+      window.setTimeout(() => focusTerminal(existing.id), 60)
+      return existing.id
+    }
+
+    const id = get().addPanel('terminal', 'center', undefined, undefined, undefined, server.name, {
+      id: `srv-${activeProjectId}-${server.id}`.slice(0, 128),
+      workspaceIsolation: 'shared',
+      serverId: server.id,
+      remote: { user: server.user, host: server.host, port: server.port }
+    })
+    if (id) window.setTimeout(() => focusTerminal(id), 60)
+    return id
+  },
+
+  syncServerPanels: (server) => {
+    const remote = { user: server.user, host: server.host, port: server.port }
+    const { workspaces } = get()
+    let changed = false
+    const next = { ...workspaces }
+    for (const [projectId, workspace] of Object.entries(workspaces)) {
+      if (!workspace.panels.some((panel) => panel.serverId === server.id)) continue
+      changed = true
+      next[projectId] = {
+        ...workspace,
+        panels: workspace.panels.map((panel) =>
+          panel.serverId === server.id ? { ...panel, title: server.name, remote } : panel
+        )
+      }
+    }
+    if (changed) set({ workspaces: next })
+  },
+
+  closeServerPanels: (serverId) => {
+    const { workspaces, projects } = get()
+    const next = { ...workspaces }
+    let changed = false
+    for (const [projectId, workspace] of Object.entries(workspaces)) {
+      const removed = workspace.panels.filter((panel) => panel.serverId === serverId)
+      if (removed.length === 0) continue
+      changed = true
+      const projectRoot = projects.find((project) => project.id === projectId)?.folderPath
+      for (const panel of removed) releasePanelIsolation(panel, projectRoot)
+      const removedIds = new Set(removed.map((panel) => panel.id))
+      const centerPanelRects = { ...(workspace.layout.centerPanelRects ?? {}) }
+      for (const id of removedIds) delete centerPanelRects[id]
+      next[projectId] = {
+        ...workspace,
+        panels: workspace.panels.filter((panel) => panel.serverId !== serverId),
+        layout: {
+          ...workspace.layout,
+          centerPanelRects,
+          centerGrid: pruneCenterGrid(workspace.layout.centerGrid, removedIds)
+        }
+      }
+    }
+    if (changed) set({ workspaces: next })
   },
 
   openResolverPanel: (kind, title, cwdOverride) => {
