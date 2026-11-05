@@ -20,6 +20,7 @@ import {
   floatingWidgetLimits,
   placeChatRect,
   DEFAULT_CHAT_RIGHT_SIZE,
+  DEFAULT_DEVICE_RIGHT_SIZE,
   clampWorkspaceScale,
   type LeftSidebarView,
   WIDE_LEFT_SIDEBAR_VIEWS,
@@ -29,6 +30,7 @@ import {
   type TiledSplitSide,
   type WorkspaceCanvasMode,
   parseCanvasMode,
+  isCanvasDevicePanel,
   type WorkspaceGridNode
 } from '@shared/types'
 import {
@@ -283,9 +285,11 @@ function getDefaultZone(type: PanelType): PanelZone {
     case 'timer':
     case 'browser':
     case 'mobile-preview':
+      return 'center'
+    // Devices dock on the right, beside the terminals, like a side panel.
     case 'ios-preview':
     case 'android-preview':
-      return 'center'
+      return 'right'
     case 'chatgpt':
     case 'claude-chat':
       return 'right'
@@ -311,7 +315,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     const moveToTiles = shouldMoveFreeLayoutsToTiles()
     const workspaces = Object.fromEntries(
       Object.entries(snapshot.workspaces).map(([projectId, workspace]) => {
-        const panels = sanitizeWorkspacePanels(workspace.panels)
+        // Devices used to float over the terminals; they now dock on the right.
+        const panels = sanitizeWorkspacePanels(workspace.panels).map((panel) =>
+          isCanvasDevicePanel(panel.type) && panel.zone === 'center' ? { ...panel, zone: 'right' as const } : panel
+        )
         const mode = parseCanvasMode(workspace.layout.canvasMode)
         const savedIds = collectGridIds(workspace.layout.centerGrid)
         const layout = moveToTiles && mode === 'free'
@@ -502,6 +509,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
     if (floatsOnCanvas(type) || isWebChatPanel(type)) {
       const existing = workspace.panels.find((panel) => panel.type === type)
+      if (existing && isCanvasDevicePanel(type) && existing.zone !== 'right') {
+        get().movePanel(existing.id, 'right')
+      }
       if (existing) {
         window.dispatchEvent(new CustomEvent('bikorch:focus-panel', { detail: existing.id }))
         return existing.id
@@ -555,6 +565,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         ...nextLayout,
         rightSize: isWebChatPanel(type)
           ? DEFAULT_CHAT_RIGHT_SIZE
+          : isCanvasDevicePanel(type)
+            ? DEFAULT_DEVICE_RIGHT_SIZE
           : nextLayout.rightSize >= 20
             ? nextLayout.rightSize
             : 36
@@ -961,7 +973,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         ...nextLayout,
         rightSize: isWebChatPanel(current?.type)
           ? DEFAULT_CHAT_RIGHT_SIZE
-          : (nextLayout.rightSize ?? 0) >= 20
+          : isCanvasDevicePanel(current?.type)
+            ? DEFAULT_DEVICE_RIGHT_SIZE
+            : (nextLayout.rightSize ?? 0) >= 20
             ? nextLayout.rightSize
             : 36
       }

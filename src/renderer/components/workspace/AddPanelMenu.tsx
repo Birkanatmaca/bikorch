@@ -150,7 +150,7 @@ export function AddPanelMenu(): React.JSX.Element {
                         .finally(() => { launchInFlight.current = false; setLaunchingKind(null) })
                       return
                     }
-                    addPanel(type, type === 'chatgpt' || type === 'claude-chat' ? 'right' : 'center')
+                    addPanel(type, type === 'chatgpt' || type === 'claude-chat' || type === 'ios-preview' || type === 'android-preview' ? 'right' : 'center')
                     closeMenu()
                   }}
                   className="menu-action flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-text-secondary"

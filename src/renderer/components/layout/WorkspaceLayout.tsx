@@ -8,6 +8,7 @@ import { useRef, useCallback, useState, useEffect } from 'react'
 import {
   type PanelDefinition,
   isMobilePreviewPanel,
+  isCanvasDevicePanel,
   type PanelZone,
   type WorkspaceLayout,
   WIDE_LEFT_SIDEBAR_VIEWS
@@ -170,7 +171,8 @@ function ZonePanels({
     }
     return { onClose: () => onClose(panel.id) }
   }
-  const isDirectDevice = (panel: PanelDefinition): boolean => isMobilePreviewPanel(panel.type)
+  // iOS and Android devices dock with a header like a CLI panel; the web preview stays bare.
+  const isDirectDevice = (panel: PanelDefinition): boolean => isMobilePreviewPanel(panel.type) && !isCanvasDevicePanel(panel.type)
 
   if (panels.length === 1) {
     const panel = panels[0]

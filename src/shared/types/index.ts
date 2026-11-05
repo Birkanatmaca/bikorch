@@ -383,6 +383,8 @@ export const DEFAULT_DEVICE_RECT: OrchestratorRect = {
 }
 
 export const DEFAULT_CHAT_RIGHT_SIZE = 22
+/** Right-dock width for an iOS or Android device, in percent. */
+export const DEFAULT_DEVICE_RIGHT_SIZE = 26
 
 export const DEFAULT_CHAT_RECT: OrchestratorRect = {
   x: 72,
