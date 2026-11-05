@@ -25,7 +25,7 @@ interface LeftSidebarProps {
 const TITLES: Record<LeftSidebarView, string> = {
   files: 'Files',
   changes: 'Agent Work & Changes',
-  accounts: 'CLI accounts',
+  accounts: 'Claude accounts',
   clis: 'CLI setup',
   apiKeys: 'API keys',
   memory: 'Intelligence',

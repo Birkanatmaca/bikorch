@@ -18,6 +18,8 @@ interface SidebarToolsGroupProps {
   onSelectMusic: () => void
   onSelectTimer: () => void
   onSelectSettings: () => void
+  /** Less used views, shown at the top of the expanded group. */
+  extra?: React.ReactNode
 }
 
 export function SidebarToolsGroup({
@@ -26,12 +28,14 @@ export function SidebarToolsGroup({
   onSelectTasks,
   onSelectMusic,
   onSelectTimer,
-  onSelectSettings
+  onSelectSettings,
+  extra
 }: SidebarToolsGroupProps): React.JSX.Element {
   const tasksActive = isOpen && view === 'tasks'
   const musicActive = isOpen && view === 'music'
   const timerActive = isOpen && view === 'timer'
-  const [expanded, setExpanded] = useState(() => ['tasks', 'music', 'timer'].includes(view))
+  const inGroup = ['tasks', 'music', 'timer', 'clis', 'apiKeys', 'memory', 'profile'].includes(view)
+  const [expanded, setExpanded] = useState(() => inGroup)
   const musicPlaying = useMusicStore((state) => state.status === 'playing')
   const timerSession = useTimerStore((state) => state.session)
   const timerNow = useTimerStore((state) => state.nowMs)
@@ -55,15 +59,16 @@ export function SidebarToolsGroup({
       <button
         type="button"
         onClick={() => setExpanded((current) => !current)}
-        className={cn('glass-icon-btn activity-rail-tools h-9 w-9', (expanded || tasksActive || musicActive || timerActive) && 'glass-icon-btn-active')}
-        aria-label="Tools"
-        title="Tools"
+        className={cn('glass-icon-btn activity-rail-tools h-9 w-9', (expanded || (isOpen && inGroup)) && 'glass-icon-btn-active')}
+        aria-label="More tools"
+        title="More: CLI setup, API keys, Intelligence, Profile, Tasks, Music, Timer"
         aria-expanded={expanded}
       >
         <Wrench className="h-4 w-4" />
       </button>
       {expanded && (
         <div className="activity-rail-group activity-rail-tools-group" aria-label="Tools">
+          {extra}
           <button
             type="button"
             onClick={onSelectTasks}

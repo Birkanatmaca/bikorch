@@ -86,55 +86,15 @@ export function SidebarActivityBar({
           type="button"
           onClick={onSelectAccounts}
           aria-pressed={accountsActive}
-          title={accountsActive ? 'Hide CLI accounts' : 'Show CLI accounts'}
+          title={accountsActive ? 'Hide Claude accounts' : 'Claude accounts'}
           aria-label={accountsActive ? 'Hide CLI accounts' : 'Show CLI accounts'}
           className={cn('glass-icon-btn h-9 w-9', accountsActive && 'glass-icon-btn-active')}
         >
           <SquareTerminal className="h-4 w-4" />
         </button>
-        <button
-          type="button"
-          onClick={onSelectClis}
-          aria-pressed={clisActive}
-          title={clisActive ? 'Hide CLI setup' : 'Install, update and remove CLIs'}
-          aria-label={clisActive ? 'Hide CLI setup' : 'Show CLI setup'}
-          className={cn('glass-icon-btn h-9 w-9', clisActive && 'glass-icon-btn-active')}
-        >
-          <PackagePlus className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          onClick={onSelectApiKeys}
-          aria-pressed={apiKeysActive}
-          title={apiKeysActive ? 'Hide API keys' : 'Manage API keys'}
-          aria-label={apiKeysActive ? 'Hide API keys' : 'Show API keys'}
-          className={cn('glass-icon-btn h-9 w-9', apiKeysActive && 'glass-icon-btn-active')}
-        >
-          <KeyRound className="h-4 w-4" />
-        </button>
       </div>
       <span className="activity-rail-divider" aria-hidden="true" />
-      <div className="activity-rail-group" aria-label="Intelligence">
-        <button
-          type="button"
-          onClick={onSelectMemory}
-          aria-pressed={memoryActive}
-          title={memoryActive ? 'Hide Intelligence' : 'Show Intelligence'}
-          aria-label={memoryActive ? 'Hide Intelligence' : 'Show Intelligence'}
-          className={cn('glass-icon-btn h-9 w-9', memoryActive && 'glass-icon-btn-active')}
-        >
-          <Brain className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          onClick={onSelectProfile}
-          aria-pressed={profileActive}
-          title={profileActive ? 'Hide developer profile' : 'Show developer profile'}
-          aria-label={profileActive ? 'Hide developer profile' : 'Show developer profile'}
-          className={cn('glass-icon-btn h-9 w-9', profileActive && 'glass-icon-btn-active')}
-        >
-          <CircleUser className="h-4 w-4" />
-        </button>
+      <div className="activity-rail-group" aria-label="Machine">
         <button
           type="button"
           onClick={onSelectStorage}
@@ -149,6 +109,50 @@ export function SidebarActivityBar({
       <SidebarToolsGroup
         isOpen={isOpen}
         view={view}
+        extra={
+          <>
+            <button
+              type="button"
+              onClick={onSelectClis}
+              aria-pressed={clisActive}
+              title={clisActive ? 'Hide CLI setup' : 'Install, update and remove CLIs'}
+              aria-label={clisActive ? 'Hide CLI setup' : 'Show CLI setup'}
+              className={cn('glass-icon-btn h-9 w-9', clisActive && 'glass-icon-btn-active')}
+            >
+              <PackagePlus className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onSelectApiKeys}
+              aria-pressed={apiKeysActive}
+              title={apiKeysActive ? 'Hide API keys' : 'Manage API keys'}
+              aria-label={apiKeysActive ? 'Hide API keys' : 'Show API keys'}
+              className={cn('glass-icon-btn h-9 w-9', apiKeysActive && 'glass-icon-btn-active')}
+            >
+              <KeyRound className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onSelectMemory}
+              aria-pressed={memoryActive}
+              title={memoryActive ? 'Hide Intelligence' : 'Show Intelligence'}
+              aria-label={memoryActive ? 'Hide Intelligence' : 'Show Intelligence'}
+              className={cn('glass-icon-btn h-9 w-9', memoryActive && 'glass-icon-btn-active')}
+            >
+              <Brain className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onSelectProfile}
+              aria-pressed={profileActive}
+              title={profileActive ? 'Hide developer profile' : 'Show developer profile'}
+              aria-label={profileActive ? 'Hide developer profile' : 'Show developer profile'}
+              className={cn('glass-icon-btn h-9 w-9', profileActive && 'glass-icon-btn-active')}
+            >
+              <CircleUser className="h-4 w-4" />
+            </button>
+          </>
+        }
         onSelectTasks={onSelectTasks}
         onSelectMusic={onSelectMusic}
         onSelectTimer={onSelectTimer}
