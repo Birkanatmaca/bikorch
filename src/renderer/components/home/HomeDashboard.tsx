@@ -5,6 +5,10 @@ import {
   Cpu,
   FolderKanban,
   GitBranch,
+  Lightbulb,
+  ListTodo,
+  MessageSquare,
+  Newspaper,
   Plus,
   RotateCcw,
   Server,
@@ -21,6 +25,7 @@ import {
   clampHomeRect,
   findHomeSpot,
   parseHomeLayout,
+  withSystemCare,
   type ClaudeActivity,
   type GitActivity,
   type HomeWidgetId,
@@ -40,8 +45,13 @@ import {
   useClaudeActivity,
   useGitActivity
 } from './widgets'
+import { NewsWidget, TasksWidget, TipsWidget } from './briefing-widgets'
+import { ChatWidget } from './ChatWidget'
 
-const LAYOUT_KEY = 'bikorch.home.canvas'
+// v3 added Tasks, Dev notes, News and Ask Claude; earlier arrangements started from the new default once.
+// v4 puts System care on Home: a v3 arrangement is kept and System care is placed in a free spot.
+const LAYOUT_KEY = 'bikorch.home.canvas.v4'
+const PREVIOUS_LAYOUT_KEY = 'bikorch.home.canvas.v3'
 
 const WIDGET_ICON: Record<HomeWidgetId, LucideIcon> = {
   today: CalendarDays,
@@ -51,7 +61,11 @@ const WIDGET_ICON: Record<HomeWidgetId, LucideIcon> = {
   servers: Server,
   tokens: Activity,
   git: GitBranch,
-  projects: FolderKanban
+  projects: FolderKanban,
+  tasks: ListTodo,
+  tips: Lightbulb,
+  news: Newspaper,
+  chat: MessageSquare
 }
 
 const WIDGET_TONE: Record<HomeWidgetId, string> = {
@@ -62,7 +76,11 @@ const WIDGET_TONE: Record<HomeWidgetId, string> = {
   servers: 'tone-sky',
   tokens: 'tone-violet',
   git: 'tone-green',
-  projects: 'tone-amber'
+  projects: 'tone-amber',
+  tasks: 'tone-green',
+  tips: 'tone-amber',
+  news: 'tone-sky',
+  chat: 'tone-coral'
 }
 
 /** Default size when a hidden widget is added back. */
@@ -70,17 +88,24 @@ const ADD_SIZE: Record<HomeWidgetId, { w: number; h: number }> = {
   today: { w: 12, h: 2 },
   claude: { w: 3, h: 5 },
   sessions: { w: 6, h: 3 },
-  system: { w: 3, h: 6 },
+  system: { w: 5, h: 6 },
   servers: { w: 3, h: 4 },
   tokens: { w: 6, h: 4 },
   git: { w: 6, h: 3 },
-  projects: { w: 3, h: 4 }
+  projects: { w: 3, h: 4 },
+  tasks: { w: 4, h: 5 },
+  tips: { w: 4, h: 5 },
+  news: { w: 5, h: 6 },
+  chat: { w: 4, h: 8 }
 }
 
 function readLayout(): HomeWidgetRect[] {
   try {
     const raw = window.localStorage.getItem(LAYOUT_KEY)
-    return raw ? parseHomeLayout(JSON.parse(raw)) : DEFAULT_HOME_LAYOUT
+    if (raw) return parseHomeLayout(JSON.parse(raw))
+    const previous = window.localStorage.getItem(PREVIOUS_LAYOUT_KEY)
+    if (!previous) return DEFAULT_HOME_LAYOUT
+    return withSystemCare(parseHomeLayout(JSON.parse(previous))) ?? DEFAULT_HOME_LAYOUT
   } catch {
     return DEFAULT_HOME_LAYOUT
   }
@@ -220,6 +245,10 @@ export function HomeDashboard(): React.JSX.Element {
       case 'tokens': return <TokensWidget activity={activity} />
       case 'git': return <GitWidget git={git} activity={activity} />
       case 'projects': return <ProjectsWidget />
+      case 'tasks': return <TasksWidget />
+      case 'tips': return <TipsWidget />
+      case 'news': return <NewsWidget />
+      case 'chat': return <ChatWidget />
     }
   }
 

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  TERMINAL_SCROLL_INTENT_MS,
+  TerminalScrollIntent,
   clampTerminalGrid,
+  isScrollbackKey,
+  shouldRestoreFollow,
   measureTerminalGrid,
   shouldPinTerminalToBottom,
   terminalGridEquals,
@@ -73,5 +77,36 @@ describe('viewport pinning', () => {
   it('compares grid sizes by integer cols/rows', () => {
     expect(terminalGridEquals({ cols: 80, rows: 24 }, { cols: 80, rows: 24 })).toBe(true)
     expect(terminalGridEquals({ cols: 80, rows: 24 }, { cols: 80, rows: 25 })).toBe(false)
+  })
+})
+
+describe('TerminalScrollIntent', () => {
+  it('counts a scroll as intentional only shortly after a gesture or while the pointer is held', () => {
+    const intent = new TerminalScrollIntent()
+    expect(intent.isIntentional(1000)).toBe(false)
+    intent.note(1000)
+    expect(intent.isIntentional(1000 + TERMINAL_SCROLL_INTENT_MS)).toBe(true)
+    expect(intent.isIntentional(1001 + TERMINAL_SCROLL_INTENT_MS)).toBe(false)
+    intent.pointerDown()
+    expect(intent.isIntentional(99_999)).toBe(true)
+    intent.pointerUp(100_000)
+    expect(intent.isIntentional(100_000 + TERMINAL_SCROLL_INTENT_MS)).toBe(true)
+    expect(intent.isIntentional(100_001 + TERMINAL_SCROLL_INTENT_MS)).toBe(false)
+  })
+})
+
+describe('isScrollbackKey', () => {
+  it('matches modified navigation keys only', () => {
+    expect(isScrollbackKey({ key: 'PageUp', shiftKey: true, metaKey: false, ctrlKey: false })).toBe(true)
+    expect(isScrollbackKey({ key: 'PageUp', shiftKey: false, metaKey: false, ctrlKey: false })).toBe(false)
+    expect(isScrollbackKey({ key: 'a', shiftKey: true, metaKey: false, ctrlKey: false })).toBe(false)
+  })
+})
+
+describe('shouldRestoreFollow', () => {
+  it('snaps back only when following output and the view drifted above the live screen', () => {
+    expect(shouldRestoreFollow({ viewportY: 10, baseY: 40 }, true)).toBe(true)
+    expect(shouldRestoreFollow({ viewportY: 40, baseY: 40 }, true)).toBe(false)
+    expect(shouldRestoreFollow({ viewportY: 10, baseY: 40 }, false)).toBe(false)
   })
 })

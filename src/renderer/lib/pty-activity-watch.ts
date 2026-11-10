@@ -6,7 +6,9 @@ import { focusWorkspacePanel } from '@renderer/lib/app-events'
 import { findPanelProject, isWatchedCliPanel } from '@renderer/lib/project-activity'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
-import { useActivityAttentionStore } from '@renderer/stores/activity-attention-store'
+import { isPanelInView, useActivityAttentionStore } from '@renderer/stores/activity-attention-store'
+import { noteCliAsking } from '@renderer/lib/notification-feed'
+import { onWindowActivity } from '@renderer/lib/window-activity'
 
 const trackers = new Map<string, CliActivityTracker>()
 let started = false
@@ -28,7 +30,8 @@ function trackerFor(sessionId: string): CliActivityTracker {
       if (current === next) return
       useTerminalStore.getState().setStatus(sessionId, next)
     },
-    getStatus: () => useTerminalStore.getState().getStatus(sessionId)
+    getStatus: () => useTerminalStore.getState().getStatus(sessionId),
+    screen: true
   })
   trackers.set(sessionId, tracker)
   return tracker
@@ -43,9 +46,36 @@ function dropTracker(sessionId: string): void {
 
 function openFinishedCliTask(payload: CliTaskNotification): void {
   useWorkspaceStore.getState().setActiveProject(payload.projectId)
-  useActivityAttentionStore.getState().clearProject(payload.projectId)
-  if (payload.panelId.startsWith('secretary:')) return
+  if (payload.panelId.startsWith('secretary:')) {
+    useActivityAttentionStore.getState().clearPanel(payload.panelId)
+    return
+  }
+  // Focusing the panel marks it seen.
   window.setTimeout(() => focusWorkspacePanel(payload.panelId), 40)
+}
+
+/** The project in front of the user: its focused panel counts as seen. */
+function markVisiblePanelSeen(): void {
+  const workspace = useWorkspaceStore.getState()
+  const projectId = workspace.activeProjectId
+  if (!projectId || workspace.homeVisible) return
+  const attention = useActivityAttentionStore.getState()
+  attention.clearDetached(projectId)
+  const focused = attention.focusedByProject[projectId]
+  if (focused && isPanelInView(projectId, focused)) attention.clearPanel(focused)
+}
+
+function noteAsking(sessionId: string): void {
+  const owner = findPanelProject(sessionId, useWorkspaceStore.getState().workspaces)
+  if (!owner || owner.panel.panelRole === 'secretary') return
+  if (isPanelInView(owner.projectId, sessionId)) return
+  const project = useWorkspaceStore.getState().projects.find((item) => item.id === owner.projectId)
+  noteCliAsking({
+    projectId: owner.projectId,
+    projectName: project?.name ?? 'Project',
+    panelId: sessionId,
+    title: owner.panel.title
+  })
 }
 
 function handleSecretaryEvent(event: SecretaryEvent): void {
@@ -80,7 +110,18 @@ function handlePtyEvent(event: PtyEvent): void {
   }
 
   if (event.type === 'data') {
-    trackerFor(event.sessionId).feed(event.data)
+    // A reattaching view gets the whole current screen again. Read it on a
+    // clean slate; layered over the old screen it would misread the state.
+    if (event.replay) dropTracker(event.sessionId)
+    const tracker = trackerFor(event.sessionId)
+    tracker.feedText(event.data)
+    // Asking is settled before the status, so a prompt never reads as "finished".
+    const asking = tracker.isAsking()
+    const wasAsking = Boolean(useTerminalStore.getState().asking[event.sessionId])
+    useTerminalStore.getState().setAsking(event.sessionId, asking)
+    if (asking && !wasAsking) noteAsking(event.sessionId)
+    // A screen-backed tracker classifies once its screen has taken the chunk in.
+    if (!tracker.readsScreen) tracker.classify()
     return
   }
 
@@ -105,9 +146,12 @@ export function startPtyActivityWatch(): () => void {
   unsubscribePty = window.api?.pty?.onEvent(handlePtyEvent) ?? null
   const unsubscribeClicks = window.api?.notifications?.onClicked(openFinishedCliTask) ?? null
   const unsubscribeSecretary = window.api?.secretary?.onEvent(handleSecretaryEvent) ?? null
+  const stopWindowWatch = onWindowActivity((inactive) => {
+    if (!inactive) markVisiblePanelSeen()
+  })
   unsubscribeWorkspace = useWorkspaceStore.subscribe((state, prev) => {
-    if (state.activeProjectId && state.activeProjectId !== prev.activeProjectId) {
-      useActivityAttentionStore.getState().clearProject(state.activeProjectId)
+    if (state.activeProjectId !== prev.activeProjectId || state.homeVisible !== prev.homeVisible) {
+      markVisiblePanelSeen()
     }
     for (const project of prev.projects) {
       if (!state.projects.some((item) => item.id === project.id)) {
@@ -124,6 +168,7 @@ export function startPtyActivityWatch(): () => void {
     unsubscribeSecretary?.()
     unsubscribeWorkspace?.()
     unsubscribeWorkspace = null
+    stopWindowWatch()
     for (const sessionId of trackers.keys()) dropTracker(sessionId)
   }
 }

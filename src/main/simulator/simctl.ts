@@ -9,6 +9,7 @@ import {
   parseDeviceList,
   parseDeviceTypes,
   parseRuntimes,
+  runningUserApps,
   SimulatorUnavailable,
   type SimulatorChoice
 } from './devices'
@@ -66,7 +67,10 @@ async function listJson(simctl: string, kind: 'devices' | 'runtimes' | 'devicety
   }
 }
 
-export async function ensureIphone(simctl: string): Promise<{ udid: string; name: string; state: string }> {
+export async function ensureIphone(
+  simctl: string,
+  preferredUdid: string | null = null
+): Promise<{ udid: string; name: string; state: string }> {
   const [devices, runtimes, deviceTypes] = await Promise.all([
     listJson(simctl, 'devices'),
     listJson(simctl, 'runtimes'),
@@ -75,7 +79,8 @@ export async function ensureIphone(simctl: string): Promise<{ udid: string; name
   const choice: SimulatorChoice = chooseSimulator({
     devices: parseDeviceList(devices),
     runtimes: parseRuntimes(runtimes),
-    deviceTypes: parseDeviceTypes(deviceTypes)
+    deviceTypes: parseDeviceTypes(deviceTypes),
+    preferredUdid
   })
   if (choice.action === 'unavailable') throw new SimulatorUnavailable(choice.message)
   if (choice.action === 'use') return { udid: choice.udid, name: choice.name, state: choice.state }
@@ -122,6 +127,19 @@ export async function captureSimulatorScreen(simctl: string, udid: string): Prom
   } catch {
     return null
   }
+}
+
+/**
+ * True when something besides Bikorch's panel uses the device: Simulator.app is
+ * open, or an app someone built (an agent's `expo run:ios`, `xcodebuild`) runs
+ * on it. Shutting it down then would kill their install or session.
+ */
+export async function simulatorInUse(simctl: string, udid: string): Promise<boolean> {
+  const simulatorApp = await run('/usr/bin/pgrep', ['-x', 'Simulator'], 5_000).catch(() => null)
+  if (simulatorApp?.code === 0) return true
+  const list = await run(simctl, ['spawn', udid, 'launchctl', 'list'], 10_000).catch(() => null)
+  if (!list || list.code !== 0) return false
+  return runningUserApps(list.stdout).length > 0
 }
 
 /** Shuts the device down. A booted iOS simulator runs hundreds of processes. */

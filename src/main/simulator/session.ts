@@ -1,9 +1,31 @@
 import type { WebContents } from 'electron'
-import { parseButton, parseKey, parsePointer, SIMULATOR_IPC, type SimulatorFeed, type SimulatorStatus } from '@shared/contracts/simulator'
+import {
+  deviceOrientationValue,
+  parseButton,
+  parseKey,
+  parsePointer,
+  parseRotation,
+  parseView,
+  SIMULATOR_IPC,
+  type SimulatorFeed,
+  type SimulatorRotation,
+  type SimulatorStatus,
+  type SimulatorView
+} from '@shared/contracts/simulator'
 import { sendSimulatorInput, startInputBridge, startWindowStream, stopInputBridge, type StreamEvent } from './bridge'
 import { SimulatorUnavailable } from './devices'
+import { watchSimulatorInstalls } from './install-watch'
+import { getManagedMainWindow } from '../lifecycle/background'
 import { sendHeadless, startHeadless, stopHeadless } from './headless'
-import { bootSimulator, captureSimulatorScreen, ensureIphone, openSimulatorApp, resolveSimctl, shutdownSimulator } from './simctl'
+import {
+  bootSimulator,
+  captureSimulatorScreen,
+  ensureIphone,
+  openSimulatorApp,
+  resolveSimctl,
+  shutdownSimulator,
+  simulatorInUse
+} from './simctl'
 
 /** How long a simulator Bikorch booted stays up after its panel closes. */
 const SHUTDOWN_GRACE_MS = 2 * 60_000
@@ -29,6 +51,12 @@ class SimulatorSession {
   private simctl: string | null = null
   private mode: SimulatorFeed | null = null
   private inputReady: boolean | null = null
+  /** Whether the panel shows the screen; hidden panels get no frames. */
+  private view: SimulatorView = { visible: true, height: 1400 }
+  /** The running device an agent last installed an app on. */
+  private preferredUdid: string | null = null
+  /** How the device is turned; landscape for games. Portrait for each new device. */
+  private rotation: SimulatorRotation = 0
   private status: SimulatorStatus = {
     phase: 'starting',
     message: 'Starting the iOS Simulator…'
@@ -63,9 +91,46 @@ class SimulatorSession {
     this.inputReady = null
     this.streaming = false
     this.headless = false
+    this.rotation = 0
     stopHeadless()
     stopInputBridge()
     this.scheduleShutdown()
+  }
+
+  /**
+   * An app was installed on `udid`. The panel follows that device, so what an
+   * agent just built is what the panel shows.
+   */
+  focusDevice(udid: string): void {
+    this.preferredUdid = udid
+    if (!this.running || this.device?.udid === udid) return
+    this.epoch += 1
+    this.rotation = 0
+    this.device = null
+    this.mode = null
+    this.inputReady = null
+    this.streaming = false
+    this.headless = false
+    stopHeadless()
+    stopInputBridge()
+    void this.start()
+  }
+
+  /** Turns the device. Only the headless feed can: Simulator.app turns its own window. */
+  rotate(raw: unknown): void {
+    const rotation = parseRotation(raw)
+    if (rotation === null || !this.headless) return
+    this.rotation = rotation
+    sendHeadless({ op: 'orientation', orientation: deviceOrientationValue(rotation) })
+    this.publish(this.status)
+  }
+
+  /** The panel was hidden, shown or resized. */
+  setView(raw: unknown): void {
+    const view = parseView(raw)
+    if (!view) return
+    this.view = view
+    if (this.headless) sendHeadless({ op: 'view', visible: view.visible, maxHeight: view.height })
   }
 
   /** Simulators the user booted themselves are left running. */
@@ -76,17 +141,17 @@ class SimulatorSession {
       this.shutdownTimer = null
       if (this.refs > 0 || this.bootedByUs !== booted) return
       this.bootedByUs = null
-      void shutdownSimulator(booted.simctl, booted.udid)
+      void shutdownIfIdle(booted)
     }, SHUTDOWN_GRACE_MS)
   }
 
-  /** App quit: shut down at once what Bikorch started. */
+  /** App quit: shut down at once what Bikorch started, unless something else uses it. */
   shutdownNow(): void {
     if (this.shutdownTimer) clearTimeout(this.shutdownTimer)
     this.shutdownTimer = null
     const booted = this.bootedByUs
     this.bootedByUs = null
-    if (booted) void shutdownSimulator(booted.simctl, booted.udid)
+    if (booted) void shutdownIfIdle(booted)
   }
 
   pointer(raw: unknown): void {
@@ -118,7 +183,7 @@ class SimulatorSession {
       const simctl = await resolveSimctl()
       if (this.stale(epoch)) return
       this.simctl = simctl
-      const device = await ensureIphone(simctl)
+      const device = await ensureIphone(simctl, this.preferredUdid)
       if (this.stale(epoch)) return
       this.device = { udid: device.udid, name: device.name }
       this.publish({ phase: 'starting', message: `Starting ${device.name}…`, deviceName: device.name })
@@ -173,6 +238,9 @@ class SimulatorSession {
         if (event.type === 'ready') {
           this.headless = true
           this.inputReady = true
+          sendHeadless({ op: 'view', visible: this.view.visible, maxHeight: this.view.height })
+          // The device keeps its last orientation; bring it in line with the panel.
+          sendHeadless({ op: 'orientation', orientation: deviceOrientationValue(this.rotation) })
           settle(true)
         } else if (event.type === 'frame') {
           this.streaming = true
@@ -216,7 +284,8 @@ class SimulatorSession {
    */
   private async screenLoop(epoch: number): Promise<void> {
     while (!this.stale(epoch)) {
-      if (this.streaming) {
+      // Streaming, or nobody is looking: no screenshots.
+      if (this.streaming || !this.view.visible) {
         await delay(500)
         continue
       }
@@ -249,7 +318,8 @@ class SimulatorSession {
   }
 
   private publish(status: SimulatorStatus): void {
-    this.status = this.inputReady === null ? status : { ...status, inputReady: this.inputReady }
+    const turned = { ...status, rotation: this.headless ? this.rotation : 0 }
+    this.status = this.inputReady === null ? turned : { ...turned, inputReady: this.inputReady }
     this.emit({ type: 'status', status: this.status })
   }
 
@@ -261,9 +331,31 @@ class SimulatorSession {
 
 export const simulatorSession = new SimulatorSession()
 
+/**
+ * When an agent installs an app on a simulator, the panel switches to that
+ * device and the window is told, so it can open the iOS panel by itself.
+ */
+export function startSimulatorInstallWatch(): () => void {
+  return watchSimulatorInstalls((udid) => {
+    simulatorSession.focusDevice(udid)
+    const win = getManagedMainWindow()
+    if (win && !win.isDestroyed()) win.webContents.send(SIMULATOR_IPC.APP_INSTALLED, udid)
+  })
+}
+
 export function stopSimulatorSession(): void {
   simulatorSession.stop()
   simulatorSession.shutdownNow()
+}
+
+/**
+ * A device Bikorch booted can be taken over: an agent installs its app on it or
+ * opens Simulator.app. Shutting it down then kills their work mid-install, so
+ * it is left running and Bikorch no longer owns it.
+ */
+async function shutdownIfIdle(booted: { simctl: string; udid: string }): Promise<void> {
+  if (await simulatorInUse(booted.simctl, booted.udid).catch(() => true)) return
+  await shutdownSimulator(booted.simctl, booted.udid)
 }
 
 function delay(ms: number): Promise<void> {

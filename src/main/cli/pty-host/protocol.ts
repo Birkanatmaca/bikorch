@@ -23,7 +23,8 @@ export type PtyHostClientMessage = (
   | { v: 1; id: string; type: 'write'; payload: { sessionId: string; data: string } }
   | { v: 1; id: string; type: 'resize'; payload: { sessionId: string; cols: number; rows: number } }
   | { v: 1; id: string; type: 'kill'; payload: { sessionId: string } }
-  | { v: 1; id: string; type: 'replay'; payload: { sessionId: string } }
+  /** `screen` asks for the serialized screen (with its chunk seq) instead of metadata and the raw tail. */
+  | { v: 1; id: string; type: 'replay'; payload: { sessionId: string; screen?: boolean } }
   | { v: 1; id: string; type: 'list' }
   /** Exit if no session is running; refused otherwise. */
   | { v: 1; id: string; type: 'retire' }
@@ -41,6 +42,8 @@ export type PtyHostServerMessage =
         reattached?: boolean
         error?: string
         outputBuffer?: string
+        screen?: string
+        seq?: number
         projectId?: string
         kind?: string
         accountId?: string
@@ -54,7 +57,7 @@ export type PtyHostServerMessage =
       v: 1
       type: 'event'
       payload:
-        | { type: 'data'; sessionId: string; data: string }
+        | { type: 'data'; sessionId: string; data: string; seq?: number }
         | { type: 'exit'; sessionId: string; exitCode: number }
         | { type: 'status'; sessionId: string; status: 'running' | 'stopped' | 'error'; error?: string }
     }

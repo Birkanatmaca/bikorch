@@ -177,7 +177,19 @@ import {
   type ResourceProcessSnapshot,
   type ResourceProfile
 } from '@shared/contracts/resources'
-import { DASHBOARD_IPC, type ClaudeActivity, type GitActivity, type SystemMetrics } from '@shared/contracts/dashboard'
+import {
+  DASHBOARD_IPC,
+  type Briefing,
+  type BriefingKind,
+  type BriefingMode,
+  type ClaudeActivity,
+  type CleanupAdvice,
+  type GitActivity,
+  type HomeChatEvent,
+  type HomeChatInput,
+  type HomeChatState,
+  type SystemMetrics
+} from '@shared/contracts/dashboard'
 import { SERVER_HEALTH_IPC, type ServerHealth } from '@shared/contracts/server-health'
 import { STORAGE_IPC, type StorageCleanResult, type StorageReport } from '@shared/contracts/storage'
 import {
@@ -186,7 +198,9 @@ import {
   type SimulatorClientEvent,
   type SimulatorKey,
   type SimulatorPointer,
-  type SimulatorStatus
+  type SimulatorRotation,
+  type SimulatorStatus,
+  type SimulatorView
 } from '@shared/contracts/simulator'
 
 export interface MusicApi {
@@ -474,8 +488,19 @@ export interface ResourcesApi {
 
 export interface DashboardApi {
   system: () => Promise<SystemMetrics>
+  /** Claude's cleanup advice for the latest storage scan. */
+  cleanupAdvice: (mode: 'cached' | 'auto' | 'force') => Promise<CleanupAdvice | null>
   claudeActivity: () => Promise<ClaudeActivity>
   gitActivity: (force?: boolean) => Promise<GitActivity>
+  briefing: <K extends BriefingKind>(kind: K, mode: BriefingMode) => Promise<Briefing<K>>
+  chat: {
+    history: () => Promise<HomeChatState>
+    send: (input: HomeChatInput) => Promise<HomeChatState>
+    image: (id: string) => Promise<string | null>
+    stop: () => Promise<HomeChatState>
+    reset: () => Promise<HomeChatState>
+    onEvent: (callback: (event: HomeChatEvent) => void) => () => void
+  }
 }
 
 export interface ServerHealthApi {
@@ -491,6 +516,12 @@ export interface StorageApi {
 export interface SimulatorApi {
   attach: () => Promise<SimulatorStatus>
   detach: () => Promise<void>
+  /** Turns the device (degrees clockwise); landscape for games. */
+  rotate: (rotation: SimulatorRotation) => Promise<void>
+  /** Whether the screen is on show, and its height in device pixels. */
+  view: (view: SimulatorView) => Promise<void>
+  /** An app was installed on a simulator, usually by an agent. */
+  onAppInstalled: (callback: (udid: string) => void) => () => void
   pointer: (event: SimulatorPointer) => Promise<void>
   key: (event: SimulatorKey) => Promise<void>
   button: (button: SimulatorButton) => Promise<void>
@@ -863,8 +894,22 @@ const resourcesApi: ResourcesApi = {
 
 const dashboardApi: DashboardApi = {
   system: () => ipcRenderer.invoke(DASHBOARD_IPC.SYSTEM),
+  cleanupAdvice: (mode) => ipcRenderer.invoke(DASHBOARD_IPC.CLEANUP_ADVICE, mode),
   claudeActivity: () => ipcRenderer.invoke(DASHBOARD_IPC.CLAUDE_ACTIVITY),
-  gitActivity: (force) => ipcRenderer.invoke(DASHBOARD_IPC.GIT_ACTIVITY, force === true)
+  gitActivity: (force) => ipcRenderer.invoke(DASHBOARD_IPC.GIT_ACTIVITY, force === true),
+  briefing: (kind, mode) => ipcRenderer.invoke(DASHBOARD_IPC.BRIEFING, kind, mode),
+  chat: {
+    history: () => ipcRenderer.invoke(DASHBOARD_IPC.CHAT_HISTORY),
+    send: (input) => ipcRenderer.invoke(DASHBOARD_IPC.CHAT_SEND, input),
+    image: (id) => ipcRenderer.invoke(DASHBOARD_IPC.CHAT_IMAGE, id),
+    stop: () => ipcRenderer.invoke(DASHBOARD_IPC.CHAT_STOP),
+    reset: () => ipcRenderer.invoke(DASHBOARD_IPC.CHAT_RESET),
+    onEvent: (callback) => {
+      const listener = (_event: IpcRendererEvent, payload: HomeChatEvent): void => callback(payload)
+      ipcRenderer.on(DASHBOARD_IPC.CHAT_EVENT, listener)
+      return () => ipcRenderer.removeListener(DASHBOARD_IPC.CHAT_EVENT, listener)
+    }
+  }
 }
 
 const serverHealthApi: ServerHealthApi = {
@@ -880,6 +925,17 @@ const storageApi: StorageApi = {
 const simulatorApi: SimulatorApi = {
   attach: () => ipcRenderer.invoke(SIMULATOR_IPC.ATTACH),
   detach: () => ipcRenderer.invoke(SIMULATOR_IPC.DETACH),
+  view: (view) => ipcRenderer.invoke(SIMULATOR_IPC.VIEW, view),
+  rotate: (rotation) => ipcRenderer.invoke(SIMULATOR_IPC.ROTATE, rotation),
+  onAppInstalled: (callback) => {
+    const listener = (_event: IpcRendererEvent, udid: unknown): void => {
+      if (typeof udid === 'string') callback(udid)
+    }
+    ipcRenderer.on(SIMULATOR_IPC.APP_INSTALLED, listener)
+    return () => {
+      ipcRenderer.removeListener(SIMULATOR_IPC.APP_INSTALLED, listener)
+    }
+  },
   pointer: (event) => ipcRenderer.invoke(SIMULATOR_IPC.POINTER, event),
   key: (event) => ipcRenderer.invoke(SIMULATOR_IPC.KEY, event),
   button: (button) => ipcRenderer.invoke(SIMULATOR_IPC.BUTTON, button),

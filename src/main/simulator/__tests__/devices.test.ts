@@ -4,7 +4,8 @@ import {
   chooseSimulator,
   parseDeviceList,
   parseDeviceTypes,
-  parseRuntimes
+  parseRuntimes,
+  runningUserApps
 } from '../devices'
 
 const IPHONE = '11111111-1111-1111-1111-111111111111'
@@ -87,5 +88,47 @@ describe('simulator input parsing', () => {
     expect(parseKey({ key: 'enter' })).toEqual({ key: 'enter' })
     expect(parseKey({ text: 'hi\n' })).toBeNull()
     expect(parseKey({ text: 'ok' })).toEqual({ text: 'ok' })
+  })
+})
+
+describe('apps running on a simulator', () => {
+  it('finds an app someone installed and ignores Apple apps and stopped jobs', () => {
+    const list = [
+      'PID\tStatus\tLabel',
+      '24945\t0\tUIKitApplication:com.apple.chrono.WidgetRenderer-Default[8943][rb-legacy]',
+      '24974\t0\tUIKitApplication:com.apple.Spotlight[ef8c][rb-legacy]',
+      '35921\t0\tUIKitApplication:com.zuxappios.app[2f9f][rb-legacy]',
+      '-\t0\tUIKitApplication:com.example.stopped[1a2b][rb-legacy]',
+      '120\t0\tcom.apple.backboardd'
+    ].join('\n')
+    expect(runningUserApps(list)).toEqual(['com.zuxappios.app'])
+  })
+
+  it('reports an idle device as unused', () => {
+    expect(runningUserApps('24974\t0\tUIKitApplication:com.apple.Spotlight[ef8c][rb-legacy]\n')).toEqual([])
+    expect(runningUserApps('')).toEqual([])
+  })
+})
+
+describe('the device an agent installed onto', () => {
+  const twoBooted = (): ReturnType<typeof parseDeviceList> =>
+    parseDeviceList({
+      devices: {
+        'com.apple.CoreSimulator.SimRuntime.iOS-26-1': [
+          { name: 'Bikorch iPhone', udid: IPHONE, state: 'Booted', isAvailable: true, deviceTypeIdentifier: 'com.apple.CoreSimulator.SimDeviceType.iPhone-17' },
+          { name: 'iPhone 16', udid: OTHER, state: 'Booted', isAvailable: true, deviceTypeIdentifier: 'com.apple.CoreSimulator.SimDeviceType.iPhone-16' }
+        ]
+      }
+    })
+
+  it('wins over other booted iPhones', () => {
+    const choice = chooseSimulator({ devices: twoBooted(), runtimes: [], deviceTypes: [], preferredUdid: OTHER })
+    expect(choice).toMatchObject({ action: 'use', udid: OTHER })
+  })
+
+  it('is ignored once it is shut down', () => {
+    const devices = twoBooted().map((device) => (device.udid === OTHER ? { ...device, state: 'Shutdown' } : device))
+    const choice = chooseSimulator({ devices, runtimes: [], deviceTypes: [], preferredUdid: OTHER })
+    expect(choice).toMatchObject({ action: 'use', udid: IPHONE })
   })
 })

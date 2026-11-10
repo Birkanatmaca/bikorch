@@ -13,7 +13,9 @@ import ObjectiveC
 // These are Xcode's private frameworks. When any piece is missing the helper
 // reports `headless-error` and Bikorch falls back to the Simulator window.
 //
-// Protocol: JSON lines on stdin and stdout.
+// Protocol: JSON lines on stdin. On stdout every message is one type byte, a
+// 4-byte big-endian length and the payload: "J" a JSON object, "F" a JPEG frame.
+// Frames go out as raw bytes, with no base64 or JSON around the pixels.
 
 struct Incoming: Decodable {
     var op: String
@@ -24,16 +26,34 @@ struct Incoming: Decodable {
     var key: String?
     var fps: Int?
     var button: String?
+    var visible: Bool?
+    var maxHeight: Double?
+    var orientation: Int?
 }
 
-let output = DispatchQueue(label: "bikorch.simulator.output")
+let outputLock = NSLock()
+let messageJSON: UInt8 = 0x4A
+let messageFrame: UInt8 = 0x46
+
+/// Writes are synchronous: when Bikorch reads slowly the pipe fills and the frame
+/// pump waits, instead of frames piling up in memory.
+func writeMessage(_ type: UInt8, _ payload: Data) {
+    let length = UInt32(payload.count)
+    var message = Data(capacity: payload.count + 5)
+    message.append(type)
+    message.append(UInt8(truncatingIfNeeded: length >> 24))
+    message.append(UInt8(truncatingIfNeeded: length >> 16))
+    message.append(UInt8(truncatingIfNeeded: length >> 8))
+    message.append(UInt8(truncatingIfNeeded: length))
+    message.append(payload)
+    outputLock.lock()
+    defer { outputLock.unlock() }
+    FileHandle.standardOutput.write(message)
+}
 
 func emit(_ object: [String: Any]) {
     guard let data = try? JSONSerialization.data(withJSONObject: object) else { return }
-    output.async {
-        FileHandle.standardOutput.write(data)
-        FileHandle.standardOutput.write(Data([0x0A]))
-    }
+    writeMessage(messageJSON, data)
 }
 
 struct HeadlessFailure: Error {
@@ -110,6 +130,58 @@ func framebuffer(of display: NSObject) -> IOSurface? {
     return unsafeBitCast(object, to: IOSurface.self)
 }
 
+// MARK: - Orientation
+
+/// GraphicsServices orientation: 1 portrait, 3 landscape (turned left), 4 landscape (turned right).
+var orientation: UInt32 = 1
+var simDevice: NSObject?
+let orientationQueue = DispatchQueue(label: "bikorch.simulator.orientation")
+
+typealias PortLookup = @convention(c) (AnyObject, Selector, NSString, UnsafeMutablePointer<NSError?>?) -> mach_port_t
+
+/// Turns the device the way Simulator.app does: a GSEvent mach message to
+/// SpringBoard's PurpleWorkspacePort. The framebuffer stays portrait; iOS draws
+/// the interface turned inside it, and Bikorch turns the picture back.
+func setOrientation(_ value: UInt32) {
+    orientation = value
+    guard let device = simDevice else { return }
+    orientationQueue.async {
+        let selector = NSSelectorFromString("lookup:error:")
+        guard device.responds(to: selector) else { return }
+        let lookup = unsafeBitCast(class_getMethodImplementation(type(of: device), selector), to: PortLookup.self)
+        var error: NSError?
+        let port = lookup(device, selector, "PurpleWorkspacePort" as NSString, &error)
+        guard port != 0 else { return }
+        // A 108-byte GSEvent message, laid out as Simulator.app sends it.
+        var message = [UInt8](repeating: 0, count: 112)
+        func put(_ value: UInt32, at offset: Int) {
+            for index in 0..<4 { message[offset + index] = UInt8(truncatingIfNeeded: value >> (8 * UInt32(index))) }
+        }
+        put(0x13, at: 0x00)             // MACH_MSGH_BITS(COPY_SEND, 0)
+        put(108, at: 0x04)              // msgh_size
+        put(0x7B, at: 0x14)             // msgh_id
+        put(50 | 0x2_0000, at: 0x18)    // GSEventTypeDeviceOrientationChanged | host flag
+        put(4, at: 0x48)                // record_info_size
+        put(value, at: 0x4C)            // orientation
+        message.withUnsafeMutableBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            let header = base.assumingMemoryBound(to: mach_msg_header_t.self)
+            header.pointee.msgh_remote_port = port
+            _ = mach_msg(header, MACH_SEND_MSG | MACH_SEND_TIMEOUT, header.pointee.msgh_size, 0,
+                         mach_port_t(MACH_PORT_NULL), 2000, mach_port_t(MACH_PORT_NULL))
+        }
+    }
+}
+
+/// How far down the screen a portrait-framebuffer point is, as the user sees it.
+func shownY(_ point: CGPoint) -> Double {
+    switch orientation {
+    case 3: return 1 - point.x
+    case 4: return point.x
+    default: return point.y
+    }
+}
+
 // MARK: - Input
 
 typealias MouseMessage = @convention(c) (
@@ -172,7 +244,7 @@ final class HIDInput {
         switch phase {
         case "down":
             pressed = true
-            touchStartY = point.y
+            touchStartY = shownY(point)
             touch = .down
         case "move":
             guard pressed else { return }
@@ -188,7 +260,7 @@ final class HIDInput {
         if let message = mouse(&point, nil, 0x32, touch.rawValue, 1, 1, 0) { send(message) }
         // The home-indicator swipe is an edge gesture the digitizer cannot start,
         // so a swipe up from the bottom edge presses Home instead.
-        if touch == .up, touchStartY > 0.955, point.y < touchStartY - 0.06 {
+        if touch == .up, touchStartY > 0.955, shownY(point) < touchStartY - 0.06 {
             press(button: "home")
         }
     }
@@ -336,14 +408,17 @@ func typeText(_ text: String, udid: String, input: HIDInput) {
 // MARK: - Frames
 
 /// Watches the framebuffer's seed and sends a JPEG only when the pixels changed,
-/// so a still screen costs a cheap integer read per tick.
+/// so a still screen costs a cheap integer read per tick. Frames are encoded at
+/// the size the panel shows them and not at all while the panel is hidden.
 final class FramePump {
     private let display: NSObject
     private var surface: IOSurface?
     private var lastSeed: UInt32 = .max
     private var lastSurfaceCheck = Date.distantPast
     private var timer: DispatchSourceTimer?
-    private var pending = false
+    private var fps = 30
+    /// Device pixels the panel shows the screen at; frames are scaled down to it.
+    private var maxHeight = 1400.0
     private let frames = DispatchQueue(label: "bikorch.simulator.frames")
     private let context = CIContext(options: [.useSoftwareRenderer: false, .cacheIntermediates: false])
     private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
@@ -354,6 +429,7 @@ final class FramePump {
 
     func start(fps: Int) {
         stop()
+        self.fps = fps
         let interval = 1.0 / Double(max(5, min(60, fps)))
         let timer = DispatchSource.makeTimerSource(queue: frames)
         timer.schedule(deadline: .now(), repeating: interval, leeway: .milliseconds(4))
@@ -366,7 +442,24 @@ final class FramePump {
     func stop() {
         timer?.cancel()
         timer = nil
-        lastSeed = .max
+        frames.async { self.lastSeed = .max }
+    }
+
+    var running: Bool { timer != nil }
+
+    /// The panel is hidden (another app, the Home tab) or was resized.
+    func view(visible: Bool, maxHeight: Double?) {
+        if let maxHeight {
+            frames.async {
+                let next = min(2400, max(320, maxHeight))
+                if next != self.maxHeight {
+                    self.maxHeight = next
+                    self.lastSeed = .max
+                }
+            }
+        }
+        if visible, !running { start(fps: fps) }
+        if !visible, running { stop() }
     }
 
     private func tick() {
@@ -378,22 +471,20 @@ final class FramePump {
                 lastSeed = .max
             }
         }
-        guard let surface, !pending else { return }
+        guard let surface else { return }
         let seed = surface.seed
         guard seed != lastSeed else { return }
         lastSeed = seed
-        pending = true
-        defer { pending = false }
         var image = CIImage(ioSurface: surface)
-        // Sharp enough for a side panel, light enough to keep the Mac cool.
-        let scale = min(1.0, 1400.0 / max(image.extent.height, 1))
+        // As sharp as the panel shows it and no sharper: encoding cost grows with pixels.
+        let scale = min(1.0, maxHeight / max(image.extent.height, 1))
         if scale < 1 { image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale)) }
         guard let jpeg = context.jpegRepresentation(
             of: image,
             colorSpace: colorSpace,
             options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.72]
         ) else { return }
-        emit(["op": "frame", "data": jpeg.base64EncodedString()])
+        writeMessage(messageFrame, jpeg)
     }
 }
 
@@ -416,6 +507,7 @@ func attach(_ target: String, fps: Int) {
         }
         guard let display else { throw HeadlessFailure(message: "The simulator display is not available") }
         let hid = try HIDInput(device: device)
+        simDevice = device
         udid = target
         input = hid
         pump?.stop()
@@ -446,6 +538,10 @@ func handle(_ command: Incoming) {
         }
     case "button":
         if let button = command.button { input?.press(button: button) }
+    case "view":
+        pump?.view(visible: command.visible ?? true, maxHeight: command.maxHeight)
+    case "orientation":
+        if let value = command.orientation, [1, 3, 4].contains(value) { setOrientation(UInt32(value)) }
     case "ping":
         emit(["op": "pong", "trusted": true])
     default:

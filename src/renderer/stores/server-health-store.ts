@@ -5,9 +5,37 @@ import { isDocumentHidden, onDocumentVisibility } from '@renderer/lib/visibility
 import { useServerStore } from './server-store'
 
 const POLL_MS = 60_000
+/** Thirty one-minute checks: the last half hour of each server. */
+export const HISTORY_LIMIT = 30
+
+/** One check, reduced to the numbers the trend lines draw. */
+export interface ServerHealthSample {
+  at: number
+  cpuPercent: number | null
+  memoryPercent: number | null
+  latencyMs: number | null
+  netRxBytesPerSec: number | null
+  netTxBytesPerSec: number | null
+}
+
+export function sampleFromHealth(health: ServerHealth): ServerHealthSample {
+  const metrics = health.metrics
+  return {
+    at: health.checkedAt,
+    cpuPercent: metrics?.cpuPercent ?? null,
+    memoryPercent: metrics && metrics.memTotalBytes > 0
+      ? ((metrics.memTotalBytes - metrics.memAvailableBytes) / metrics.memTotalBytes) * 100
+      : null,
+    latencyMs: health.latencyMs,
+    netRxBytesPerSec: metrics?.netRxBytesPerSec ?? null,
+    netTxBytesPerSec: metrics?.netTxBytesPerSec ?? null
+  }
+}
 
 interface ServerHealthState {
   healthById: Record<string, ServerHealth>
+  /** Oldest first, at most HISTORY_LIMIT samples per server, kept for this run. */
+  historyById: Record<string, ServerHealthSample[]>
   checkingIds: Record<string, boolean>
   check: (server: RemoteServer) => Promise<void>
   checkAll: () => Promise<void>
@@ -15,6 +43,7 @@ interface ServerHealthState {
 
 export const useServerHealthStore = create<ServerHealthState>((set, get) => ({
   healthById: {},
+  historyById: {},
   checkingIds: {},
 
   check: async (server) => {
@@ -22,7 +51,13 @@ export const useServerHealthStore = create<ServerHealthState>((set, get) => ({
     set((state) => ({ checkingIds: { ...state.checkingIds, [server.id]: true } }))
     try {
       const health = await window.api.serverHealth.check(server.id, { user: server.user, host: server.host, port: server.port })
-      set((state) => ({ healthById: { ...state.healthById, [server.id]: health } }))
+      set((state) => ({
+        healthById: { ...state.healthById, [server.id]: health },
+        historyById: {
+          ...state.historyById,
+          [server.id]: [...(state.historyById[server.id] ?? []), sampleFromHealth(health)].slice(-HISTORY_LIMIT)
+        }
+      }))
     } catch {
       // A failed check keeps the last known health.
     } finally {

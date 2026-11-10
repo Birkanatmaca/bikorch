@@ -29,6 +29,7 @@ import {
 import { recordLog } from '../logs'
 import { ptyHostClient } from './pty-host/client'
 import { appendOutputBuffer } from './pty-host/session-store'
+import { ScreenMirror, type ScreenSnapshot } from './pty-host/screen-mirror'
 import { appendCliArgs } from './spawn-args'
 import { trustManagedWorktree } from '../accounts/workspace-trust'
 import { managedCliPaths } from './managed-paths'
@@ -59,8 +60,12 @@ interface PtySession {
   status: PtySessionStatus
   cols: number
   rows: number
-  /** Bounded output is kept for reattach and trusted internal observers. */
+  /** Bounded output is kept for trusted internal observers. */
   outputBuffer?: string
+  /** In-process sessions only: parsed screen served on reattach (the host keeps its own). */
+  mirror?: ScreenMirror
+  /** Live output held back while a reattaching view is sent the current screen. */
+  replayGate?: Array<{ data: string; seq?: number }>
 }
 
 export type { PtySessionSnapshot } from '@shared/contracts/pty'
@@ -161,6 +166,10 @@ class PtyManager {
 
       if (event.type === 'data') {
         session.outputBuffer = appendOutputBuffer(session.outputBuffer ?? '', event.data, DURABLE_TAIL_LIMIT)
+        if (session.replayGate) {
+          session.replayGate.push({ data: event.data, ...(event.seq !== undefined ? { seq: event.seq } : {}) })
+          return
+        }
         this.emit(session.webContents, { type: 'data', sessionId: event.sessionId, data: event.data })
         return
       }
@@ -246,21 +255,18 @@ class PtyManager {
         const connected = await ptyHostClient.ensureConnected()
         if (connected) {
           try {
-            const replay = await ptyHostClient.replay(sessionId)
-            if (replay.status !== 'running') throw new Error('Terminal session is no longer running')
-            this.emit(webContents, { type: 'status', sessionId, status: existing.status, kind })
-            if (replay.outputBuffer) {
-              existing.outputBuffer = replay.outputBuffer.slice(-DURABLE_TAIL_LIMIT)
-              this.emit(webContents, { type: 'data', sessionId, data: replay.outputBuffer })
-            }
-            // A running CLI TUI needs a fresh SIGWINCH after replay even when
-            // the grid is unchanged: the bounded ANSI replay may start midway
-            // through a full-screen frame.
-            if (kind !== 'terminal' || existing.cols !== nextCols || existing.rows !== nextRows) {
-              await ptyHostClient.resize(sessionId, nextCols, nextRows)
-              existing.cols = nextCols
-              existing.rows = nextRows
-            }
+            await this.sendScreen(existing, webContents, async () => {
+              // Resize first so the mirror serializes at the new view's grid. A
+              // CLI TUI also gets a SIGWINCH and repaints, even at the same size.
+              if (kind !== 'terminal' || existing.cols !== nextCols || existing.rows !== nextRows) {
+                await ptyHostClient.resize(sessionId, nextCols, nextRows)
+                existing.cols = nextCols
+                existing.rows = nextRows
+              }
+              const replay = await ptyHostClient.replayScreen(sessionId)
+              if (replay.status !== 'running') throw new Error('Terminal session is no longer running')
+              return replay
+            })
             recordLog('debug', `${getKindLabel(kind)} session reattached (${sessionId})`, 'pty')
             return { sessionId, status: existing.status, reattached: true }
           } catch {
@@ -270,17 +276,17 @@ class PtyManager {
           this.sessions.delete(sessionId)
         }
       } else {
-        if (existing.process) {
-          if (existing.cols !== nextCols || existing.rows !== nextRows) {
-            await this.resize(sessionId, nextCols, nextRows)
-          } else if (kind !== 'terminal') {
-            existing.process.resize(nextCols, nextRows)
+        await this.sendScreen(existing, webContents, async () => {
+          if (existing.process) {
+            if (existing.cols !== nextCols || existing.rows !== nextRows) {
+              await this.resize(sessionId, nextCols, nextRows)
+            } else if (kind !== 'terminal') {
+              existing.process.resize(nextCols, nextRows)
+            }
           }
-        }
-        this.emit(webContents, { type: 'status', sessionId, status: existing.status, kind })
-        if (existing.outputBuffer) {
-          this.emit(webContents, { type: 'data', sessionId, data: existing.outputBuffer })
-        }
+          const screen: ScreenSnapshot | null = existing.mirror ? await existing.mirror.snapshot() : null
+          return { data: screen?.data ?? existing.outputBuffer ?? '', seq: screen?.seq ?? null }
+        })
         recordLog('debug', `${getKindLabel(kind)} session reattached (${sessionId})`, 'pty')
         return { sessionId, status: existing.status, reattached: true }
       }
@@ -460,7 +466,7 @@ class PtyManager {
           this.clearHostRelease()
           this.emit(webContents, { type: 'status', sessionId, status: session.status })
           if (hosted.outputBuffer) {
-            this.emit(webContents, { type: 'data', sessionId, data: hosted.outputBuffer })
+            this.emit(webContents, { type: 'data', sessionId, data: hosted.outputBuffer, replay: true })
           }
           if (kind === 'antigravity' && request.launchMode !== 'login') {
             markAntigravitySessionAccount(request.accountId ?? null)
@@ -515,7 +521,8 @@ class PtyManager {
           status: 'running',
           cols: safeCols,
           rows: safeRows,
-          outputBuffer: ''
+          outputBuffer: '',
+          mirror: new ScreenMirror(safeCols, safeRows)
         }
 
         this.sessions.set(sessionId, session)
@@ -527,6 +534,11 @@ class PtyManager {
 
         shellProcess.onData((data) => {
           session.outputBuffer = appendOutputBuffer(session.outputBuffer ?? '', data, OUTPUT_BUFFER_LIMIT)
+          const seq = session.mirror?.write(data)
+          if (session.replayGate) {
+            session.replayGate.push({ data, ...(seq !== undefined ? { seq } : {}) })
+            return
+          }
           this.emit(session.webContents, { type: 'data', sessionId, data })
         })
 
@@ -534,6 +546,7 @@ class PtyManager {
           const current = this.sessions.get(sessionId)
           if (!current || current.process !== shellProcess) return
           this.sessions.delete(sessionId)
+          current.mirror?.dispose()
           if (current.kind === 'antigravity') finishAntigravityFreshLogin(current.accountId)
           this.emit(current.webContents, { type: 'exit', sessionId, exitCode })
           this.emit(current.webContents, { type: 'status', sessionId, status: 'stopped' })
@@ -589,8 +602,34 @@ class PtyManager {
     }
     if (!session.process) throw new Error('The selected CLI session is no longer available')
     session.process.resize(nextCols, nextRows)
+    session.mirror?.resize(nextCols, nextRows)
     session.cols = nextCols
     session.rows = nextRows
+  }
+
+  /**
+   * Sends a reattaching view the session's current screen, then the output that
+   * arrived meanwhile. Live chunks are held while the screen is fetched; those
+   * already contained in it (seq <= screen seq) are dropped so nothing repeats.
+   */
+  private async sendScreen(
+    session: PtySession,
+    webContents: WebContents,
+    fetch: () => Promise<{ data: string; seq: number | null }>
+  ): Promise<void> {
+    const gate: Array<{ data: string; seq?: number }> = []
+    session.replayGate = gate
+    try {
+      const screen = await fetch()
+      this.emit(webContents, { type: 'status', sessionId: session.id, status: session.status, kind: session.kind })
+      if (screen.data) this.emit(webContents, { type: 'data', sessionId: session.id, data: screen.data, replay: true })
+      for (const chunk of gate) {
+        if (screen.seq !== null && chunk.seq !== undefined && chunk.seq <= screen.seq) continue
+        this.emit(webContents, { type: 'data', sessionId: session.id, data: chunk.data })
+      }
+    } finally {
+      if (session.replayGate === gate) session.replayGate = undefined
+    }
   }
 
   kill(sessionId: string): void {
@@ -598,6 +637,7 @@ class PtyManager {
     if (!session) return
 
     this.sessions.delete(sessionId)
+    session.mirror?.dispose()
     if (session.durable) {
       void ptyHostClient.kill(sessionId)
       this.scheduleHostRelease()

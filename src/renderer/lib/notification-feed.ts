@@ -121,7 +121,7 @@ export function noteCliFinished(input: {
   panelId: string
   title: string
   outcome: 'done' | 'error'
-}): void {
+}): AppNotice {
   const visible = useWorkspaceStore.getState().activeProjectId === input.projectId && !isWindowInactive()
   const notice = useNotificationStore.getState().push({
     kind: input.outcome === 'error' ? 'failed' : 'done',
@@ -134,5 +134,30 @@ export function noteCliFinished(input: {
     panelIds: [input.panelId]
   }, { toast: !visible })
   if (visible) useNotificationStore.getState().markRead(notice.id)
+  desktopNotice(notice)
+  return notice
+}
+
+/**
+ * A CLI stopped to ask for approval or an answer. Unlike a finish, this blocks
+ * the work, so it toasts even inside the same project when another panel is
+ * in front; the caller skips it when the panel itself is in view.
+ */
+export function noteCliAsking(input: {
+  projectId: string
+  projectName: string
+  panelId: string
+  title: string
+}): void {
+  const notice = useNotificationStore.getState().push({
+    kind: 'needs-input',
+    projectId: input.projectId,
+    projectName: input.projectName,
+    source: input.title,
+    headline: `${input.title} is asking for your approval.`,
+    highlights: [],
+    changedFiles: 0,
+    panelIds: [input.panelId]
+  }, { toast: true })
   desktopNotice(notice)
 }

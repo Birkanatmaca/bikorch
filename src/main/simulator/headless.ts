@@ -7,6 +7,8 @@ export type HeadlessMessage =
   | { op: 'down' | 'move' | 'up'; x: number; y: number }
   | { op: 'key'; key?: string; text?: string }
   | { op: 'button'; button: 'home' | 'lock' }
+  | { op: 'view'; visible: boolean; maxHeight?: number }
+  | { op: 'orientation'; orientation: 1 | 3 | 4 }
 
 export type HeadlessEvent =
   | { type: 'ready' }
@@ -14,6 +16,30 @@ export type HeadlessEvent =
   | { type: 'failed'; message: string }
 
 let child: ChildProcessWithoutNullStreams | null = null
+
+const MESSAGE_JSON = 0x4a
+const MESSAGE_FRAME = 0x46
+const HEADER_BYTES = 5
+
+/**
+ * Splits the helper's stdout into messages: one type byte, a 4-byte big-endian
+ * length, then the payload. Frames arrive as raw JPEG bytes.
+ */
+export class HelperMessageReader {
+  private buffer: Buffer = Buffer.alloc(0)
+
+  push(chunk: Buffer, onMessage: (type: number, payload: Buffer) => void): void {
+    this.buffer = this.buffer.length ? Buffer.concat([this.buffer, chunk]) : chunk
+    while (this.buffer.length >= HEADER_BYTES) {
+      const length = this.buffer.readUInt32BE(1)
+      if (this.buffer.length < HEADER_BYTES + length) return
+      const type = this.buffer[0]
+      const payload = this.buffer.subarray(HEADER_BYTES, HEADER_BYTES + length)
+      this.buffer = this.buffer.subarray(HEADER_BYTES + length)
+      onMessage(type, payload)
+    }
+  }
+}
 
 function send(message: HeadlessMessage): void {
   if (!child || child.killed || !child.stdin.writable) return
@@ -45,19 +71,19 @@ export async function startHeadless(udid: string, onEvent: (event: HeadlessEvent
   }
   const next = spawn(binary, [], { stdio: ['pipe', 'pipe', 'pipe'] })
   child = next
-  let buffer = ''
+  const reader = new HelperMessageReader()
   let settled = false
   next.stdout.on('data', (chunk: Buffer) => {
-    buffer += chunk.toString('utf8')
-    const lines = buffer.split('\n')
-    buffer = lines.pop() ?? ''
-    for (const line of lines) {
-      if (!line.trim() || child !== next) continue
+    reader.push(chunk, (type, payload) => {
+      if (child !== next) return
+      if (type === MESSAGE_FRAME) {
+        onEvent({ type: 'frame', jpeg: payload })
+        return
+      }
+      if (type !== MESSAGE_JSON) return
       try {
-        const message = JSON.parse(line) as { op?: string; data?: string; message?: string }
-        if (message.op === 'frame' && typeof message.data === 'string') {
-          onEvent({ type: 'frame', jpeg: Buffer.from(message.data, 'base64') })
-        } else if (message.op === 'ready') {
+        const message = JSON.parse(payload.toString('utf8')) as { op?: string; message?: string }
+        if (message.op === 'ready') {
           settled = true
           onEvent({ type: 'ready' })
         } else if (message.op === 'headless-error') {
@@ -65,9 +91,9 @@ export async function startHeadless(udid: string, onEvent: (event: HeadlessEvent
           onEvent({ type: 'failed', message: message.message ?? 'The headless simulator failed.' })
         }
       } catch {
-        // Ignore partial or unknown lines.
+        // Ignore unknown messages.
       }
-    }
+    })
   })
   next.stderr.on('data', (chunk: Buffer) => {
     const text = chunk.toString('utf8').trim()

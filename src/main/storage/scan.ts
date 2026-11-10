@@ -2,9 +2,9 @@ import { execFile } from 'child_process'
 import { createHash } from 'crypto'
 import { app } from 'electron'
 import type { Dirent } from 'fs'
-import { readdir, stat, statfs } from 'fs/promises'
+import { readdir, realpath, stat, statfs } from 'fs/promises'
 import { homedir } from 'os'
-import { basename, join, relative } from 'path'
+import { basename, dirname, join, relative } from 'path'
 import type { StorageGroup, StorageItem, StorageReport, StorageSafety } from '@shared/contracts/storage'
 import { mainRepositoryOf } from '../accounts/workspace-trust'
 import { loadRepoIsolation } from '../git/agent-run-store'
@@ -33,9 +33,19 @@ export interface ScannedItem {
 const MIN_ITEM_BYTES = 1024 * 1024
 const MIN_APP_CACHE_BYTES = 50 * 1024 * 1024
 const SIZE_CONCURRENCY = 4
+/** Claude Code deletes conversations after 30 days itself; these are the ones it still keeps. */
+export const OLD_CONVERSATION_DAYS = 14
+const DAY_MS = 86_400_000
+const CONVERSATION_ENTRY_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\.jsonl)?$/i
 
 let lastScan = new Map<string, ScannedItem>()
 let running: Promise<StorageReport> | null = null
+let lastReport: StorageReport | null = null
+
+/** The most recent finished scan, if any. */
+export function latestStorageReport(): StorageReport | null {
+  return lastReport
+}
 
 export function scannedItem(id: string): ScannedItem | undefined {
   return lastScan.get(id)
@@ -184,9 +194,14 @@ async function bikorchItems(userData: string, projectFolders: string[]): Promise
     if (!state) continue
     const finished: string[] = []
     for (const run of state.runs) {
-      if (!isTerminalAgentRunStatus(run.status) || !(await pathExists(run.worktreePath))) continue
-      if (await isWorkingTreeDirty(run.worktreePath).catch(() => true)) continue
-      finished.push(run.worktreePath)
+      if (!(await pathExists(run.worktreePath))) continue
+      const ended = isTerminalAgentRunStatus(run.status)
+      if (ended && !(await isWorkingTreeDirty(run.worktreePath).catch(() => true))) {
+        finished.push(run.worktreePath)
+        continue
+      }
+      // A worktree that stays (unsaved changes, or still in use) can still shed its build output.
+      pending.push(...(await worktreeOutputItems(repoRoot, run.worktreePath, ended)))
     }
     if (finished.length === 0) continue
     pending.push({
@@ -240,6 +255,111 @@ async function bikorchItems(userData: string, projectFolders: string[]): Promise
     }
   }
   return pending
+}
+
+/** Build output and dependencies inside an agent worktree; the worktree and its changes stay. */
+async function worktreeOutputItems(repoRoot: string, worktree: string, ended: boolean): Promise<Pending[]> {
+  const outputs = await findProjectOutputs(worktree).catch(() => [])
+  const lastUsedAt = await projectLastUsed(worktree).catch(() => null)
+  return outputs.map((output) => ({
+    id: idFor('bikorch-worktree-output', output.path),
+    group: 'bikorch' as const,
+    label: `Agent worktree · ${basename(repoRoot)} · ${relative(worktree, output.path)}`,
+    detail: ended
+      ? `${output.detail} It sits in a finished agent worktree (${basename(worktree)}) whose unsaved changes stay.`
+      : `${output.detail} An agent may still be using this worktree (${basename(worktree)}); clean it once that agent is done.`,
+    path: output.path,
+    safety: ended ? output.safety : 'caution' as const,
+    plan: { type: 'remove' as const, paths: [output.path] },
+    project: basename(repoRoot),
+    lastUsedAt
+  }))
+}
+
+/** Conversation folders of Claude Code: the user's own and each Bikorch Claude account's. */
+function conversationRoots(home: string, userData: string, profileIds: string[]): Array<{ id: string; label: string; path: string }> {
+  return [
+    { id: 'claude-home', label: 'Old Claude Code conversations', path: join(home, '.claude', 'projects') },
+    ...profileIds.map((profile) => ({
+      id: `claude-profile-${profile}`,
+      label: 'Old Claude conversations in Bikorch',
+      path: join(userData, 'cli-profiles', 'claude', profile, 'projects')
+    }))
+  ]
+}
+
+/**
+ * Conversation logs (and their tool output folders) untouched for
+ * OLD_CONVERSATION_DAYS. A conversation in use is written to, so it is never this old.
+ */
+export async function oldConversationItems(home: string, userData: string, now = Date.now()): Promise<Pending[]> {
+  const profiles = (await entries(join(userData, 'cli-profiles', 'claude'))).filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+  const cutoff = now - OLD_CONVERSATION_DAYS * DAY_MS
+  const pending: Pending[] = []
+  for (const root of conversationRoots(home, userData, profiles)) {
+    const stale: string[] = []
+    let bytes = 0
+    let newest = 0
+    for (const project of await entries(root.path)) {
+      if (!project.isDirectory()) continue
+      for (const entry of await entries(join(root.path, project.name))) {
+        // Only a conversation (<uuid>.jsonl) and its tool output folder (<uuid>/);
+        // never memory/ or anything else Claude Code keeps next to them.
+        if (!CONVERSATION_ENTRY_RE.test(entry.name)) continue
+        const path = join(root.path, project.name, entry.name)
+        const info = await stat(path).catch(() => null)
+        if (!info || info.mtimeMs >= cutoff) continue
+        stale.push(path)
+        newest = Math.max(newest, info.mtimeMs)
+        bytes += entry.isDirectory() ? await sizeOf(path) : info.size
+      }
+    }
+    if (stale.length === 0) continue
+    pending.push({
+      id: idFor('claude-conversations', root.path),
+      group: 'bikorch',
+      label: root.label,
+      detail: `${stale.length} conversation file${stale.length === 1 ? '' : 's'} untouched for ${OLD_CONVERSATION_DAYS}+ days. Claude Code deletes them after 30 days anyway; once gone they cannot be resumed.`,
+      path: root.path,
+      safety: 'caution',
+      plan: { type: 'remove', paths: stale },
+      bytes,
+      lastUsedAt: newest || null
+    })
+  }
+  return pending
+}
+
+/**
+ * Claude Code keeps every version it updated to. The one ~/.local/bin/claude
+ * runs and the newest stay; nothing is listed if the running one is unknown.
+ */
+export async function oldClaudeVersionItems(home: string): Promise<Pending[]> {
+  if (process.platform === 'win32') return []
+  // Compare real paths: the home folder itself may sit behind a symlink.
+  const versions = await realpath(join(home, '.local', 'share', 'claude', 'versions')).catch(() => null)
+  const current = await realpath(join(home, '.local', 'bin', 'claude')).catch(() => null)
+  if (!versions || !current || dirname(current) !== versions) return []
+  const all = await Promise.all(
+    (await entries(versions)).map(async (entry) => {
+      const path = join(versions, entry.name)
+      return { path, name: entry.name, at: (await stat(path).catch(() => null))?.mtimeMs ?? 0 }
+    })
+  )
+  const newest = all.reduce<(typeof all)[number] | null>((best, item) => (!best || item.at > best.at ? item : best), null)
+  const old = all.filter((item) => item.path !== current && item.path !== newest?.path)
+  if (old.length === 0) return []
+  return [{
+    id: 'dev:claude-code-versions',
+    group: 'developer',
+    label: 'Old Claude Code versions',
+    detail: `${old.map((item) => item.name).join(', ')}. Claude Code keeps every version it updated to; the one in use (${basename(current)}) stays.`,
+    path: versions,
+    safety: 'safe',
+    plan: { type: 'remove', paths: old.map((item) => item.path) },
+    measure: old.map((item) => item.path),
+    lastUsedAt: Math.max(...old.map((item) => item.at)) || null
+  }]
 }
 
 /** "accesverifyer/mobile" says more than "mobile" when several projects share a name. */
@@ -302,6 +422,8 @@ async function runScan(): Promise<StorageReport> {
   const pending = [
     ...(await bikorchItems(userData, registered)),
     ...(await toolCacheItems(home)),
+    ...(await oldClaudeVersionItems(home)),
+    ...(await oldConversationItems(home, userData)),
     ...(await projectItems(registered, false, home)),
     ...(await projectItems(nearby, true, home)),
     ...(await appCacheItems(home))
@@ -344,8 +466,13 @@ async function runScan(): Promise<StorageReport> {
 
 /** One scan at a time; a second request joins the running one. */
 export function scanStorage(): Promise<StorageReport> {
-  running ??= runScan().finally(() => {
-    running = null
-  })
+  running ??= runScan()
+    .then((report) => {
+      lastReport = report
+      return report
+    })
+    .finally(() => {
+      running = null
+    })
   return running
 }

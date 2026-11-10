@@ -1,36 +1,57 @@
 import { useRef } from 'react'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
-import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useActivityAttentionStore } from '@renderer/stores/activity-attention-store'
 import { useOpenProject } from '@renderer/hooks/use-open-project'
-import { summarizeProjectTabActivity, type ProjectTabActivity } from '@renderer/lib/project-activity'
+import { useProjectSessionSummaries } from '@renderer/hooks/use-session-signals'
+import {
+  SESSION_SIGNAL_LABEL,
+  formatElapsed,
+  type ProjectSessionSummary,
+  type SessionSignal
+} from '@renderer/lib/project-activity'
 import { focusWorkspacePanel } from '@renderer/lib/app-events'
+import { SignalIcon } from '@renderer/components/ui/SessionBadge'
 import { cn, formatProjectName } from '@renderer/lib/utils'
 import { FolderOpen, House, Plus, X } from 'lucide-react'
 import type { Project } from '@shared/types'
 
-function TabFace({
-  project,
-  isActive,
-  activity
-}: {
-  project: Project
-  isActive: boolean
-  activity: ProjectTabActivity
-}): React.JSX.Element {
+const EMPTY_SUMMARY: ProjectSessionSummary = {
+  top: null,
+  counts: { asking: 0, error: 0, working: 0, done: 0, idle: 0, off: 0 },
+  rows: []
+}
+
+const PILL_SIGNALS: SessionSignal[] = ['asking', 'error', 'working', 'done']
+
+/** One line per session for the tab tooltip: "Claude 1 — Working · 3m". */
+function summaryLines(summary: ProjectSessionSummary): string[] {
+  return summary.rows
+    .filter((row) => row.signal !== 'idle' && row.signal !== 'off')
+    .map((row) => `${row.title} — ${SESSION_SIGNAL_LABEL[row.signal]}${row.since ? ` · ${formatElapsed(row.since)}` : ''}`)
+}
+
+function summaryLabel(summary: ProjectSessionSummary): string {
+  return PILL_SIGNALS
+    .filter((signal) => summary.counts[signal] > 0)
+    .map((signal) => `${summary.counts[signal]} ${SESSION_SIGNAL_LABEL[signal].toLowerCase()}`)
+    .join(', ')
+}
+
+function TabFace({ project, summary }: { project: Project; summary: ProjectSessionSummary }): React.JSX.Element {
+  const active = PILL_SIGNALS.filter((signal) => summary.counts[signal] > 0)
+  // The icon already says it when only one session has something to show.
+  const showPills = active.length > 1 || (active.length === 1 && summary.counts[active[0]] > 1)
   return (
     <>
-      <span
-        className={cn(
-          'project-tab-dot',
-          isActive && activity.signal === 'idle' && 'is-on',
-          activity.signal === 'busy' && 'is-busy',
-          activity.signal === 'ready' && 'is-ready',
-          activity.signal === 'error' && 'is-error'
-        )}
-        aria-hidden
-      />
+      {summary.top ? <SignalIcon signal={summary.top} className="project-tab-signal" /> : <span className="project-tab-dot" aria-hidden />}
       <span className="project-tab-name">{project.name}</span>
+      {showPills && (
+        <span className="project-tab-pills" aria-hidden>
+          {active.map((signal) => (
+            <span key={signal} className={cn('project-tab-pill', `is-${signal}`)}>{summary.counts[signal]}</span>
+          ))}
+        </span>
+      )}
     </>
   )
 }
@@ -44,30 +65,44 @@ export function ProjectTabs(): React.JSX.Element {
   const setActiveProject = useWorkspaceStore((s) => s.setActiveProject)
   const removeProject = useWorkspaceStore((s) => s.removeProject)
   const updateProject = useWorkspaceStore((s) => s.updateProject)
-  const sessions = useTerminalStore((s) => s.sessions)
-  const attentionByProject = useActivityAttentionStore((s) => s.attentionByProject)
+  const summaries = useProjectSessionSummaries()
   const { openFolderPicker } = useOpenProject()
   const listRef = useRef<HTMLDivElement>(null)
   const draggedProjectIdRef = useRef<string | null>(null)
   const draggedTabRef = useRef<HTMLDivElement | null>(null)
   const dropTabRef = useRef<HTMLDivElement | null>(null)
 
-  const activityFor = (projectId: string): ProjectTabActivity =>
-    summarizeProjectTabActivity({
-      panels: workspaces[projectId]?.panels ?? [],
-      sessions,
-      attention: attentionByProject[projectId] ?? []
-    })
+  const summaryFor = (projectId: string): ProjectSessionSummary => summaries[projectId] ?? EMPTY_SUMMARY
 
+  // Opening a project goes straight to the session that most needs the user.
   const activateProject = (projectId: string): void => {
-    const attentionStore = useActivityAttentionStore.getState()
-    const pending = attentionStore.attentionByProject[projectId]
-    const review = pending?.reduce((latest, item) => (item.at >= latest.at ? item : latest), pending[0])
+    const target = summaryFor(projectId).rows.find((row) =>
+      (row.signal === 'asking' || row.signal === 'error' || row.signal === 'done') && !row.panelId.startsWith('secretary:'))
     setActiveProject(projectId)
-    attentionStore.clearProject(projectId)
-    if (!review) return
-    window.setTimeout(() => focusWorkspacePanel(review.panelId), 40)
+    useActivityAttentionStore.getState().clearDetached(projectId)
+    if (target) window.setTimeout(() => focusWorkspacePanel(target.panelId), 40)
   }
+
+  // Home carries what needs the user across all projects.
+  const homeCounts = Object.values(summaries).reduce(
+    (sum, summary) => ({
+      asking: sum.asking + summary.counts.asking,
+      error: sum.error + summary.counts.error,
+      done: sum.done + summary.counts.done,
+      working: sum.working + summary.counts.working
+    }),
+    { asking: 0, error: 0, done: 0, working: 0 }
+  )
+  const homeAttention = homeCounts.asking + homeCounts.error + homeCounts.done
+  const homeTop: SessionSignal | null = homeCounts.asking ? 'asking' : homeCounts.error ? 'error' : homeCounts.done ? 'done' : homeCounts.working ? 'working' : null
+  const homeTitle = homeTop
+    ? `Home — ${[
+        homeCounts.asking && `${homeCounts.asking} need you`,
+        homeCounts.error && `${homeCounts.error} with errors`,
+        homeCounts.working && `${homeCounts.working} working`,
+        homeCounts.done && `${homeCounts.done} done`
+      ].filter(Boolean).join(', ')}`
+    : 'Home'
 
   const handleSelectFolder = async (projectId: string): Promise<void> => {
     const folder = await window.api.selectFolder()
@@ -136,15 +171,22 @@ export function ProjectTabs(): React.JSX.Element {
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') showHome()
         }}
-        title="Home"
-        aria-label="Home"
+        title={homeTitle}
+        aria-label={homeTitle}
       >
         <House className="h-4 w-4" aria-hidden />
+        {homeTop && !homeVisible && (
+          <span className={cn('project-home-badge', `is-${homeTop}`)} aria-hidden>
+            {homeAttention > 0 ? homeAttention : ''}
+          </span>
+        )}
       </button>
       {projects.map((project) => {
         const isActive = !homeVisible && project.id === activeProjectId
-        const activity = activityFor(project.id)
-        const tabTitle = [project.folderPath || project.name, activity.label].filter(Boolean).join(' · ')
+        const summary = summaryFor(project.id)
+        const lines = summaryLines(summary)
+        const tabTitle = [project.folderPath || project.name, ...(lines.length > 0 ? ['', ...lines] : [])].join('\n')
+        const label = summaryLabel(summary)
 
         return (
           <div
@@ -176,7 +218,7 @@ export function ProjectTabs(): React.JSX.Element {
             onPointerDown={(event) => handleActivate(event, project.id)}
             role="tab"
             aria-selected={isActive}
-            aria-label={activity.label ? `${project.name}. ${activity.label}` : project.name}
+            aria-label={label ? `${project.name}. ${label}` : project.name}
             title={tabTitle}
             tabIndex={isActive ? 0 : -1}
             onKeyDown={(event) => {
@@ -203,12 +245,10 @@ export function ProjectTabs(): React.JSX.Element {
             className={cn(
               'project-tab group relative flex max-w-[196px] items-center gap-1.5 app-no-drag',
               isActive ? 'is-active' : 'is-idle',
-              activity.signal === 'busy' && 'is-working',
-              activity.signal === 'ready' && 'is-ready',
-              activity.signal === 'error' && 'is-alert'
+              summary.top && `has-${summary.top}`
             )}
           >
-            <TabFace project={project} isActive={isActive} activity={activity} />
+            <TabFace project={project} summary={summary} />
             <button
               type="button"
               data-tab-action="folder"

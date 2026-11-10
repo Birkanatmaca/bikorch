@@ -1,4 +1,5 @@
 import { app, BrowserWindow, session, shell } from 'electron'
+import { disposeHomeChat } from './dashboard/home-chat'
 import { join, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { ptyManager } from './cli/pty-manager'
@@ -26,7 +27,7 @@ import {
 } from './lifecycle/background'
 import { disposeTray, initTray } from './lifecycle/tray'
 import { closeAllNotifications } from './notifications'
-import { stopSimulatorSession } from './simulator/session'
+import { startSimulatorInstallWatch, stopSimulatorSession } from './simulator/session'
 
 const isDev = !app.isPackaged
 const isBackgroundStart = process.argv.includes('--background')
@@ -174,6 +175,8 @@ function createWindow(): BrowserWindow {
   return mainWindow
 }
 
+let stopSimulatorInstallWatch: () => void = () => undefined
+
 app.whenReady().then(async () => {
   applyAppBranding()
   // Started from a Claude Code session? Its markers must not reach our CLI panels.
@@ -205,6 +208,7 @@ app.whenReady().then(async () => {
     callback(permission === 'media' || permission === 'fullscreen')
   })
   createWindow()
+  stopSimulatorInstallWatch = startSimulatorInstallWatch()
   void pruneOversizedBrowserCaches().catch((error) => {
     console.error('Browser cache maintenance failed:', error)
   })
@@ -241,8 +245,10 @@ app.on('before-quit', () => {
   disposeTray()
   disposeDownloadManager()
   closeAllNotifications()
+  disposeHomeChat()
   // Keep durable host sessions alive so updates/restarts can reattach.
   ptyManager.releaseForAppQuit()
+  stopSimulatorInstallWatch()
   stopSimulatorSession()
 })
 

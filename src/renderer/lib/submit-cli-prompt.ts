@@ -1,4 +1,5 @@
 import { formatCliPaste } from '@shared/cli-prompt'
+import { useTerminalStore } from '@renderer/stores/terminal-store'
 
 export { formatCliPaste } from '@shared/cli-prompt'
 
@@ -10,4 +11,5 @@ export async function submitCliPrompt(sessionId: string, prompt: string): Promis
   await window.api.pty.write({ sessionId, data: formatCliPaste(text) })
   await new Promise((resolve) => setTimeout(resolve, SUBMIT_DELAY_MS))
   await window.api.pty.write({ sessionId, data: '\r' })
+  useTerminalStore.getState().noteInput(sessionId)
 }

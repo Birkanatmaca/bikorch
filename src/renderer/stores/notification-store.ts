@@ -51,6 +51,8 @@ interface NotificationStore {
   centerOpen: boolean
   push: (notice: Omit<AppNotice, 'id' | 'at' | 'read'>, options?: { toast?: boolean }) => AppNotice
   dismissToast: (id: string) => void
+  /** Takes back a notice that turned out to be wrong: gone from toasts and history. */
+  retract: (id: string) => void
   markRead: (id: string) => void
   markAllRead: () => void
   clear: () => void
@@ -72,6 +74,11 @@ export const useNotificationStore = create<NotificationStore>((set, get) => ({
     return notice
   },
   dismissToast: (id) => set((state) => ({ toastIds: state.toastIds.filter((item) => item !== id) })),
+  retract: (id) => {
+    const notices = get().notices.filter((item) => item.id !== id)
+    if (notices.length !== get().notices.length) save(notices)
+    set((state) => ({ notices, toastIds: state.toastIds.filter((item) => item !== id) }))
+  },
   markRead: (id) => {
     const notices = get().notices.map((item) => (item.id === id ? { ...item, read: true } : item))
     save(notices)

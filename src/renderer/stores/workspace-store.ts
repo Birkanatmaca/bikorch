@@ -152,6 +152,16 @@ function noteProjectOpened(project: Project): void {
 }
 
 const WEB_CHAT_TYPES = ['chatgpt', 'claude-chat'] as const
+/**
+ * Panels that follow you across project tabs: open once, shown in every tab,
+ * closed everywhere at once. The iOS device runs one simulator for the whole app.
+ */
+const CARRIED_TYPES = [...WEB_CHAT_TYPES, 'ios-preview'] as const
+type CarriedPanelType = (typeof CARRIED_TYPES)[number]
+
+function isCarriedPanel(type: PanelType | undefined): type is CarriedPanelType {
+  return (CARRIED_TYPES as readonly string[]).includes(type ?? '')
+}
 
 function workspaceHasType(workspace: ProjectWorkspaceState | undefined, type: PanelType): boolean {
   return Boolean(workspace?.panels.some((panel) => panel.type === type))
@@ -186,7 +196,7 @@ interface WorkspaceStore extends WorkspaceSnapshot {
   touchRecentProject: (projectId: string) => void
   ensureProjectWorkspace: (projectId: string, openSidebar?: boolean) => void
   carryWebChats: (projectId: string) => void
-  closeWebChat: (type: 'chatgpt' | 'claude-chat') => void
+  closeWebChat: (type: CarriedPanelType) => void
 
   getActiveWorkspace: () => ProjectWorkspaceState | null
   openPlayerPanel: () => string
@@ -754,7 +764,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   carryWebChats: (projectId) => {
     const workspace = get().workspaces[projectId]
     if (!workspace) return
-    for (const type of WEB_CHAT_TYPES) {
+    for (const type of CARRIED_TYPES) {
       if (workspaceHasType(workspace, type)) continue
       if (!anyWorkspaceHasType(get().workspaces, type)) continue
       get().addPanel(type, 'right')
@@ -806,7 +816,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     if (!workspace) return
 
     const removedPanel = workspace.panels.find((p) => p.id === panelId)
-    if (removedPanel && isWebChatPanel(removedPanel.type)) {
+    if (removedPanel && isCarriedPanel(removedPanel.type)) {
       get().closeWebChat(removedPanel.type)
       return
     }

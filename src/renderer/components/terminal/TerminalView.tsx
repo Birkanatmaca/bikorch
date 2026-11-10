@@ -19,9 +19,7 @@ import { getTerminalOptions } from '@renderer/lib/terminal-theme'
 import { registerLiveTerminal, unregisterLiveTerminal } from '@renderer/lib/live-terminals'
 import { Button } from '@renderer/components/ui/Button'
 import {
-  inferCliActivity,
   isCliKind,
-  isInterrupt,
   isPromptSubmit,
   looksCliSignedIn,
   mapProcessStatus
@@ -37,9 +35,12 @@ import {
 } from '@renderer/lib/developer-events'
 import {
   TERMINAL_FIT_SETTLE_MS,
+  TerminalScrollIntent,
+  isScrollbackKey,
   measureTerminalGrid,
   pinViewportToBottom,
   shouldPinTerminalToBottom,
+  shouldRestoreFollow,
   terminalGridEquals,
   viewportIsAtBottom
 } from '@renderer/lib/terminal-fit'
@@ -247,7 +248,56 @@ export function TerminalView({
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
 
-    setStatus(sessionId, 'starting')
+    // Keep the live screen (and the CLI's input box) in view while output streams.
+    // xterm treats every DOM `scroll` event on its viewport as the user's; a late
+    // event with a stale scrollTop (common when a TUI clears scrollback and
+    // redraws) moves the view up and stops it following output. Only real
+    // gestures may leave the bottom; anything else is snapped back.
+    const scrollIntent = new TerminalScrollIntent()
+    let followOutput = true
+    let followFrame: number | null = null
+    const restoreFollow = (): void => {
+      if (followFrame !== null) return
+      followFrame = requestAnimationFrame(() => {
+        followFrame = null
+        if (disposedRef.current) return
+        if (!shouldRestoreFollow(terminal.buffer.active, followOutput)) return
+        if (scrollIntent.isIntentional(performance.now())) return
+        terminal.scrollToBottom()
+      })
+    }
+    const scrollSubscription = terminal.onScroll(() => {
+      const buffer = terminal.buffer.active
+      if (buffer.viewportY >= buffer.baseY) {
+        followOutput = true
+        return
+      }
+      if (scrollIntent.isIntentional(performance.now())) {
+        followOutput = false
+        return
+      }
+      restoreFollow()
+    })
+    const markScrollIntent = (): void => scrollIntent.note(performance.now())
+    const onScrollKey = (event: KeyboardEvent): void => {
+      if (isScrollbackKey(event)) markScrollIntent()
+    }
+    const onPointerHeld = (): void => scrollIntent.pointerDown()
+    const onPointerReleased = (): void => scrollIntent.pointerUp(performance.now())
+    container.addEventListener('wheel', markScrollIntent, { capture: true, passive: true })
+    container.addEventListener('touchmove', markScrollIntent, { capture: true, passive: true })
+    container.addEventListener('keydown', onScrollKey, true)
+    container.addEventListener('pointerdown', onPointerHeld, true)
+    window.addEventListener('pointerup', onPointerReleased, true)
+    window.addEventListener('pointercancel', onPointerReleased, true)
+
+    // Remounting (a project tab switch) must not reset a live session's status:
+    // a working agent would read as idle until its next output.
+    const keepsLiveStatus = (): boolean => {
+      const current = useTerminalStore.getState().getStatus(sessionId)
+      return current === 'busy' || current === 'waiting' || current === 'running'
+    }
+    if (!keepsLiveStatus()) setStatus(sessionId, 'starting')
 
     const cli = isCliKind(kind)
     // Developer Intelligence: rebuild the composed prompt from keystrokes (CLI agents only).
@@ -406,15 +456,8 @@ export function TerminalView({
       if (antigravitySignedOut(plain)) sendAntigravityLogin()
     }
 
-    const applyCliStatus = (next: 'waiting' | 'busy'): void => {
-      const current = useTerminalStore.getState().getStatus(sessionId)
-      if (current === 'stopped' || current === 'error') return
-      if (current === next) return
-      setStatus(sessionId, next)
-    }
-
     // Agent TUIs emit hundreds of tiny chunks a second. Keep the tail current on
-    // every chunk, but publish it and re-infer busy/waiting at most every
+    // every chunk, but publish it and check for sign-in at most every
     // OUTPUT_ANALYSIS_MS: store listeners and the ANSI-stripping regexes then run
     // a few times a second instead of once per chunk.
     let outputAnalysisTimer: number | null = null
@@ -424,14 +467,8 @@ export function TerminalView({
       useTerminalStore.getState().setOutputTail(sessionId, outputTail)
       if (!cli) return
       maybeStartAntigravityLogin()
-      const inferred = inferCliActivity(outputTail)
-      if (inferred === 'busy') {
-        applyCliStatus('busy')
-        return
-      }
-      if (inferred === 'waiting') {
-        applyCliStatus('waiting')
-      }
+      // Busy/idle from output is decided in one place, the PTY activity watch,
+      // which reads a rendered screen; a second guess here would fight it.
     }
     cancelOutputAnalysis = () => {
       if (outputAnalysisTimer !== null) window.clearTimeout(outputAnalysisTimer)
@@ -451,7 +488,9 @@ export function TerminalView({
 
       switch (event.type) {
         case 'data':
-          terminal.write(event.data)
+          terminal.write(event.data, () => {
+            if (shouldRestoreFollow(terminal.buffer.active, followOutput)) restoreFollow()
+          })
           noteOutput(event.data)
           scheduleAuthInspect()
           break
@@ -508,12 +547,11 @@ export function TerminalView({
             })
           }
         }
-        if (isInterrupt(data)) {
-          applyCliStatus('waiting')
-          return
-        }
+        // Busy/idle comes only from what the CLI draws (the PTY activity watch).
+        // Enter also confirms menus and runs slash commands, so it cannot mean
+        // "working"; it only opens a new turn whose finish may be announced.
         if (isPromptSubmit(data)) {
-          applyCliStatus('busy')
+          useTerminalStore.getState().noteInput(sessionId)
         }
       },
       (error) => {
@@ -561,7 +599,7 @@ export function TerminalView({
       }
       antigravityLogoutSent = resumeLogin
       if (nextLaunchMode === 'login' && resumeLogin && kind === 'antigravity') antigravityLoginSent = false
-      setStatus(sessionId, 'starting')
+      if (!liveSession || !keepsLiveStatus()) setStatus(sessionId, 'starting')
       ptyReadyRef.current = false
       if (nextLaunchMode === 'login' && !resumeLogin && (kind === 'cursor' || kind === 'antigravity')) {
         term.writeln(
@@ -737,7 +775,8 @@ export function TerminalView({
           })
         }
       }
-      setStatus(sessionId, mapProcessStatus(kind, result.status), result.error)
+      const reattachedLive = result.reattached && result.status === 'running' && keepsLiveStatus()
+      if (!reattachedLive) setStatus(sessionId, mapProcessStatus(kind, result.status), result.error)
       if (result.status === 'error' && result.error && result.error !== printedPtyError) {
         printedPtyError = result.error
         term.writeln(`\x1b[31m[Error] ${result.error}\x1b[0m`)
@@ -841,6 +880,14 @@ export function TerminalView({
       if (authInspectTimer !== null) window.clearTimeout(authInspectTimer)
       if (authPollTimer !== null) window.clearInterval(authPollTimer)
       clearAntigravityLoginTimers()
+      if (followFrame !== null) cancelAnimationFrame(followFrame)
+      scrollSubscription.dispose()
+      container.removeEventListener('wheel', markScrollIntent, true)
+      container.removeEventListener('touchmove', markScrollIntent, true)
+      container.removeEventListener('keydown', onScrollKey, true)
+      container.removeEventListener('pointerdown', onPointerHeld, true)
+      window.removeEventListener('pointerup', onPointerReleased, true)
+      window.removeEventListener('pointercancel', onPointerReleased, true)
       resizeObserver.disconnect()
       window.removeEventListener('resize', onHostResize)
       document.removeEventListener('visibilitychange', onVisibilityChange)

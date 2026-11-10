@@ -53,7 +53,18 @@ describe('cliLaunchArgs', () => {
     setGeminiSkipTrustSupport(true)
     expect(cliLaunchArgs('gemini')).toEqual(['--skip-trust'])
     setGeminiSkipTrustSupport(false)
-    expect(cliLaunchArgs('claude')).toEqual([])
+    expect(cliLaunchArgs('claude', 'login')).toEqual([])
+  })
+
+  it('tells Claude on a Mac to run iOS apps in the Bikorch simulator panel', () => {
+    const args = cliLaunchArgs('claude')
+    if (process.platform !== 'darwin') {
+      expect(args).toEqual([])
+      return
+    }
+    expect(args[0]).toBe('--append-system-prompt')
+    expect(args[1]).toContain('xcrun simctl install')
+    expect(args[1]).toContain('open -a Simulator')
   })
 })
 

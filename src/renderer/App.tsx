@@ -4,6 +4,7 @@ import { AppHeader } from '@renderer/components/layout/AppHeader'
 import { StatusBar } from '@renderer/components/layout/StatusBar'
 import { WorkspaceLayout } from '@renderer/components/layout/WorkspaceLayout'
 import { HomeDashboard } from '@renderer/components/home/HomeDashboard'
+import { PersistentIosDeviceHost } from '@renderer/components/mobile-preview/PersistentIosDevice'
 import { CommandPalette } from '@renderer/components/command/CommandPalette'
 import { ErrorBoundary } from '@renderer/components/ui/ErrorBoundary'
 import { LoadingSplash } from '@renderer/components/ui/LoadingSplash'
@@ -162,6 +163,7 @@ export default function App(): React.JSX.Element {
         )}
         {(projects.length === 0 || homeVisible) && <HomeDashboard />}
         <StatusBar />
+        <PersistentIosDeviceHost />
         <MusicPlayerHost />
         <TimerHost />
         <CommandPalette open={open} onClose={closePalette} />

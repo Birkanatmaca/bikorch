@@ -25,11 +25,15 @@ import { useActivityAttentionStore } from '@renderer/stores/activity-attention-s
 import { checkAllAccountUsage } from '@renderer/lib/usage-sync'
 import { focusWorkspacePanel, OPEN_SERVERS_EVENT } from '@renderer/lib/app-events'
 import { isDocumentHidden, onDocumentVisibility } from '@renderer/lib/visibility'
+import { SESSION_SIGNAL_ORDER, formatElapsed, isPtyPanelType, sessionSignal, type SessionSignal } from '@renderer/lib/project-activity'
+import { useNow } from '@renderer/hooks/use-session-signals'
+import { SignalIcon } from '@renderer/components/ui/SessionBadge'
 import { useOpenProject } from '@renderer/hooks/use-open-project'
 import { getCliLogo } from '@renderer/lib/cli-logos'
 import { cn } from '@renderer/lib/utils'
-import { HealthDot, ServerHealthDetails } from '@renderer/components/servers/ServerHealthView'
+import { HealthDot, ServerHealthTiles } from '@renderer/components/servers/ServerHealthView'
 import { ContributionMap, Ring, StackedBars, compactNumber, dayKey, formatBytes, streaks } from './charts'
+import { SystemCare } from './SystemCare'
 
 /** Calls `load` now and every `intervalMs` while the window is visible. */
 export function usePolled<T>(load: () => Promise<T>, intervalMs: number): { data: T | null; refresh: () => void; loading: boolean } {
@@ -138,49 +142,56 @@ export function ClaudeLimitsWidget(): React.JSX.Element {
 
 /* Live sessions ----------------------------------------------------------- */
 
-const SESSION_TYPES = new Set(['claude', 'terminal'])
+type SessionTone = SessionSignal
 
-type SessionTone = 'working' | 'waiting' | 'done' | 'error' | 'idle'
+const SESSION_ROW_LABEL: Record<SessionSignal, string> = {
+  asking: 'Needs your answer',
+  error: 'Error',
+  working: 'Working',
+  done: 'Done · not seen yet',
+  idle: 'Ready',
+  off: 'Stopped'
+}
 
 export function SessionsWidget(): React.JSX.Element {
   const projects = useWorkspaceStore((state) => state.projects)
   const workspaces = useWorkspaceStore((state) => state.workspaces)
   const setActiveProject = useWorkspaceStore((state) => state.setActiveProject)
   const sessions = useTerminalStore((state) => state.sessions)
+  const asking = useTerminalStore((state) => state.asking)
+  const busySince = useTerminalStore((state) => state.busySince)
   const attention = useActivityAttentionStore((state) => state.attentionByProject)
+  const now = useNow(30_000)
 
   const rows = useMemo(() => {
     const list: Array<{ projectId: string; project: string; panelId: string; title: string; type: string; tone: SessionTone; label: string }> = []
     for (const project of projects) {
-      const finished = new Map((attention[project.id] ?? []).map((item) => [item.panelId, item.outcome]))
+      const unseen = new Map((attention[project.id] ?? []).map((item) => [item.panelId, item.outcome]))
       for (const panel of workspaces[project.id]?.panels ?? []) {
-        if (!SESSION_TYPES.has(panel.type)) continue
-        const status = sessions[panel.id]
-        const outcome = finished.get(panel.id)
-        const tone: SessionTone =
-          status === 'busy' || status === 'starting' ? 'working'
-            : status === 'error' || outcome === 'error' ? 'error'
-              : outcome === 'done' ? 'done'
-                : status === 'waiting' ? 'waiting'
-                  : 'idle'
-        const label = { working: 'Working', waiting: 'Waiting for you', done: 'Done', error: 'Needs attention', idle: status === 'stopped' ? 'Stopped' : 'Not started' }[tone]
+        if (!isPtyPanelType(panel.type)) continue
+        const tone = sessionSignal({ status: sessions[panel.id], asking: asking[panel.id], unseen: unseen.get(panel.id) })
+        const since = busySince[panel.id]
+        const label = tone === 'working' && since ? `Working · ${formatElapsed(since, now)}` : SESSION_ROW_LABEL[tone]
         list.push({ projectId: project.id, project: project.name, panelId: panel.id, title: panel.title, type: panel.type, tone, label })
       }
     }
-    const order: Record<SessionTone, number> = { working: 0, error: 1, done: 2, waiting: 3, idle: 4 }
-    return list.sort((a, b) => order[a.tone] - order[b.tone])
-  }, [attention, projects, sessions, workspaces])
+    return list.sort((a, b) => SESSION_SIGNAL_ORDER.indexOf(a.tone) - SESSION_SIGNAL_ORDER.indexOf(b.tone))
+  }, [asking, attention, busySince, now, projects, sessions, workspaces])
 
-  const counts = rows.reduce<Record<SessionTone, number>>((sum, row) => ({ ...sum, [row.tone]: sum[row.tone] + 1 }), { working: 0, waiting: 0, done: 0, error: 0, idle: 0 })
+  const counts = rows.reduce<Record<SessionTone, number>>(
+    (sum, row) => ({ ...sum, [row.tone]: sum[row.tone] + 1 }),
+    { asking: 0, error: 0, working: 0, done: 0, idle: 0, off: 0 }
+  )
 
   if (rows.length === 0) return <WidgetEmpty>No open sessions. Open a project and start Claude; its progress shows up here.</WidgetEmpty>
   return (
     <div className="home-sessions">
       <div className="home-session-counts">
+        {counts.asking > 0 && <span className="tone-asking"><b>{counts.asking}</b> need you</span>}
         <span className="tone-working"><b>{counts.working}</b> working</span>
         <span className="tone-done"><b>{counts.done}</b> done</span>
-        <span className="tone-waiting"><b>{counts.waiting}</b> waiting</span>
-        {counts.error > 0 && <span className="tone-error"><b>{counts.error}</b> need attention</span>}
+        {counts.error > 0 && <span className="tone-error"><b>{counts.error}</b> errors</span>}
+        <span className="tone-idle"><b>{counts.idle}</b> ready</span>
       </div>
       <ul className="home-session-list">
         {rows.slice(0, 12).map((row) => (
@@ -190,11 +201,13 @@ export function SessionsWidget(): React.JSX.Element {
               className={cn('home-session', `tone-${row.tone}`)}
               onClick={() => {
                 setActiveProject(row.projectId)
-                useActivityAttentionStore.getState().clearProject(row.projectId)
+                // Focusing the panel marks it seen.
                 window.setTimeout(() => focusWorkspacePanel(row.panelId), 60)
               }}
             >
-              <span className="home-session-pulse" aria-hidden />
+              {row.tone === 'idle' || row.tone === 'off'
+                ? <span className="home-session-pulse" aria-hidden />
+                : <SignalIcon signal={row.tone} className="home-session-signal" />}
               <span className="home-session-text">
                 <strong>{row.title || PANEL_TYPE_LABELS[row.type as keyof typeof PANEL_TYPE_LABELS]}</strong>
                 <small>{row.project}</small>
@@ -219,7 +232,7 @@ const THERMAL_COPY: Record<NonNullable<SystemMetrics['thermal']>, string> = {
 }
 
 export function SystemWidget(): React.JSX.Element {
-  const { data } = usePolled(() => window.api.dashboard.system(), 5_000)
+  const { data, refresh } = usePolled(() => window.api.dashboard.system(), 5_000)
   if (!data) return <WidgetEmpty>Reading this Mac…</WidgetEmpty>
   const memory = (data.memory.usedBytes / data.memory.totalBytes) * 100
   const disk = data.disk ? ((data.disk.totalBytes - data.disk.freeBytes) / data.disk.totalBytes) * 100 : null
@@ -260,6 +273,7 @@ export function SystemWidget(): React.JSX.Element {
         )}
         <span className="home-chip">Load {data.load1.toFixed(1)} / {data.cpus}</span>
       </div>
+      <SystemCare onCleaned={refresh} />
       <div className="home-procs">
         <span className="home-procs-title"><Flame className="h-3 w-3" aria-hidden /> Heaviest right now</span>
         {grouped.map((process) => (
@@ -283,6 +297,7 @@ export function ServersWidget(): React.JSX.Element {
   const setActiveProject = useWorkspaceStore((state) => state.setActiveProject)
   const healthById = useServerHealthStore((state) => state.healthById)
   const checkingIds = useServerHealthStore((state) => state.checkingIds)
+  const historyById = useServerHealthStore((state) => state.historyById)
   useEffect(() => watchServerHealth(), [])
   if (servers.length === 0) {
     return (
@@ -304,18 +319,35 @@ export function ServersWidget(): React.JSX.Element {
       </WidgetEmpty>
     )
   }
-  const healthy = servers.filter((server) => healthById[server.id]?.state === 'healthy').length
+  const states = servers.map((server) => healthById[server.id]?.state)
+  const count = (state: string): number => states.filter((value) => value === state).length
+  const latencies = servers.map((server) => healthById[server.id]?.latencyMs).filter((value): value is number => typeof value === 'number')
+  const averageLatency = latencies.length > 0 ? Math.round(latencies.reduce((sum, value) => sum + value, 0) / latencies.length) : null
   return (
     <div className="home-servers">
-      <p className="home-servers-summary"><b>{healthy}</b> of {servers.length} healthy</p>
+      <div className="home-servers-summary">
+        <span className="tone-healthy"><b>{count('healthy') + count('reachable')}</b> online</span>
+        {count('warning') > 0 && <span className="tone-warning"><b>{count('warning')}</b> need attention</span>}
+        {count('down') > 0 && <span className="tone-down"><b>{count('down')}</b> down</span>}
+        {averageLatency !== null && <span className="home-servers-latency">avg {averageLatency} ms</span>}
+        <button
+          type="button"
+          className="home-servers-refresh"
+          onClick={() => void useServerHealthStore.getState().checkAll()}
+          aria-label="Check all servers now"
+          title="Check all servers now"
+        >
+          <RefreshCw className={cn('h-3 w-3', Object.values(checkingIds).some(Boolean) && 'animate-spin')} aria-hidden />
+        </button>
+      </div>
       {servers.map((server) => (
         <div key={server.id} className="home-server">
           <div className="home-server-head">
             <HealthDot health={healthById[server.id]} checking={checkingIds[server.id]} />
             <strong>{server.name}</strong>
-            <small>{server.host}</small>
+            <small>{healthById[server.id]?.metrics?.hostname ?? server.host}</small>
           </div>
-          <ServerHealthDetails health={healthById[server.id]} />
+          <ServerHealthTiles health={healthById[server.id]} history={historyById[server.id]} />
         </div>
       ))}
     </div>

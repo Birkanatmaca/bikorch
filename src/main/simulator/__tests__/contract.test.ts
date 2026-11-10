@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseButton, parseKey, parsePointer } from '@shared/contracts/simulator'
+import { deviceOrientationValue, parseButton, parseKey, parsePointer, parseRotation, turnDevice } from '@shared/contracts/simulator'
 
 describe('simulator input contract', () => {
   it('accepts only the hardware buttons the helper knows', () => {
@@ -19,5 +19,27 @@ describe('simulator input contract', () => {
     expect(parseKey({ text: 'ğİş' })).toEqual({ text: 'ğİş' })
     expect(parseKey({ key: 'enter' })).toEqual({ key: 'enter' })
     expect(parseKey({ text: '\n' })).toBeNull()
+  })
+})
+
+describe('turning the device', () => {
+  it('steps between portrait and the two landscapes', () => {
+    expect(turnDevice(0, 'left')).toBe(270)
+    expect(turnDevice(270, 'left')).toBe(270)
+    expect(turnDevice(270, 'right')).toBe(0)
+    expect(turnDevice(0, 'right')).toBe(90)
+    expect(turnDevice(90, 'left')).toBe(0)
+  })
+
+  it('sends the orientation Simulator.app sends', () => {
+    expect(deviceOrientationValue(0)).toBe(1)
+    expect(deviceOrientationValue(270)).toBe(3)
+    expect(deviceOrientationValue(90)).toBe(4)
+  })
+
+  it('accepts only the turns the device supports', () => {
+    expect(parseRotation(270)).toBe(270)
+    expect(parseRotation(180)).toBeNull()
+    expect(parseRotation('90')).toBeNull()
   })
 })

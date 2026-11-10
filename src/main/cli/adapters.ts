@@ -4,6 +4,7 @@ import { join, resolve, sep } from 'path'
 import { type PtyKind } from '@shared/contracts/pty'
 import { sshCommandArgs, type SshTarget } from '@shared/contracts/servers'
 import { managedCliPaths } from './managed-paths'
+import { IOS_AGENT_GUIDE } from '../simulator/agent-guide'
 
 export interface SpawnConfig {
   command: string
@@ -396,6 +397,10 @@ export function cliLaunchArgs(
   if (launchMode === 'login' && (kind === 'codex' || kind === 'cursor')) return ['login']
   if (kind === 'cursor') return cliModel ? ['--trust', '--model', cliModel] : ['--trust']
   if (kind === 'gemini') return geminiTrustArgs()
+  // On a Mac, tell Claude to run iOS apps in Bikorch's simulator panel.
+  if (kind === 'claude' && launchMode === 'normal' && process.platform === 'darwin') {
+    return ['--append-system-prompt', IOS_AGENT_GUIDE]
+  }
   return []
 }
 

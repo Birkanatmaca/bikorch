@@ -108,9 +108,13 @@ export function chooseSimulator(input: {
   devices: SimDeviceRecord[]
   runtimes: SimRuntimeRecord[]
   deviceTypes: string[]
+  /** A running device an app was just installed on: the one an agent is testing. */
+  preferredUdid?: string | null
 }): SimulatorChoice {
   const iphones = input.devices.filter((device) => device.available && isIphone(device))
   const rank = (device: SimDeviceRecord): number => {
+    const running = device.state === 'Booted' || device.state === 'Booting'
+    if (running && device.udid === input.preferredUdid) return -1
     if (device.state === 'Booted') return 0
     if (device.state === 'Booting') return 1
     if (device.name === BIKORCH_IPHONE_NAME) return 2
@@ -135,4 +139,20 @@ export function chooseSimulator(input: {
     return { action: 'unavailable', message: 'Xcode has no iPhone simulator device type.' }
   }
   return { action: 'create', name: BIKORCH_IPHONE_NAME, deviceType, runtime: runtime.identifier }
+}
+
+/**
+ * Bundle ids of the apps running on a device, from `launchctl list` inside it.
+ * Apple's own apps (SpringBoard, widgets, Spotlight) are left out: they run on
+ * any idle device, so only someone's own app shows the device is in use.
+ */
+export function runningUserApps(launchctlList: string): string[] {
+  const apps = new Set<string>()
+  for (const line of launchctlList.split('\n')) {
+    const [pid, , label] = line.trim().split('\t')
+    if (!label || !pid || pid === '-') continue
+    const match = /^UIKitApplication:([^[\s]+)/.exec(label)
+    if (match && !match[1].startsWith('com.apple.')) apps.add(match[1])
+  }
+  return [...apps]
 }

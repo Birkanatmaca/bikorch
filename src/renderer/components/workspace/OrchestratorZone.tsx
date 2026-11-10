@@ -22,9 +22,11 @@ import { WorkspaceTimerWidget } from '@renderer/components/timer/WorkspaceTimerW
 import { CanvasDeviceInteractionContext } from '@renderer/components/mobile-preview/canvas-device-context'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
+import { useActivityAttentionStore } from '@renderer/stores/activity-attention-store'
 import { cn } from '@renderer/lib/utils'
 import { FOCUS_PANEL_EVENT, focusTerminal, lockTerminalLayout, unlockTerminalLayout } from '@renderer/lib/app-events'
 import { cliFrameClass, getCliChromePhase } from '@renderer/lib/cli-chrome'
+import { signalFrameClass, usePanelSignal } from '@renderer/hooks/use-session-signals'
 import { isMacOS } from '@renderer/lib/electron-api'
 import { ContextMenu } from '@renderer/components/ui/ContextMenu'
 import { useOrchestratorContextMenu } from '@renderer/components/workspace/use-orchestrator-context-menu'
@@ -197,6 +199,7 @@ function OrchestratorWindow({
   const floats = isWidget || isDevice
   const status = useTerminalStore((s) => s.sessions[panel.id])
   const phase = getCliChromePhase(panel.type, status)
+  const frameSignal = usePanelSignal(panel.id, panel.type)?.signal
   const showChrome = !floats && LIVE_PANEL_TYPES.includes(panel.type) && phase !== 'off'
   const isMac = isMacOS()
 
@@ -277,6 +280,7 @@ function OrchestratorWindow({
             isMobilePreviewPanel(panel.type) && 'direct-device-window',
             isMac ? 'orchestrator-window-macos' : 'rounded-md shadow-lg shadow-black/25',
             showChrome ? cliFrameClass(phase) : 'border-border',
+            signalFrameClass(frameSignal),
             !active && isMac && 'orchestrator-window-macos-inactive'
           )}
           data-active={active}
@@ -351,6 +355,11 @@ export function OrchestratorZone({
     previousPanelIds.current = new Set(panels.map((panel) => panel.id))
     if (addedPanel) setFocusedId(addedPanel.id)
   }, [panels])
+
+  // Looking at a panel is what clears its "done" mark, so report focus globally.
+  useEffect(() => {
+    if (focusedId) useActivityAttentionStore.getState().noteFocus(projectId, focusedId)
+  }, [focusedId, projectId])
 
   useEffect(() => {
     const onFocusPanel = (event: Event): void => {

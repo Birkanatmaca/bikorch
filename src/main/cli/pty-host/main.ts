@@ -13,6 +13,7 @@ import {
 import { appendOutputBuffer, hostHasRunningSessions, hostSessionMatchesRequest } from './session-store'
 import { resolveSafeCwd, resolveWindowsSpawnPath } from '../path-validator'
 import { hostBuildStamp } from './paths'
+import { ScreenMirror } from './screen-mirror'
 
 interface HostSession {
   id: string
@@ -27,6 +28,8 @@ interface HostSession {
   cols: number
   rows: number
   outputBuffer: string
+  /** Parsed copy of the screen, served on reattach instead of the raw byte tail. */
+  mirror: ScreenMirror
 }
 
 function socketPath(): string {
@@ -168,6 +171,7 @@ class PtyHostRuntime {
         session.cols = cols
         session.rows = rows
         session.process.resize(cols, rows)
+        session.mirror.resize(cols, rows)
         socket.write(encodeMessage({ v: 1, id: message.id, type: 'ok' }))
         return
       }
@@ -178,6 +182,19 @@ class PtyHostRuntime {
         return
       case 'replay': {
         const session = this.sessions.get(message.payload.sessionId)
+        if (session && message.payload.screen) {
+          void session.mirror.snapshot().then((screen) => {
+            socket.write(
+              encodeMessage({
+                v: 1,
+                id: message.id,
+                type: 'ok',
+                payload: { sessionId: session.id, status: session.status, screen: screen.data, seq: screen.seq }
+              })
+            )
+          })
+          return
+        }
         socket.write(
           encodeMessage({
             v: 1,
@@ -210,6 +227,7 @@ class PtyHostRuntime {
         existing.cols = payload.cols
         existing.rows = payload.rows
         existing.process.resize(payload.cols, payload.rows)
+        existing.mirror.resize(payload.cols, payload.rows)
       }
       return {
         v: 1,
@@ -267,17 +285,19 @@ class PtyHostRuntime {
         status: 'running',
         cols: payload.cols,
         rows: payload.rows,
-        outputBuffer: ''
+        outputBuffer: '',
+        mirror: new ScreenMirror(payload.cols, payload.rows)
       }
       this.sessions.set(payload.sessionId, session)
       this.clearIdleTimer()
 
       shellProcess.onData((data) => {
         session.outputBuffer = appendOutputBuffer(session.outputBuffer, data)
+        const seq = session.mirror.write(data)
         this.broadcast({
           v: 1,
           type: 'event',
-          payload: { type: 'data', sessionId: payload.sessionId, data }
+          payload: { type: 'data', sessionId: payload.sessionId, data, seq }
         })
       })
 
@@ -285,6 +305,7 @@ class PtyHostRuntime {
         const current = this.sessions.get(payload.sessionId)
         if (!current || current.process !== shellProcess) return
         this.sessions.delete(payload.sessionId)
+        current.mirror.dispose()
         this.broadcast({
           v: 1,
           type: 'event',
@@ -320,6 +341,7 @@ class PtyHostRuntime {
     const session = this.sessions.get(sessionId)
     if (!session) return
     this.sessions.delete(sessionId)
+    session.mirror.dispose()
     if (!session.process) return
     try {
       if (force) session.process.kill()

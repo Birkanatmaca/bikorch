@@ -94,3 +94,49 @@ export function readXtermCellSize(terminal: {
   if (width <= 0 || height <= 0) return null
   return { width, height }
 }
+
+/** How long after a wheel/touch/scroll-key gesture a viewport scroll still counts as the user's. */
+export const TERMINAL_SCROLL_INTENT_MS = 400
+
+/**
+ * Tells user-driven scrolls apart from scroll events xterm's DOM viewport emits
+ * on its own. xterm 5 turns every viewport `scroll` event into a buffer scroll;
+ * when a TUI clears scrollback (ED3) and redraws quickly, a late event carrying
+ * a stale `scrollTop` moves the view up and marks it "user scrolled", so new
+ * output stops following and the prompt stays off-screen until a resize.
+ */
+export class TerminalScrollIntent {
+  private intentUntil = 0
+  private pointerHeld = false
+
+  note(now: number, windowMs: number = TERMINAL_SCROLL_INTENT_MS): void {
+    this.intentUntil = Math.max(this.intentUntil, now + windowMs)
+  }
+
+  pointerDown(): void {
+    this.pointerHeld = true
+  }
+
+  pointerUp(now: number): void {
+    this.pointerHeld = false
+    this.note(now)
+  }
+
+  isIntentional(now: number): boolean {
+    return this.pointerHeld || now <= this.intentUntil
+  }
+}
+
+/** Keys xterm uses to scroll its own scrollback (Shift+PageUp, Shift+Home, ...). */
+export function isScrollbackKey(event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'metaKey' | 'ctrlKey'>): boolean {
+  if (!(event.shiftKey || event.metaKey || event.ctrlKey)) return false
+  return ['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown'].includes(event.key)
+}
+
+/** True when the view sits above the live screen without the user having put it there. */
+export function shouldRestoreFollow(
+  buffer: { viewportY: number; baseY: number },
+  followOutput: boolean
+): boolean {
+  return followOutput && buffer.viewportY < buffer.baseY
+}

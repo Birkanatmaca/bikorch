@@ -14,6 +14,16 @@ export function registerSimulatorHandlers(): void {
     simulatorSession.detach()
   })
 
+  ipcMain.handle(SIMULATOR_IPC.ROTATE, (event, raw: unknown) => {
+    assertTrustedMainWindow(event)
+    simulatorSession.rotate(raw)
+  })
+
+  ipcMain.handle(SIMULATOR_IPC.VIEW, (event, raw: unknown) => {
+    assertTrustedMainWindow(event)
+    simulatorSession.setView(raw)
+  })
+
   ipcMain.handle(SIMULATOR_IPC.POINTER, (event, raw: unknown) => {
     assertTrustedMainWindow(event)
     simulatorSession.pointer(raw)

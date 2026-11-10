@@ -81,6 +81,12 @@ describe('modern CLI screens', () => {
     expect(inferCliActivity(claudeIdle + '\n✻ Working… (3s · esc to interrupt)')).toBe('busy')
   })
 
+  it('does not read tool output that sounds like a turn summary as the end of the turn', () => {
+    expect(inferCliActivity('✻ Zigzagging… (12s · esc to interrupt)\n  ⎿ Waited for 5s\n')).toBe('busy')
+    expect(inferCliActivity('✻ Zigzagging… (esc to interrupt)\nDone.\n✻ Cogitated for 3s · done')).toBe('waiting')
+    expect(inferCliActivity('• Working (esc to interrupt)\n─ Worked for 1m 05s ─────')).toBe('waiting')
+  })
+
   it('does not mistake the effort label for a spinner', () => {
     expect(inferCliActivity('Some output\n◐ medium · /effort')).toBeNull()
   })

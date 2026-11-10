@@ -18,6 +18,8 @@ import { Info, X, GripVertical, PanelLeftClose, Pencil, UserRound } from 'lucide
 import { PanelContent } from './PanelContent'
 import { Button } from '@renderer/components/ui/Button'
 import { StatusChip } from '@renderer/components/ui/StatusChip'
+import { SessionBadge } from '@renderer/components/ui/SessionBadge'
+import { signalFrameClass, usePanelSignal } from '@renderer/hooks/use-session-signals'
 
 interface PanelShellProps {
   id: string
@@ -298,6 +300,7 @@ export function PanelShell({
 }: PanelShellProps): React.JSX.Element {
   const status = usePanelStatus(id, type)
   const phase = getCliChromePhase(type, status)
+  const panelSignal = usePanelSignal(id, type)
   const showChrome = !flush && phase !== 'off'
   const cliLogo = getCliLogo(type)
   const isMac = isMacOS()
@@ -369,7 +372,8 @@ export function PanelShell({
           flush ? 'panel-shell-flush rounded-none border-0' : 'rounded-md border border-border shadow-sm',
           isMac && 'panel-shell-macos',
           isWin && 'panel-shell-windows',
-          showChrome && cliFrameClass(phase)
+          showChrome && cliFrameClass(phase),
+          !flush && signalFrameClass(panelSignal?.signal)
         )}
         data-active={windowActive}
         data-panel-kind={type}
@@ -459,6 +463,7 @@ export function PanelShell({
             </div>
           )}
           <div className="panel-header-actions flex shrink-0 items-center gap-1">
+            {panelSignal && <SessionBadge signal={panelSignal.signal} since={panelSignal.since} />}
             {panelRole === 'resolver' && (
               <span className="iso-mode-chip is-shared" title="This session is combining agent changes">
                 Resolving

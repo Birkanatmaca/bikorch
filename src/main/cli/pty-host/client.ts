@@ -312,19 +312,28 @@ class PtyHostClient {
     this.knownSessions.delete(sessionId)
   }
 
-  async replay(sessionId: string): Promise<{ status: 'running' | 'stopped' | 'error'; outputBuffer: string }> {
+  /**
+   * The session's screen as the host's mirror sees it now, plus the seq of the
+   * last output chunk it contains. Falls back to the raw tail for an older host.
+   */
+  async replayScreen(sessionId: string): Promise<{
+    status: 'running' | 'stopped' | 'error'
+    data: string
+    seq: number | null
+  }> {
     const response = await this.request({
       v: 1,
       id: this.nextId(),
       type: 'replay',
-      payload: { sessionId }
+      payload: { sessionId, screen: true }
     })
-    if (response.type === 'error') return { status: 'error', outputBuffer: '' }
-    if (response.type !== 'ok') return { status: 'stopped', outputBuffer: '' }
-    return {
-      status: response.payload?.status ?? 'stopped',
-      outputBuffer: response.payload?.outputBuffer ?? ''
+    if (response.type === 'error') return { status: 'error', data: '', seq: null }
+    if (response.type !== 'ok') return { status: 'stopped', data: '', seq: null }
+    const payload = response.payload
+    if (typeof payload?.screen === 'string') {
+      return { status: payload.status, data: payload.screen, seq: payload.seq ?? null }
     }
+    return { status: payload?.status ?? 'stopped', data: payload?.outputBuffer ?? '', seq: null }
   }
 
   async snapshot(sessionId: string): Promise<PtySessionSnapshot | null> {

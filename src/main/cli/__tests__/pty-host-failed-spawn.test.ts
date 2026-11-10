@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   disconnect: vi.fn(),
   prepare: vi.fn(async () => ({ ok: true, ready: true })),
   snapshot: vi.fn(async () => null as import('@shared/contracts/pty').PtySessionSnapshot | null),
-  replay: vi.fn(async () => ({ status: 'running', outputBuffer: '' })),
+  replayScreen: vi.fn(async () => ({ status: 'running', data: '', seq: 0 })),
   hostListener: null as ((message: { type: string; payload: { type: string; sessionId: string; exitCode?: number } }) => void) | null,
   spawnHost: vi.fn(async () => ({ status: 'error' as const, error: 'spawn failed' }))
 }))
@@ -47,7 +47,7 @@ vi.mock('../pty-host/client', () => ({
     write: vi.fn(),
     resize: vi.fn(),
     kill: vi.fn(),
-    replay: mocks.replay,
+    replayScreen: mocks.replayScreen,
     snapshot: mocks.snapshot,
     disconnect: mocks.disconnect,
     isConnected: () => true,

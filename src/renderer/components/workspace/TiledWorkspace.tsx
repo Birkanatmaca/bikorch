@@ -19,6 +19,7 @@ import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
 import { cn } from '@renderer/lib/utils'
 import { cliFrameClass, getCliChromePhase } from '@renderer/lib/cli-chrome'
+import { signalFrameClass, usePanelSignal } from '@renderer/hooks/use-session-signals'
 import { isMacOS } from '@renderer/lib/electron-api'
 import { focusTerminal, lockTerminalLayout, unlockTerminalLayout } from '@renderer/lib/app-events'
 import { getCliLogo } from '@renderer/lib/cli-logos'
@@ -82,6 +83,7 @@ function TiledWindow({
 }): React.JSX.Element {
   const status = useTerminalStore((s) => s.sessions[panel.id])
   const phase = getCliChromePhase(panel.type, status)
+  const frameSignal = usePanelSignal(panel.id, panel.type)?.signal
   const showChrome = LIVE_PANEL_TYPES.includes(panel.type) && phase !== 'off'
   const isMac = isMacOS()
   const swapTiledPanels = useWorkspaceStore((s) => s.swapTiledPanels)
@@ -117,6 +119,7 @@ function TiledWindow({
           isMobilePreviewPanel(panel.type) && 'direct-device-window',
           isMac ? 'orchestrator-window-macos' : 'rounded-md shadow-lg shadow-black/25',
           showChrome ? cliFrameClass(phase) : 'border-border',
+          signalFrameClass(frameSignal),
           !active && isMac && 'orchestrator-window-macos-inactive'
         )}
         data-active={active}

@@ -42,6 +42,7 @@ export function ServerDock(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const healthById = useServerHealthStore((state) => state.healthById)
   const checkingIds = useServerHealthStore((state) => state.checkingIds)
+  const historyById = useServerHealthStore((state) => state.historyById)
 
   // Health is checked only while the dock is open.
   useEffect(() => (open ? watchServerHealth() : undefined), [open])
@@ -218,7 +219,7 @@ export function ServerDock(): React.JSX.Element {
                 <Trash2 className="h-3.5 w-3.5" aria-hidden />
               </button>
             </div>
-            <ServerHealthDetails health={healthById[server.id]} />
+            <ServerHealthDetails health={healthById[server.id]} history={historyById[server.id]} />
             </div>
           ))}
         </div>

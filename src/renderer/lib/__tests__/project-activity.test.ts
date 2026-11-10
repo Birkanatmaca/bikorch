@@ -6,7 +6,9 @@ import {
   findPanelProject,
   isWatchedCliPanel,
   processNoticeBody,
-  summarizeProjectTabActivity
+  formatElapsed,
+  sessionSignal,
+  summarizeProjectSessions
 } from '../project-activity'
 
 const cursorPanel: PanelDefinition = {
@@ -48,51 +50,63 @@ describe('findPanelProject', () => {
   })
 })
 
-describe('summarizeProjectTabActivity', () => {
-  it('shows working when any CLI is busy', () => {
-    expect(
-      summarizeProjectTabActivity({
-        panels: [cursorPanel, otherPanel],
-        sessions: { 'cli-1': 'busy', 'cli-2': 'waiting' },
-        attention: [{ panelId: 'cli-2', title: 'Claude Code', outcome: 'done', at: 1 }]
-      })
-    ).toMatchObject({ signal: 'busy', busyCount: 1, label: 'Working' })
+describe('sessionSignal', () => {
+  it('puts a question to the user above everything else', () => {
+    expect(sessionSignal({ status: 'busy', asking: true })).toBe('asking')
+    expect(sessionSignal({ status: 'waiting', asking: true, unseen: 'done' })).toBe('asking')
+    expect(sessionSignal({ status: 'stopped', asking: true })).toBe('off')
   })
 
-  it('counts multiple busy agents', () => {
-    expect(
-      summarizeProjectTabActivity({
-        panels: [cursorPanel, otherPanel],
-        sessions: { 'cli-1': 'busy', 'cli-2': 'starting' },
-        attention: []
-      })
-    ).toMatchObject({ signal: 'busy', busyCount: 2, label: '2 working' })
+  it('reads errors, work, unseen results and rest', () => {
+    expect(sessionSignal({ status: 'error' })).toBe('error')
+    expect(sessionSignal({ status: 'waiting', unseen: 'error' })).toBe('error')
+    expect(sessionSignal({ status: 'busy', unseen: 'done' })).toBe('working')
+    expect(sessionSignal({ status: 'waiting', unseen: 'done' })).toBe('done')
+    expect(sessionSignal({ status: 'waiting' })).toBe('idle')
+    expect(sessionSignal({ status: 'stopped' })).toBe('off')
   })
+})
 
-  it('pings the tab after background work finishes', () => {
-    expect(
-      summarizeProjectTabActivity({
-        panels: [cursorPanel],
-        sessions: { 'cli-1': 'waiting' },
-        attention: [{ panelId: 'cli-1', title: 'Cursor CLI', outcome: 'done', at: 2 }]
-      })
-    ).toMatchObject({
-      signal: 'ready',
-      label: 'Finished'
+describe('summarizeProjectSessions', () => {
+  it('counts each signal and ranks the most urgent first', () => {
+    const summary = summarizeProjectSessions({
+      panels: [cursorPanel, otherPanel],
+      sessions: { 'cli-1': 'busy', 'cli-2': 'waiting' },
+      asking: { 'cli-2': true },
+      busySince: { 'cli-1': 1_000 },
+      attention: []
     })
+    expect(summary.top).toBe('asking')
+    expect(summary.counts).toMatchObject({ asking: 1, working: 1 })
+    expect(summary.rows).toEqual([
+      { panelId: 'cli-2', title: 'Claude Code', signal: 'asking' },
+      { panelId: 'cli-1', title: 'Cursor CLI', signal: 'working', since: 1_000 }
+    ])
   })
 
-  it('prefers an error ping when the finished run failed', () => {
-    expect(
-      summarizeProjectTabActivity({
-        panels: [cursorPanel],
-        sessions: { 'cli-1': 'error' },
-        attention: [{ panelId: 'cli-1', title: 'Cursor CLI', outcome: 'error', at: 2 }]
-      })
-    ).toMatchObject({
-      signal: 'error',
-      label: 'Needs attention'
+  it('keeps a finished session marked until it is seen, and counts Manager notices', () => {
+    const summary = summarizeProjectSessions({
+      panels: [cursorPanel],
+      sessions: { 'cli-1': 'waiting' },
+      attention: [
+        { panelId: 'cli-1', title: 'Cursor CLI', outcome: 'done', at: 2 },
+        { panelId: 'secretary:run-1', title: 'Manager', outcome: 'error', at: 3 }
+      ]
     })
+    expect(summary.top).toBe('error')
+    expect(summary.counts).toMatchObject({ done: 1, error: 1 })
+  })
+
+  it('is quiet when nothing is going on', () => {
+    expect(summarizeProjectSessions({ panels: [cursorPanel], sessions: { 'cli-1': 'waiting' }, attention: [] }).top).toBeNull()
+  })
+})
+
+describe('formatElapsed', () => {
+  it('reads like a clock a person would say', () => {
+    expect(formatElapsed(0, 42_000)).toBe('42s')
+    expect(formatElapsed(0, 5 * 60_000)).toBe('5m')
+    expect(formatElapsed(0, 125 * 60_000)).toBe('2h 5m')
   })
 })
 

@@ -1,10 +1,10 @@
 import { useContext, useEffect, useRef, useState } from 'react'
-import { Circle, Loader2, X } from 'lucide-react'
-import type { SimulatorStatus } from '@shared/contracts/simulator'
+import { Circle, Loader2, RotateCcw, RotateCw, X } from 'lucide-react'
+import { turnDevice, type SimulatorStatus } from '@shared/contracts/simulator'
 import { CanvasDeviceInteractionContext } from '@renderer/components/mobile-preview/canvas-device-context'
-import { normalizeContainedPointer } from '@renderer/components/mobile-preview/simulator-geometry'
+import { normalizeContainedPointer, unrotatePoint } from '@renderer/components/mobile-preview/simulator-geometry'
 import { Button } from '@renderer/components/ui/Button'
-import { onDocumentVisibility } from '@renderer/lib/visibility'
+import { isDocumentHidden, onDocumentVisibility } from '@renderer/lib/visibility'
 import { cn } from '@renderer/lib/utils'
 
 const STARTING: SimulatorStatus = {
@@ -18,8 +18,8 @@ export function IosSimulatorScreen(): React.JSX.Element {
   const imageRef = useRef<HTMLImageElement>(null)
   const pressed = useRef(false)
   const [status, setStatus] = useState<SimulatorStatus>(STARTING)
-  const [frame, setFrame] = useState<string | null>(null)
-  const frameRef = useRef<string | null>(null)
+  // Frames go straight into the <img>; React only hears about the first one.
+  const [hasFrame, setHasFrame] = useState(false)
   const [aspect, setAspect] = useState<number | null>(null)
 
   useEffect(() => {
@@ -29,17 +29,41 @@ export function IosSimulatorScreen(): React.JSX.Element {
       return
     }
     let alive = true
+    let shown: string | null = null
+    let decoding = false
+    let waiting: Uint8Array | null = null
+    // Decodes off the main thread and keeps only the newest frame while one is
+    // decoding, so a busy renderer drops frames instead of falling behind.
+    const show = (jpeg: Uint8Array): void => {
+      const image = imageRef.current
+      if (!alive || !image) return
+      if (decoding) {
+        waiting = jpeg
+        return
+      }
+      decoding = true
+      const url = URL.createObjectURL(new Blob([jpeg as Uint8Array<ArrayBuffer>], { type: 'image/jpeg' }))
+      image.src = url
+      void image.decode().catch(() => undefined).then(() => {
+        if (shown) URL.revokeObjectURL(shown)
+        shown = url
+        decoding = false
+        if (!alive) return
+        const { naturalWidth, naturalHeight } = image
+        if (naturalWidth && naturalHeight) {
+          const next = Math.round((naturalWidth / naturalHeight) * 1000) / 1000
+          setAspect((current) => (current === next ? current : next))
+        }
+        setHasFrame(true)
+        const next = waiting
+        waiting = null
+        if (next) show(next)
+      })
+    }
     const unsubscribe = api.onEvent((event) => {
       if (!alive) return
       if (event.type === 'status') setStatus(event.status)
-      if (event.type !== 'frame') return
-      const bytes = new ArrayBuffer(event.jpeg.byteLength)
-      new Uint8Array(bytes).set(event.jpeg)
-      const url = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }))
-      const previous = frameRef.current
-      frameRef.current = url
-      setFrame(url)
-      if (previous) URL.revokeObjectURL(previous)
+      else if (event.type === 'frame') show(event.jpeg)
     })
     void api.attach().then((next) => {
       if (alive) setStatus(next)
@@ -50,28 +74,40 @@ export function IosSimulatorScreen(): React.JSX.Element {
       alive = false
       unsubscribe()
       void api.detach()
-      if (frameRef.current) URL.revokeObjectURL(frameRef.current)
-      frameRef.current = null
+      if (shown) URL.revokeObjectURL(shown)
     }
   }, [])
 
-  // A hidden window needs no frames: let the capture stop until it is visible again.
+  // Frames are encoded at the size the panel shows them, and not at all while
+  // it is out of sight (another app in front, the Home tab, a collapsed panel).
+  // The device keeps running meanwhile: an agent may be installing onto it.
+  const sidewaysView = (status.rotation ?? 0) !== 0
   useEffect(() => {
     const api = window.api?.simulator
-    if (!api) return
-    let paused = false
-    const stop = onDocumentVisibility((hidden) => {
-      if (hidden && !paused) {
-        paused = true
-        void api.detach()
-      } else if (!hidden && paused) {
-        paused = false
-        void api.attach().then(setStatus).catch(() => undefined)
-      }
-    })
-    // The mount effect's detach ends the session; refs never go below zero.
-    return stop
-  }, [])
+    const screen = screenRef.current
+    if (!api || !screen) return
+    let sent = ''
+    const report = (): void => {
+      const { width, height } = screen.getBoundingClientRect()
+      const visible = width > 0 && height > 0 && !isDocumentHidden()
+      // The portrait framebuffer's height runs across a turned screen.
+      const long = sidewaysView ? width : height
+      // Steps of 80px so a resize drag does not re-tune the encoder every frame.
+      const pixels = Math.ceil((long * window.devicePixelRatio) / 80) * 80
+      const key = `${visible}:${pixels}`
+      if (key === sent) return
+      sent = key
+      void api.view({ visible, height: Math.max(320, pixels) })
+    }
+    const observer = new ResizeObserver(report)
+    observer.observe(screen)
+    const stop = onDocumentVisibility(report)
+    report()
+    return () => {
+      observer.disconnect()
+      stop()
+    }
+  }, [sidewaysView])
 
   const retry = (): void => {
     const api = window.api?.simulator
@@ -83,12 +119,16 @@ export function IosSimulatorScreen(): React.JSX.Element {
   const pointFrom = (event: React.PointerEvent<HTMLDivElement>): { x: number; y: number } | null => {
     const bounds = event.currentTarget.getBoundingClientRect()
     const image = imageRef.current
-    return normalizeContainedPointer(
+    const width = image?.naturalWidth ?? 0
+    const height = image?.naturalHeight ?? 0
+    // A turned device shows its portrait frame on its side.
+    const point = normalizeContainedPointer(
       { width: bounds.width, height: bounds.height },
-      { width: image?.naturalWidth ?? 0, height: image?.naturalHeight ?? 0 },
+      sideways ? { width: height, height: width } : { width, height },
       event.clientX - bounds.left,
       event.clientY - bounds.top
     )
+    return point ? unrotatePoint(point, rotation) : null
   }
 
   const sendPointer = (phase: 'down' | 'move' | 'up', event: React.PointerEvent<HTMLDivElement>): void => {
@@ -97,12 +137,19 @@ export function IosSimulatorScreen(): React.JSX.Element {
     void window.api.simulator.pointer({ phase, ...point })
   }
 
-  const showStatus = status.phase !== 'live' || !frame
+  const rotation = status.rotation ?? 0
+  const sideways = rotation !== 0
+  const shownAspect = aspect && sideways ? Math.round((1 / aspect) * 1000) / 1000 : aspect
+  const showStatus = status.phase !== 'live' || !hasFrame
   // The headless feed already carries the real island and home indicator.
   const lcd = status.mode === 'screen'
   const canPressHome = status.phase === 'live' && status.mode === 'device'
   const pressHome = (): void => {
     void window.api?.simulator?.button('home')
+  }
+  // Only the headless feed can turn the device; Simulator.app turns its own window.
+  const turn = (direction: 'left' | 'right'): void => {
+    void window.api?.simulator?.rotate(turnDevice(rotation, direction))
   }
 
   return (
@@ -116,12 +163,13 @@ export function IosSimulatorScreen(): React.JSX.Element {
                 status.mode === 'window' && 'is-window-feed',
                 status.mode === 'device' && aspect && 'is-device-feed'
               )}
-              style={aspect ? ({ '--sim-aspect': String(aspect) } as React.CSSProperties) : undefined}
+              style={shownAspect ? ({ '--sim-aspect': String(shownAspect) } as React.CSSProperties) : undefined}
             >
               {lcd ? <span className="mobile-ios-island" aria-hidden /> : null}
               <div
                 ref={screenRef}
-                className="mobile-device-screen mobile-sim-screen"
+                className={cn('mobile-device-screen mobile-sim-screen', sideways && 'is-sideways')}
+                style={sideways ? ({ '--sim-rotate': `${rotation === 270 ? -90 : 90}deg` } as React.CSSProperties) : undefined}
                 tabIndex={status.phase === 'live' ? 0 : -1}
                 onPointerDown={(event) => {
                   if (event.button !== 0) return
@@ -150,6 +198,13 @@ export function IosSimulatorScreen(): React.JSX.Element {
                     pressHome()
                     return
                   }
+                  // ⌘← and ⌘→ turn the device, as in Simulator.app.
+                  if (event.metaKey && !event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight') && canPressHome) {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    turn(event.key === 'ArrowLeft' ? 'left' : 'right')
+                    return
+                  }
                   if (event.metaKey || event.ctrlKey || event.altKey) return
                   const key = event.key
                   if (key === 'Enter' || key === 'Backspace' || key === 'Escape' || key === 'Tab' || key === ' ' || key.startsWith('Arrow')) {
@@ -165,20 +220,13 @@ export function IosSimulatorScreen(): React.JSX.Element {
                   void window.api?.simulator?.key({ text: key })
                 }}
               >
-                {frame ? <img
-                    ref={imageRef}
-                    className="mobile-sim-feed"
-                    src={frame}
-                    alt=""
-                    draggable={false}
-                    onLoad={(event) => {
-                      const { naturalWidth, naturalHeight } = event.currentTarget
-                      if (naturalWidth && naturalHeight) {
-                        const next = Math.round((naturalWidth / naturalHeight) * 1000) / 1000
-                        setAspect((current) => (current === next ? current : next))
-                      }
-                    }}
-                  /> : null}
+                <img
+                  ref={imageRef}
+                  className="mobile-sim-feed"
+                  alt=""
+                  draggable={false}
+                  hidden={!hasFrame}
+                />
                 {status.phase === 'live' && status.inputReady === false ? (
                   <div className="mobile-sim-hint">
                     <span>Allow Bikorch in Accessibility to tap and type.</span>
@@ -203,9 +251,31 @@ export function IosSimulatorScreen(): React.JSX.Element {
               {canvas?.onClose || canPressHome ? (
                 <div className="mobile-device-actions is-overlay">
                   {canPressHome ? (
-                    <button type="button" className="browser-icon-btn" onClick={pressHome} aria-label="Home" title="Home (⌘⇧H)">
-                      <Circle className="h-3.5 w-3.5" />
-                    </button>
+                    <>
+                      <button type="button" className="browser-icon-btn" onClick={pressHome} aria-label="Home" title="Home (⌘⇧H)">
+                        <Circle className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        className="browser-icon-btn"
+                        onClick={() => turn('left')}
+                        disabled={rotation === 270}
+                        aria-label="Rotate left"
+                        title="Rotate left (⌘←)"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        className="browser-icon-btn"
+                        onClick={() => turn('right')}
+                        disabled={rotation === 90}
+                        aria-label="Rotate right"
+                        title="Rotate right (⌘→)"
+                      >
+                        <RotateCw className="h-3.5 w-3.5" />
+                      </button>
+                    </>
                   ) : null}
                   {canvas?.onClose ? (
                     <button type="button" className="browser-icon-btn" onClick={canvas.onClose} aria-label="Close device" title="Close device">

@@ -79,7 +79,8 @@ export interface PtyKillRequest {
 }
 
 export type PtyEvent =
-  | { type: 'data'; sessionId: string; data: string }
+  /** `replay`: the session's current screen sent to a reattaching view, not new output. */
+  | { type: 'data'; sessionId: string; data: string; replay?: boolean }
   | { type: 'exit'; sessionId: string; exitCode: number }
   | {
       type: 'status'

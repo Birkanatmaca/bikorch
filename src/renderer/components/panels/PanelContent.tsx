@@ -4,6 +4,7 @@ import type { PtyKind } from '@shared/contracts/pty'
 import type { PtyLaunchMode } from '@shared/contracts/pty'
 import { Loader2 } from 'lucide-react'
 
+import { IosDeviceSlot } from '@renderer/components/mobile-preview/PersistentIosDevice'
 const TerminalView = lazy(() =>
   import('@renderer/components/terminal/TerminalView').then((m) => ({ default: m.TerminalView }))
 )
@@ -43,11 +44,6 @@ const BrowserPanel = lazy(() =>
 const MobilePreviewPanel = lazy(() =>
   import('@renderer/components/mobile-preview/MobilePreviewPanel').then((m) => ({
     default: m.MobilePreviewPanel
-  }))
-)
-const IosSimulatorScreen = lazy(() =>
-  import('@renderer/components/mobile-preview/IosSimulatorScreen').then((m) => ({
-    default: m.IosSimulatorScreen
   }))
 )
 
@@ -190,11 +186,8 @@ export function PanelContent({ panelId, type, launchMode, accountId, cliModel }:
         </Suspense>
       )
     case 'ios-preview':
-      return (
-        <Suspense fallback={<PanelLoading />}>
-          <IosSimulatorScreen />
-        </Suspense>
-      )
+      // One screen for the whole app, so switching tabs never restarts the simulator.
+      return <IosDeviceSlot />
     case 'android-preview':
       return (
         <Suspense fallback={<PanelLoading />}>
