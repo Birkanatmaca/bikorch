@@ -205,9 +205,10 @@ export function IosSimulatorScreen(): React.JSX.Element {
                     turn(event.key === 'ArrowLeft' ? 'left' : 'right')
                     return
                   }
-                  if (event.metaKey || event.ctrlKey || event.altKey) return
+                  if (event.metaKey || event.ctrlKey) return
                   const key = event.key
                   if (key === 'Enter' || key === 'Backspace' || key === 'Escape' || key === 'Tab' || key === ' ' || key.startsWith('Arrow')) {
+                    if (event.altKey) return
                     event.preventDefault()
                     event.stopPropagation()
                     const name = key === ' ' ? 'space' : key === 'Backspace' ? 'backspace' : key === 'Escape' ? 'escape' : key === 'Tab' ? 'tab' : key === 'Enter' ? 'enter' : key.toLowerCase()

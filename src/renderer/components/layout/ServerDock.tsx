@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Pencil, Plus, RefreshCw, Server, Trash2, X } from 'lucide-react'
+import { Laptop, Pencil, Plus, RefreshCw, Server, Trash2, X } from 'lucide-react'
 import { sshTargetLabel, type RemoteServer, type RemoteServerDraft } from '@shared/contracts/servers'
 import { OPEN_SERVERS_EVENT } from '@renderer/lib/app-events'
 import { useServerStore } from '@renderer/stores/server-store'
 import { useServerHealthStore, watchServerHealth } from '@renderer/stores/server-health-store'
 import { HealthDot, ServerHealthDetails } from '@renderer/components/servers/ServerHealthView'
 import { useWorkspaceStore } from '@renderer/stores/workspace-store'
+import { SystemWidget } from '@renderer/components/home/widgets'
 
 const OPEN_KEY = 'bikorch.serverDockOpen'
 
@@ -121,6 +122,7 @@ export function ServerDock(): React.JSX.Element {
   return (
     <section className="server-dock is-open app-no-drag" aria-label="Servers">
       <div className="server-dock-panel">
+        <div className="server-dock-half">
         <header className="server-dock-header">
           <Server className="h-4 w-4" aria-hidden />
           <strong>Servers</strong>
@@ -226,6 +228,17 @@ export function ServerDock(): React.JSX.Element {
         {servers.length > 0 && (
           <p className="server-dock-note">An open session keeps its connection until you close that terminal.</p>
         )}
+        </div>
+        {/* The lower half shows this computer, as on Home, with Claude's cleanup advice. */}
+        <div className="server-dock-half server-dock-machine">
+          <header className="server-dock-header">
+            <Laptop className="h-4 w-4" aria-hidden />
+            <strong>This Mac</strong>
+          </header>
+          <div className="server-dock-machine-body">
+            <SystemWidget />
+          </div>
+        </div>
       </div>
     </section>
   )
